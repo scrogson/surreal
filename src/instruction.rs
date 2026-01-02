@@ -236,6 +236,25 @@ pub enum Instruction {
 
     /// Check if a list is empty, store 1 (true) or 0 (false)
     ListIsEmpty { list: Register, dest: Register },
+
+    /// Get the length of a list (O(n))
+    ListLength { list: Register, dest: Register },
+
+    /// Append two lists (a ++ b)
+    /// Crashes if either is not a list
+    ListAppend { a: Register, b: Register, dest: Register },
+
+    /// Reverse a list
+    /// Crashes if not a list
+    ListReverse { list: Register, dest: Register },
+
+    /// Get the nth element of a list (0-based)
+    /// Crashes if not a list or index out of bounds
+    ListNth { list: Register, n: Register, dest: Register },
+
+    /// Check if an element is a member of a list
+    /// Stores 1 (true) or 0 (false)
+    ListMember { elem: Register, list: Register, dest: Register },
 }
 
 /// An operand for arithmetic/comparison operations

@@ -1215,6 +1215,77 @@ impl Scheduler {
                 process.registers[dest.0 as usize] = Value::Int(is_empty);
                 ExecResult::Continue(1)
             }
+
+            Instruction::ListLength { list, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::List(elements) = &process.registers[list.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let length = elements.len() as i64;
+                process.registers[dest.0 as usize] = Value::Int(length);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::ListAppend { a, b, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::List(list_a) = &process.registers[a.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let Value::List(list_b) = &process.registers[b.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let mut result = list_a.clone();
+                result.extend(list_b.clone());
+                process.registers[dest.0 as usize] = Value::List(result);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::ListReverse { list, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::List(elements) = &process.registers[list.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let reversed: Vec<Value> = elements.iter().rev().cloned().collect();
+                process.registers[dest.0 as usize] = Value::List(reversed);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::ListNth { list, n, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::List(elements) = &process.registers[list.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let Value::Int(index) = process.registers[n.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                if index < 0 || index as usize >= elements.len() {
+                    return ExecResult::Crash;
+                }
+                let elem = elements[index as usize].clone();
+                process.registers[dest.0 as usize] = elem;
+                ExecResult::Continue(1)
+            }
+
+            Instruction::ListMember { elem, list, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::List(elements) = &process.registers[list.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let search_elem = &process.registers[elem.0 as usize];
+                let found = elements.contains(search_elem);
+                process.registers[dest.0 as usize] = Value::Int(if found { 1 } else { 0 });
+                ExecResult::Continue(1)
+            }
         }
     }
 
@@ -4578,5 +4649,323 @@ mod tests {
 
         let process = scheduler.processes.get(&Pid(0)).unwrap();
         assert_eq!(process.status, ProcessStatus::Crashed);
+    }
+
+    // ========== List BIFs Tests ==========
+
+    #[test]
+    fn test_list_length() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create list [1, 2, 3]
+            Instruction::Push {
+                source: Operand::Int(1),
+            },
+            Instruction::Push {
+                source: Operand::Int(2),
+            },
+            Instruction::Push {
+                source: Operand::Int(3),
+            },
+            Instruction::MakeList {
+                length: 3,
+                dest: Register(0),
+            },
+            Instruction::ListLength {
+                list: Register(0),
+                dest: Register(1),
+            },
+            // Empty list length
+            Instruction::MakeList {
+                length: 0,
+                dest: Register(2),
+            },
+            Instruction::ListLength {
+                list: Register(2),
+                dest: Register(3),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(3));
+        assert_eq!(process.registers[3], Value::Int(0));
+    }
+
+    #[test]
+    fn test_list_append() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create list [1, 2]
+            Instruction::Push {
+                source: Operand::Int(1),
+            },
+            Instruction::Push {
+                source: Operand::Int(2),
+            },
+            Instruction::MakeList {
+                length: 2,
+                dest: Register(0),
+            },
+            // Create list [3, 4]
+            Instruction::Push {
+                source: Operand::Int(3),
+            },
+            Instruction::Push {
+                source: Operand::Int(4),
+            },
+            Instruction::MakeList {
+                length: 2,
+                dest: Register(1),
+            },
+            // Append [1, 2] ++ [3, 4]
+            Instruction::ListAppend {
+                a: Register(0),
+                b: Register(1),
+                dest: Register(2),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(
+            process.registers[2],
+            Value::List(vec![
+                Value::Int(1),
+                Value::Int(2),
+                Value::Int(3),
+                Value::Int(4)
+            ])
+        );
+    }
+
+    #[test]
+    fn test_list_reverse() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create list [1, 2, 3]
+            Instruction::Push {
+                source: Operand::Int(1),
+            },
+            Instruction::Push {
+                source: Operand::Int(2),
+            },
+            Instruction::Push {
+                source: Operand::Int(3),
+            },
+            Instruction::MakeList {
+                length: 3,
+                dest: Register(0),
+            },
+            Instruction::ListReverse {
+                list: Register(0),
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(
+            process.registers[1],
+            Value::List(vec![Value::Int(3), Value::Int(2), Value::Int(1)])
+        );
+    }
+
+    #[test]
+    fn test_list_nth() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create list [10, 20, 30]
+            Instruction::Push {
+                source: Operand::Int(10),
+            },
+            Instruction::Push {
+                source: Operand::Int(20),
+            },
+            Instruction::Push {
+                source: Operand::Int(30),
+            },
+            Instruction::MakeList {
+                length: 3,
+                dest: Register(0),
+            },
+            // Get element at index 0
+            Instruction::LoadInt {
+                value: 0,
+                dest: Register(1),
+            },
+            Instruction::ListNth {
+                list: Register(0),
+                n: Register(1),
+                dest: Register(2),
+            },
+            // Get element at index 2
+            Instruction::LoadInt {
+                value: 2,
+                dest: Register(3),
+            },
+            Instruction::ListNth {
+                list: Register(0),
+                n: Register(3),
+                dest: Register(4),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[2], Value::Int(10)); // index 0
+        assert_eq!(process.registers[4], Value::Int(30)); // index 2
+    }
+
+    #[test]
+    fn test_list_nth_out_of_bounds_crashes() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create list [1, 2]
+            Instruction::Push {
+                source: Operand::Int(1),
+            },
+            Instruction::Push {
+                source: Operand::Int(2),
+            },
+            Instruction::MakeList {
+                length: 2,
+                dest: Register(0),
+            },
+            // Try to get element at index 5 (out of bounds)
+            Instruction::LoadInt {
+                value: 5,
+                dest: Register(1),
+            },
+            Instruction::ListNth {
+                list: Register(0),
+                n: Register(1),
+                dest: Register(2),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.status, ProcessStatus::Crashed);
+    }
+
+    #[test]
+    fn test_list_member() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create list [1, 2, 3]
+            Instruction::Push {
+                source: Operand::Int(1),
+            },
+            Instruction::Push {
+                source: Operand::Int(2),
+            },
+            Instruction::Push {
+                source: Operand::Int(3),
+            },
+            Instruction::MakeList {
+                length: 3,
+                dest: Register(0),
+            },
+            // Check if 2 is a member
+            Instruction::LoadInt {
+                value: 2,
+                dest: Register(1),
+            },
+            Instruction::ListMember {
+                elem: Register(1),
+                list: Register(0),
+                dest: Register(2),
+            },
+            // Check if 5 is a member
+            Instruction::LoadInt {
+                value: 5,
+                dest: Register(3),
+            },
+            Instruction::ListMember {
+                elem: Register(3),
+                list: Register(0),
+                dest: Register(4),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[2], Value::Int(1)); // 2 is a member
+        assert_eq!(process.registers[4], Value::Int(0)); // 5 is not a member
+    }
+
+    #[test]
+    fn test_list_append_with_empty() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create list [1, 2]
+            Instruction::Push {
+                source: Operand::Int(1),
+            },
+            Instruction::Push {
+                source: Operand::Int(2),
+            },
+            Instruction::MakeList {
+                length: 2,
+                dest: Register(0),
+            },
+            // Create empty list
+            Instruction::MakeList {
+                length: 0,
+                dest: Register(1),
+            },
+            // Append [1, 2] ++ []
+            Instruction::ListAppend {
+                a: Register(0),
+                b: Register(1),
+                dest: Register(2),
+            },
+            // Append [] ++ [1, 2]
+            Instruction::ListAppend {
+                a: Register(1),
+                b: Register(0),
+                dest: Register(3),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(
+            process.registers[2],
+            Value::List(vec![Value::Int(1), Value::Int(2)])
+        );
+        assert_eq!(
+            process.registers[3],
+            Value::List(vec![Value::Int(1), Value::Int(2)])
+        );
     }
 }
