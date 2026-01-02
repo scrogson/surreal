@@ -12,6 +12,7 @@
 
 mod instruction;
 mod message;
+mod module;
 mod pid;
 mod process;
 mod scheduler;
@@ -23,7 +24,8 @@ pub mod wasm;
 // Re-export public API
 pub use instruction::{Instruction, Operand, Pattern, Register, Source};
 pub use message::{DownReason, Message, SystemMsg};
+pub use module::{FunctionDef, Module};
 pub use pid::Pid;
-pub use process::{Process, ProcessStatus};
+pub use process::{CallFrame, Process, ProcessStatus};
 pub use scheduler::{Scheduler, StepResult};
 pub use value::Value;

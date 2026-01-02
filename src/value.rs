@@ -17,6 +17,12 @@ pub enum Value {
     Tuple(Vec<Value>),
     /// List - variable-size linked list of values
     List(Vec<Value>),
+    /// Function reference (module:function/arity)
+    Fun {
+        module: String,
+        function: String,
+        arity: u8,
+    },
     /// No value / uninitialized
     None,
 }
@@ -58,6 +64,11 @@ impl std::fmt::Debug for Value {
                 }
                 write!(f, "]")
             }
+            Value::Fun {
+                module,
+                function,
+                arity,
+            } => write!(f, "fun {}:{}/{}", module, function, arity),
             Value::None => write!(f, "None"),
         }
     }

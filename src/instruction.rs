@@ -104,6 +104,60 @@ pub enum Instruction {
     /// If call stack is empty, ends the process
     Return,
 
+    // ========== Module Function Calls ==========
+    /// Call a function by MFA (Module:Function/Arity)
+    /// Arguments must be in R0..R(arity-1) before call
+    /// Return value will be in R0
+    CallMFA {
+        module: String,
+        function: String,
+        arity: u8,
+    },
+
+    /// Call a local function in the current module
+    /// More efficient than CallMFA when calling within same module
+    CallLocal { function: String, arity: u8 },
+
+    /// Tail call MFA - call without pushing return frame
+    TailCallMFA {
+        module: String,
+        function: String,
+        arity: u8,
+    },
+
+    /// Tail call local - call without pushing return frame
+    TailCallLocal { function: String, arity: u8 },
+
+    /// Create a function reference and store in register
+    MakeFun {
+        module: String,
+        function: String,
+        arity: u8,
+        dest: Register,
+    },
+
+    /// Apply a function reference (from register) to arguments
+    /// Fun must be a Value::Fun in the specified register
+    /// Arguments in R0..R(arity-1)
+    Apply { fun: Register, arity: u8 },
+
+    /// Spawn a process running module:function/arity
+    /// Arguments for the function must be in R0..R(arity-1)
+    SpawnMFA {
+        module: String,
+        function: String,
+        arity: u8,
+        dest: Register,
+    },
+
+    /// Spawn and link, running module:function/arity
+    SpawnLinkMFA {
+        module: String,
+        function: String,
+        arity: u8,
+        dest: Register,
+    },
+
     // ========== Stack Operations ==========
     /// Push a value onto the data stack
     Push { source: Operand },

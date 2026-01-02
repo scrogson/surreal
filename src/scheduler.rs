@@ -3,8 +3,8 @@
 use std::collections::{HashMap, VecDeque};
 
 use crate::{
-    DownReason, Instruction, Message, Operand, Pattern, Pid, Process, ProcessStatus, Register,
-    Source, SystemMsg, Value,
+    CallFrame, DownReason, Instruction, Message, Module, Operand, Pattern, Pid, Process,
+    ProcessStatus, Register, Source, SystemMsg, Value,
 };
 
 /// Result of stepping the scheduler
@@ -51,6 +51,8 @@ pub struct Scheduler {
     pub next_pid: u64,
     /// Process registry: name -> pid
     pub registry: HashMap<String, Pid>,
+    /// Module registry: name -> module
+    pub modules: HashMap<String, Module>,
     /// Output buffer from print instructions
     pub output: Vec<String>,
 }
@@ -62,7 +64,45 @@ impl Scheduler {
             ready_queue: VecDeque::new(),
             next_pid: 0,
             registry: HashMap::new(),
+            modules: HashMap::new(),
             output: Vec::new(),
+        }
+    }
+
+    /// Load a module into the VM.
+    pub fn load_module(&mut self, module: Module) -> Result<(), String> {
+        if self.modules.contains_key(&module.name) {
+            return Err(format!("Module {} already loaded", module.name));
+        }
+        self.modules.insert(module.name.clone(), module);
+        Ok(())
+    }
+
+    /// Get an instruction from a process (checking module or inline code).
+    fn get_instruction(&self, process: &Process) -> Option<Instruction> {
+        if let Some(ref module_name) = process.current_module {
+            // Running module code
+            let module = self.modules.get(module_name)?;
+            module.code.get(process.pc).cloned()
+        } else if let Some(ref code) = process.inline_code {
+            // Running inline code
+            code.get(process.pc).cloned()
+        } else {
+            None
+        }
+    }
+
+    /// Get the code length for a process.
+    fn get_code_len(&self, process: &Process) -> usize {
+        if let Some(ref module_name) = process.current_module {
+            self.modules
+                .get(module_name)
+                .map(|m| m.code.len())
+                .unwrap_or(0)
+        } else if let Some(ref code) = process.inline_code {
+            code.len()
+        } else {
+            0
         }
     }
 
@@ -157,14 +197,18 @@ impl Scheduler {
                 break;
             };
 
-            if process.pc >= process.code.len() {
+            let code_len = self.get_code_len(process);
+            if process.pc >= code_len {
                 // Process finished
                 self.finish_process(pid, ProcessStatus::Done);
                 break;
             }
 
-            // Clone instruction to avoid borrow issues
-            let instruction = process.code[process.pc].clone();
+            // Get instruction (from module or inline code)
+            let Some(instruction) = self.get_instruction(process) else {
+                self.finish_process(pid, ProcessStatus::Crashed);
+                break;
+            };
 
             match self.execute(pid, instruction) {
                 ExecResult::Continue(cost) => {
@@ -209,7 +253,8 @@ impl Scheduler {
         // If we used full budget but process isn't done, requeue it
         if used >= budget {
             if let Some(p) = self.processes.get(&pid) {
-                if p.status == ProcessStatus::Ready && p.pc < p.code.len() {
+                let code_len = self.get_code_len(p);
+                if p.status == ProcessStatus::Ready && p.pc < code_len {
                     self.ready_queue.push_back(pid);
                 }
             }
@@ -487,8 +532,11 @@ impl Scheduler {
 
             Instruction::Call { target } => {
                 if let Some(p) = self.processes.get_mut(&pid) {
-                    // Push return address (next instruction after call)
-                    p.call_stack.push(p.pc + 1);
+                    // Push call frame with return context
+                    p.call_stack.push(CallFrame {
+                        module: p.current_module.clone(),
+                        return_pc: p.pc + 1,
+                    });
                 }
                 ExecResult::Jump(target, 1)
             }
@@ -497,12 +545,352 @@ impl Scheduler {
                 let Some(process) = self.processes.get_mut(&pid) else {
                     return ExecResult::Crash;
                 };
-                if let Some(return_addr) = process.call_stack.pop() {
-                    ExecResult::Jump(return_addr, 1)
+                if let Some(frame) = process.call_stack.pop() {
+                    // Restore module context
+                    process.current_module = frame.module;
+                    ExecResult::Jump(frame.return_pc, 1)
                 } else {
                     // Empty call stack - end the process
                     ExecResult::Done
                 }
+            }
+
+            Instruction::CallMFA {
+                module,
+                function,
+                arity,
+            } => {
+                // Look up the module
+                let Some(mod_ref) = self.modules.get(&module) else {
+                    log(&format!("CallMFA: module {} not found", module));
+                    return ExecResult::Crash;
+                };
+
+                // Look up the function
+                let Some(func) = mod_ref.get_function(&function, arity) else {
+                    log(&format!(
+                        "CallMFA: function {}:{}/{} not found",
+                        module, function, arity
+                    ));
+                    return ExecResult::Crash;
+                };
+
+                let entry = func.entry;
+
+                // Push call frame and switch module
+                if let Some(p) = self.processes.get_mut(&pid) {
+                    p.call_stack.push(CallFrame {
+                        module: p.current_module.clone(),
+                        return_pc: p.pc + 1,
+                    });
+                    p.current_module = Some(module.clone());
+                }
+                ExecResult::Jump(entry, 1)
+            }
+
+            Instruction::CallLocal { function, arity } => {
+                let Some(process) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+
+                // Must be in a module
+                let Some(ref module_name) = process.current_module else {
+                    log("CallLocal: not in a module");
+                    return ExecResult::Crash;
+                };
+
+                // Look up the function in current module
+                let Some(mod_ref) = self.modules.get(module_name) else {
+                    return ExecResult::Crash;
+                };
+
+                let Some(func) = mod_ref.get_function(&function, arity) else {
+                    log(&format!(
+                        "CallLocal: function {}:{}/{} not found",
+                        module_name, function, arity
+                    ));
+                    return ExecResult::Crash;
+                };
+
+                let entry = func.entry;
+
+                // Push call frame (same module)
+                if let Some(p) = self.processes.get_mut(&pid) {
+                    p.call_stack.push(CallFrame {
+                        module: p.current_module.clone(),
+                        return_pc: p.pc + 1,
+                    });
+                }
+                ExecResult::Jump(entry, 1)
+            }
+
+            Instruction::TailCallMFA {
+                module,
+                function,
+                arity,
+            } => {
+                // Look up the module
+                let Some(mod_ref) = self.modules.get(&module) else {
+                    log(&format!("TailCallMFA: module {} not found", module));
+                    return ExecResult::Crash;
+                };
+
+                // Look up the function
+                let Some(func) = mod_ref.get_function(&function, arity) else {
+                    log(&format!(
+                        "TailCallMFA: function {}:{}/{} not found",
+                        module, function, arity
+                    ));
+                    return ExecResult::Crash;
+                };
+
+                let entry = func.entry;
+
+                // No call frame push - tail call, just switch module
+                if let Some(p) = self.processes.get_mut(&pid) {
+                    p.current_module = Some(module.clone());
+                }
+                ExecResult::Jump(entry, 1)
+            }
+
+            Instruction::TailCallLocal { function, arity } => {
+                let Some(process) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+
+                // Must be in a module
+                let Some(ref module_name) = process.current_module else {
+                    log("TailCallLocal: not in a module");
+                    return ExecResult::Crash;
+                };
+
+                // Look up the function in current module
+                let Some(mod_ref) = self.modules.get(module_name) else {
+                    return ExecResult::Crash;
+                };
+
+                let Some(func) = mod_ref.get_function(&function, arity) else {
+                    log(&format!(
+                        "TailCallLocal: function {}:{}/{} not found",
+                        module_name, function, arity
+                    ));
+                    return ExecResult::Crash;
+                };
+
+                let entry = func.entry;
+
+                // No call frame push - tail call (stay in same module)
+                ExecResult::Jump(entry, 1)
+            }
+
+            Instruction::MakeFun {
+                module,
+                function,
+                arity,
+                dest,
+            } => {
+                // Verify function exists
+                let Some(mod_ref) = self.modules.get(&module) else {
+                    log(&format!("MakeFun: module {} not found", module));
+                    return ExecResult::Crash;
+                };
+
+                if mod_ref.get_function(&function, arity).is_none() {
+                    log(&format!(
+                        "MakeFun: function {}:{}/{} not found",
+                        module, function, arity
+                    ));
+                    return ExecResult::Crash;
+                }
+
+                if let Some(p) = self.processes.get_mut(&pid) {
+                    p.registers[dest.0 as usize] = Value::Fun {
+                        module: module.clone(),
+                        function: function.clone(),
+                        arity,
+                    };
+                }
+                ExecResult::Continue(1)
+            }
+
+            Instruction::Apply { fun, arity } => {
+                let Some(process) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+
+                // Get the function reference
+                let Value::Fun {
+                    module,
+                    function,
+                    arity: fun_arity,
+                } = &process.registers[fun.0 as usize]
+                else {
+                    log("Apply: not a function reference");
+                    return ExecResult::Crash;
+                };
+
+                if *fun_arity != arity {
+                    log(&format!(
+                        "Apply: arity mismatch, expected {}, got {}",
+                        fun_arity, arity
+                    ));
+                    return ExecResult::Crash;
+                }
+
+                // Look up the function
+                let Some(mod_ref) = self.modules.get(module) else {
+                    log(&format!("Apply: module {} not found", module));
+                    return ExecResult::Crash;
+                };
+
+                let Some(func) = mod_ref.get_function(function, arity) else {
+                    log(&format!(
+                        "Apply: function {}:{}/{} not found",
+                        module, function, arity
+                    ));
+                    return ExecResult::Crash;
+                };
+
+                let entry = func.entry;
+                let module = module.clone();
+
+                // Push call frame and switch module
+                if let Some(p) = self.processes.get_mut(&pid) {
+                    p.call_stack.push(CallFrame {
+                        module: p.current_module.clone(),
+                        return_pc: p.pc + 1,
+                    });
+                    p.current_module = Some(module);
+                }
+                ExecResult::Jump(entry, 1)
+            }
+
+            Instruction::SpawnMFA {
+                module,
+                function,
+                arity,
+                dest,
+            } => {
+                // Look up the module and function
+                let Some(mod_ref) = self.modules.get(&module) else {
+                    log(&format!("SpawnMFA: module {} not found", module));
+                    return ExecResult::Crash;
+                };
+
+                // Function must be exported for spawn
+                if !mod_ref.is_exported(&function, arity) {
+                    log(&format!(
+                        "SpawnMFA: function {}:{}/{} not exported",
+                        module, function, arity
+                    ));
+                    return ExecResult::Crash;
+                }
+
+                let Some(func) = mod_ref.get_function(&function, arity) else {
+                    log(&format!(
+                        "SpawnMFA: function {}:{}/{} not found",
+                        module, function, arity
+                    ));
+                    return ExecResult::Crash;
+                };
+
+                let entry = func.entry;
+
+                // Copy arguments from parent's registers
+                let Some(parent) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let args: Vec<Value> = (0..arity)
+                    .map(|i| parent.registers[i as usize].clone())
+                    .collect();
+
+                // Create new process
+                let child_pid = Pid(self.next_pid);
+                self.next_pid += 1;
+
+                let mut child =
+                    Process::new_with_module(child_pid, Some(pid), module.clone(), entry);
+
+                // Initialize child's registers with arguments
+                for (i, arg) in args.into_iter().enumerate() {
+                    child.registers[i] = arg;
+                }
+
+                self.processes.insert(child_pid, child);
+                self.ready_queue.push_back(child_pid);
+
+                // Store child PID in parent's dest register
+                if let Some(p) = self.processes.get_mut(&pid) {
+                    p.registers[dest.0 as usize] = Value::Pid(child_pid);
+                }
+
+                ExecResult::Continue(1)
+            }
+
+            Instruction::SpawnLinkMFA {
+                module,
+                function,
+                arity,
+                dest,
+            } => {
+                // Look up the module and function
+                let Some(mod_ref) = self.modules.get(&module) else {
+                    log(&format!("SpawnLinkMFA: module {} not found", module));
+                    return ExecResult::Crash;
+                };
+
+                // Function must be exported for spawn
+                if !mod_ref.is_exported(&function, arity) {
+                    log(&format!(
+                        "SpawnLinkMFA: function {}:{}/{} not exported",
+                        module, function, arity
+                    ));
+                    return ExecResult::Crash;
+                }
+
+                let Some(func) = mod_ref.get_function(&function, arity) else {
+                    log(&format!(
+                        "SpawnLinkMFA: function {}:{}/{} not found",
+                        module, function, arity
+                    ));
+                    return ExecResult::Crash;
+                };
+
+                let entry = func.entry;
+
+                // Copy arguments from parent's registers
+                let Some(parent) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let args: Vec<Value> = (0..arity)
+                    .map(|i| parent.registers[i as usize].clone())
+                    .collect();
+
+                // Create new process
+                let child_pid = Pid(self.next_pid);
+                self.next_pid += 1;
+
+                let mut child =
+                    Process::new_with_module(child_pid, Some(pid), module.clone(), entry);
+
+                // Initialize child's registers with arguments
+                for (i, arg) in args.into_iter().enumerate() {
+                    child.registers[i] = arg;
+                }
+
+                // Establish bidirectional link
+                child.links.push(pid);
+
+                self.processes.insert(child_pid, child);
+                self.ready_queue.push_back(child_pid);
+
+                // Add link to parent and store child PID
+                if let Some(p) = self.processes.get_mut(&pid) {
+                    p.links.push(child_pid);
+                    p.registers[dest.0 as usize] = Value::Pid(child_pid);
+                }
+
+                ExecResult::Continue(1)
             }
 
             Instruction::Push { source } => {
@@ -3503,5 +3891,369 @@ mod tests {
             Value::List(vec![Value::Int(3), Value::Int(4)])
         ); // Rest
         assert_eq!(process.registers[2], Value::Int(1)); // Success
+    }
+
+    // ========== Module Tests ==========
+
+    #[test]
+    fn test_module_load() {
+        use crate::Module;
+
+        let mut scheduler = Scheduler::new();
+
+        let mut math = Module::new("math".to_string());
+        math.add_function(
+            "identity".to_string(),
+            1,
+            vec![
+                // Just return the argument (already in R0)
+                Instruction::Return,
+            ],
+        );
+        math.export("identity", 1);
+
+        assert!(scheduler.load_module(math).is_ok());
+        assert!(scheduler.modules.contains_key("math"));
+    }
+
+    #[test]
+    fn test_call_mfa() {
+        use crate::Module;
+
+        let mut scheduler = Scheduler::new();
+
+        // Create a math module with add_one function
+        let mut math = Module::new("math".to_string());
+        math.add_function(
+            "add_one".to_string(),
+            1,
+            vec![
+                // R0 contains the argument, add 1 and return
+                Instruction::Add {
+                    a: Operand::Reg(Register(0)),
+                    b: Operand::Int(1),
+                    dest: Register(0),
+                },
+                Instruction::Return,
+            ],
+        );
+        math.export("add_one", 1);
+        scheduler.load_module(math).unwrap();
+
+        // Spawn a process that calls math:add_one(5)
+        let program = vec![
+            Instruction::LoadInt {
+                value: 5,
+                dest: Register(0),
+            },
+            Instruction::CallMFA {
+                module: "math".to_string(),
+                function: "add_one".to_string(),
+                arity: 1,
+            },
+            // R0 should now be 6
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(6));
+    }
+
+    #[test]
+    fn test_call_local() {
+        use crate::Module;
+
+        let mut scheduler = Scheduler::new();
+
+        // Create a module with two functions
+        let mut math = Module::new("math".to_string());
+
+        // double(X) -> X * 2
+        math.add_function(
+            "double".to_string(),
+            1,
+            vec![
+                Instruction::Mul {
+                    a: Operand::Reg(Register(0)),
+                    b: Operand::Int(2),
+                    dest: Register(0),
+                },
+                Instruction::Return,
+            ],
+        );
+
+        // quadruple(X) -> double(double(X))
+        math.add_function(
+            "quadruple".to_string(),
+            1,
+            vec![
+                Instruction::CallLocal {
+                    function: "double".to_string(),
+                    arity: 1,
+                },
+                Instruction::CallLocal {
+                    function: "double".to_string(),
+                    arity: 1,
+                },
+                Instruction::Return,
+            ],
+        );
+        math.export("quadruple", 1);
+        scheduler.load_module(math).unwrap();
+
+        // Call quadruple(3) -> 12
+        let program = vec![
+            Instruction::LoadInt {
+                value: 3,
+                dest: Register(0),
+            },
+            Instruction::CallMFA {
+                module: "math".to_string(),
+                function: "quadruple".to_string(),
+                arity: 1,
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(12));
+    }
+
+    #[test]
+    fn test_tail_call_no_stack_growth() {
+        use crate::Module;
+
+        let mut scheduler = Scheduler::new();
+
+        // Create a module with a tail-recursive countdown
+        let mut counter = Module::new("counter".to_string());
+
+        // countdown(0) -> 0
+        // countdown(N) -> countdown(N-1)
+        counter.add_function(
+            "countdown".to_string(),
+            1,
+            vec![
+                // Check if N == 0
+                Instruction::Eq {
+                    a: Operand::Reg(Register(0)),
+                    b: Operand::Int(0),
+                    dest: Register(1),
+                },
+                Instruction::JumpIf {
+                    cond: Operand::Reg(Register(1)),
+                    target: 5, // Return 0
+                },
+                // N - 1
+                Instruction::Sub {
+                    a: Operand::Reg(Register(0)),
+                    b: Operand::Int(1),
+                    dest: Register(0),
+                },
+                // Tail call countdown(N-1)
+                Instruction::TailCallLocal {
+                    function: "countdown".to_string(),
+                    arity: 1,
+                },
+                // Should never reach here
+                Instruction::End,
+                // Return 0
+                Instruction::LoadInt {
+                    value: 0,
+                    dest: Register(0),
+                },
+                Instruction::Return,
+            ],
+        );
+        counter.export("countdown", 1);
+        scheduler.load_module(counter).unwrap();
+
+        // Call countdown(1000) - should not overflow stack
+        let program = vec![
+            Instruction::LoadInt {
+                value: 1000,
+                dest: Register(0),
+            },
+            Instruction::CallMFA {
+                module: "counter".to_string(),
+                function: "countdown".to_string(),
+                arity: 1,
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(0));
+        // Call stack should be empty (all tail calls)
+        assert!(process.call_stack.is_empty());
+    }
+
+    #[test]
+    fn test_spawn_mfa() {
+        use crate::Module;
+
+        let mut scheduler = Scheduler::new();
+
+        // Create a module with a simple worker function
+        let mut worker = Module::new("worker".to_string());
+        worker.add_function(
+            "start".to_string(),
+            1,
+            vec![
+                // Just double the argument and end
+                Instruction::Mul {
+                    a: Operand::Reg(Register(0)),
+                    b: Operand::Int(2),
+                    dest: Register(0),
+                },
+                Instruction::End,
+            ],
+        );
+        worker.export("start", 1);
+        scheduler.load_module(worker).unwrap();
+
+        // Spawn a worker with argument 21
+        let program = vec![
+            Instruction::LoadInt {
+                value: 21,
+                dest: Register(0),
+            },
+            Instruction::SpawnMFA {
+                module: "worker".to_string(),
+                function: "start".to_string(),
+                arity: 1,
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        // Check the child process
+        let child = scheduler.processes.get(&Pid(1)).unwrap();
+        assert_eq!(child.registers[0], Value::Int(42));
+        assert_eq!(child.status, ProcessStatus::Done);
+    }
+
+    #[test]
+    fn test_make_fun_and_apply() {
+        use crate::Module;
+
+        let mut scheduler = Scheduler::new();
+
+        // Create a module with a double function
+        let mut math = Module::new("math".to_string());
+        math.add_function(
+            "double".to_string(),
+            1,
+            vec![
+                Instruction::Mul {
+                    a: Operand::Reg(Register(0)),
+                    b: Operand::Int(2),
+                    dest: Register(0),
+                },
+                Instruction::Return,
+            ],
+        );
+        math.export("double", 1);
+        scheduler.load_module(math).unwrap();
+
+        // Create a function reference and apply it
+        let program = vec![
+            // Make a fun reference to math:double/1
+            Instruction::MakeFun {
+                module: "math".to_string(),
+                function: "double".to_string(),
+                arity: 1,
+                dest: Register(7),
+            },
+            // Put argument in R0
+            Instruction::LoadInt {
+                value: 21,
+                dest: Register(0),
+            },
+            // Apply the fun
+            Instruction::Apply {
+                fun: Register(7),
+                arity: 1,
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(42));
+    }
+
+    #[test]
+    fn test_cross_module_call() {
+        use crate::Module;
+
+        let mut scheduler = Scheduler::new();
+
+        // Module A calls Module B
+        let mut mod_a = Module::new("mod_a".to_string());
+        mod_a.add_function(
+            "call_b".to_string(),
+            1,
+            vec![
+                Instruction::CallMFA {
+                    module: "mod_b".to_string(),
+                    function: "add_ten".to_string(),
+                    arity: 1,
+                },
+                Instruction::Return,
+            ],
+        );
+        mod_a.export("call_b", 1);
+
+        let mut mod_b = Module::new("mod_b".to_string());
+        mod_b.add_function(
+            "add_ten".to_string(),
+            1,
+            vec![
+                Instruction::Add {
+                    a: Operand::Reg(Register(0)),
+                    b: Operand::Int(10),
+                    dest: Register(0),
+                },
+                Instruction::Return,
+            ],
+        );
+        mod_b.export("add_ten", 1);
+
+        scheduler.load_module(mod_a).unwrap();
+        scheduler.load_module(mod_b).unwrap();
+
+        let program = vec![
+            Instruction::LoadInt {
+                value: 5,
+                dest: Register(0),
+            },
+            Instruction::CallMFA {
+                module: "mod_a".to_string(),
+                function: "call_b".to_string(),
+                arity: 1,
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(15));
     }
 }
