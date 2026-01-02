@@ -86,6 +86,16 @@ pub enum Instruction {
 
     /// Compare greater than or equal: dest = (a >= b) ? 1 : 0
     Gte { a: Operand, b: Operand, dest: Register },
+
+    // ========== Control Flow ==========
+    /// Unconditional jump to instruction index
+    Jump { target: usize },
+
+    /// Jump to target if condition is truthy (non-zero integer)
+    JumpIf { cond: Operand, target: usize },
+
+    /// Jump to target if condition is falsy (zero or non-integer)
+    JumpUnless { cond: Operand, target: usize },
 }
 
 /// An operand for arithmetic/comparison operations

@@ -24,6 +24,8 @@ enum ExecResult {
     /// Yield back to scheduler (e.g., spawned a process)
     #[allow(dead_code)]
     Yield(u32),
+    /// Jump to a specific instruction (sets PC directly, no auto-increment)
+    Jump(usize, u32),
     /// Waiting for a message
     Wait,
     /// Process finished normally
@@ -179,6 +181,12 @@ impl Scheduler {
                     // Re-queue and return
                     self.ready_queue.push_back(pid);
                     break;
+                }
+                ExecResult::Jump(target, cost) => {
+                    used += cost;
+                    if let Some(p) = self.processes.get_mut(&pid) {
+                        p.pc = target;
+                    }
                 }
                 ExecResult::Wait => {
                     // Don't advance PC, don't requeue (waiting for message)
@@ -450,6 +458,31 @@ impl Scheduler {
 
             Instruction::Gte { a, b, dest } => {
                 self.cmp_op(pid, &a, &b, dest, |x, y| x >= y)
+            }
+
+            // ========== Control Flow ==========
+            Instruction::Jump { target } => ExecResult::Jump(target, 1),
+
+            Instruction::JumpIf { cond, target } => {
+                let Some(process) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let val = self.resolve_operand(process, &cond);
+                match val {
+                    Some(n) if n != 0 => ExecResult::Jump(target, 1),
+                    _ => ExecResult::Continue(1), // Falsy, continue to next instruction
+                }
+            }
+
+            Instruction::JumpUnless { cond, target } => {
+                let Some(process) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let val = self.resolve_operand(process, &cond);
+                match val {
+                    Some(0) | None => ExecResult::Jump(target, 1), // Falsy, jump
+                    _ => ExecResult::Continue(1), // Truthy, continue
+                }
             }
         }
     }
@@ -1296,5 +1329,224 @@ mod tests {
 
         let process = scheduler.processes.get(&Pid(0)).unwrap();
         assert_eq!(process.registers[0], Value::Int(27));
+    }
+
+    // ========== Control Flow Tests ==========
+
+    #[test]
+    fn test_jump() {
+        let mut scheduler = Scheduler::new();
+
+        // Jump over the first LoadInt, should only execute second one
+        let program = vec![
+            // 0: Jump to instruction 2
+            Instruction::Jump { target: 2 },
+            // 1: This should be skipped
+            Instruction::LoadInt {
+                value: 999,
+                dest: Register(0),
+            },
+            // 2: This should execute
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(0),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(42));
+    }
+
+    #[test]
+    fn test_jump_if_truthy() {
+        let mut scheduler = Scheduler::new();
+
+        // Condition is 1 (truthy), should jump
+        let program = vec![
+            // 0: Load 1 (truthy)
+            Instruction::LoadInt {
+                value: 1,
+                dest: Register(0),
+            },
+            // 1: Jump if truthy to 3
+            Instruction::JumpIf {
+                cond: Operand::Reg(Register(0)),
+                target: 3,
+            },
+            // 2: Should be skipped
+            Instruction::LoadInt {
+                value: 999,
+                dest: Register(1),
+            },
+            // 3: Should execute
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(42));
+    }
+
+    #[test]
+    fn test_jump_if_falsy() {
+        let mut scheduler = Scheduler::new();
+
+        // Condition is 0 (falsy), should NOT jump
+        let program = vec![
+            // 0: Load 0 (falsy)
+            Instruction::LoadInt {
+                value: 0,
+                dest: Register(0),
+            },
+            // 1: Jump if truthy - should NOT jump since 0 is falsy
+            Instruction::JumpIf {
+                cond: Operand::Reg(Register(0)),
+                target: 3,
+            },
+            // 2: Should execute (not skipped)
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(1),
+            },
+            // 3:
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(42));
+    }
+
+    #[test]
+    fn test_jump_unless_falsy() {
+        let mut scheduler = Scheduler::new();
+
+        // Condition is 0 (falsy), should jump
+        let program = vec![
+            // 0: Load 0 (falsy)
+            Instruction::LoadInt {
+                value: 0,
+                dest: Register(0),
+            },
+            // 1: Jump unless truthy - should jump since 0 is falsy
+            Instruction::JumpUnless {
+                cond: Operand::Reg(Register(0)),
+                target: 3,
+            },
+            // 2: Should be skipped
+            Instruction::LoadInt {
+                value: 999,
+                dest: Register(1),
+            },
+            // 3: Should execute
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(42));
+    }
+
+    #[test]
+    fn test_simple_loop() {
+        let mut scheduler = Scheduler::new();
+
+        // Count down from 5 to 0
+        // R0 = counter, R1 = accumulator (sum)
+        let program = vec![
+            // 0: R0 = 5
+            Instruction::LoadInt {
+                value: 5,
+                dest: Register(0),
+            },
+            // 1: R1 = 0
+            Instruction::LoadInt {
+                value: 0,
+                dest: Register(1),
+            },
+            // 2: Loop start - R1 = R1 + R0
+            Instruction::Add {
+                a: Operand::Reg(Register(1)),
+                b: Operand::Reg(Register(0)),
+                dest: Register(1),
+            },
+            // 3: R0 = R0 - 1
+            Instruction::Sub {
+                a: Operand::Reg(Register(0)),
+                b: Operand::Int(1),
+                dest: Register(0),
+            },
+            // 4: Jump back to 2 if R0 > 0
+            Instruction::JumpIf {
+                cond: Operand::Reg(Register(0)),
+                target: 2,
+            },
+            // 5: End
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        // Sum of 5+4+3+2+1 = 15
+        assert_eq!(process.registers[1], Value::Int(15));
+    }
+
+    #[test]
+    fn test_conditional_with_comparison() {
+        let mut scheduler = Scheduler::new();
+
+        // If 10 > 5, set R1 = 1, else R1 = 0
+        let program = vec![
+            // 0: Compare 10 > 5 -> R0
+            Instruction::Gt {
+                a: Operand::Int(10),
+                b: Operand::Int(5),
+                dest: Register(0),
+            },
+            // 1: If R0 is truthy, jump to 3
+            Instruction::JumpIf {
+                cond: Operand::Reg(Register(0)),
+                target: 3,
+            },
+            // 2: Else branch - set R1 = 0, jump to end
+            Instruction::LoadInt {
+                value: 0,
+                dest: Register(1),
+            },
+            Instruction::Jump { target: 4 },
+            // 3: Then branch - set R1 = 1
+            Instruction::LoadInt {
+                value: 1,
+                dest: Register(1),
+            },
+            // 4: End
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(1)); // 10 > 5, so then branch
     }
 }

@@ -268,6 +268,33 @@ fn parse_program(program: JsValue) -> Result<Vec<Instruction>, JsError> {
                 Instruction::Gte { a, b, dest }
             }
 
+            // Control flow
+            "jump" => {
+                let target = Reflect::get(&obj, &"target".into())
+                    .ok()
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0) as usize;
+                Instruction::Jump { target }
+            }
+
+            "jump_if" => {
+                let cond = get_operand(&obj, "cond")?;
+                let target = Reflect::get(&obj, &"target".into())
+                    .ok()
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0) as usize;
+                Instruction::JumpIf { cond, target }
+            }
+
+            "jump_unless" => {
+                let cond = get_operand(&obj, "cond")?;
+                let target = Reflect::get(&obj, &"target".into())
+                    .ok()
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0) as usize;
+                Instruction::JumpUnless { cond, target }
+            }
+
             other => return Err(JsError::new(&format!("unknown op: {}", other))),
         };
 
