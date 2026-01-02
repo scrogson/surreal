@@ -531,6 +531,59 @@ impl Scheduler {
                     ExecResult::Crash
                 }
             }
+
+            Instruction::LoadAtom { name, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::Atom(name.clone());
+                ExecResult::Continue(1)
+            }
+
+            Instruction::MakeTuple { arity, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let arity = arity as usize;
+                if process.stack.len() < arity {
+                    return ExecResult::Crash;
+                }
+                // Drain elements - first pushed is at lower index, which becomes first tuple element
+                let elements: Vec<Value> = process
+                    .stack
+                    .drain(process.stack.len() - arity..)
+                    .collect();
+                process.registers[dest.0 as usize] = Value::Tuple(elements);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::TupleElement { tuple, index, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Tuple(elements) = &process.registers[tuple.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let idx = index as usize;
+                if idx >= elements.len() {
+                    return ExecResult::Crash;
+                }
+                let value = elements[idx].clone();
+                process.registers[dest.0 as usize] = value;
+                ExecResult::Continue(1)
+            }
+
+            Instruction::TupleArity { tuple, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Tuple(elements) = &process.registers[tuple.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let arity = elements.len() as i64;
+                process.registers[dest.0 as usize] = Value::Int(arity);
+                ExecResult::Continue(1)
+            }
         }
     }
 
@@ -1984,5 +2037,240 @@ mod tests {
 
         let process = scheduler.processes.get(&Pid(0)).unwrap();
         assert_eq!(process.registers[0], Value::Int(55)); // fib(10) = 55
+    }
+
+    // ========== Atom & Tuple Tests ==========
+
+    #[test]
+    fn test_load_atom() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::LoadAtom {
+                name: "ok".to_string(),
+                dest: Register(0),
+            },
+            Instruction::LoadAtom {
+                name: "error".to_string(),
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Atom("ok".to_string()));
+        assert_eq!(process.registers[1], Value::Atom("error".to_string()));
+    }
+
+    #[test]
+    fn test_make_tuple() {
+        let mut scheduler = Scheduler::new();
+
+        // Create tuple {:ok, 42}
+        let program = vec![
+            Instruction::LoadAtom {
+                name: "ok".to_string(),
+                dest: Register(0),
+            },
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(1),
+            },
+            // Push elements onto stack
+            Instruction::Push {
+                source: Operand::Reg(Register(0)),
+            },
+            Instruction::Push {
+                source: Operand::Reg(Register(1)),
+            },
+            // Make 2-tuple
+            Instruction::MakeTuple {
+                arity: 2,
+                dest: Register(2),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(
+            process.registers[2],
+            Value::Tuple(vec![
+                Value::Atom("ok".to_string()),
+                Value::Int(42),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_tuple_element() {
+        let mut scheduler = Scheduler::new();
+
+        // Create tuple {:error, "not found", 404} and extract elements
+        let program = vec![
+            Instruction::LoadAtom {
+                name: "error".to_string(),
+                dest: Register(0),
+            },
+            Instruction::LoadInt {
+                value: 404,
+                dest: Register(1),
+            },
+            Instruction::Push {
+                source: Operand::Reg(Register(0)),
+            },
+            Instruction::Push {
+                source: Operand::Reg(Register(1)),
+            },
+            Instruction::MakeTuple {
+                arity: 2,
+                dest: Register(0),
+            },
+            // Extract element 0 (the atom)
+            Instruction::TupleElement {
+                tuple: Register(0),
+                index: 0,
+                dest: Register(1),
+            },
+            // Extract element 1 (the integer)
+            Instruction::TupleElement {
+                tuple: Register(0),
+                index: 1,
+                dest: Register(2),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Atom("error".to_string()));
+        assert_eq!(process.registers[2], Value::Int(404));
+    }
+
+    #[test]
+    fn test_tuple_arity() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create a 3-tuple
+            Instruction::Push {
+                source: Operand::Int(1),
+            },
+            Instruction::Push {
+                source: Operand::Int(2),
+            },
+            Instruction::Push {
+                source: Operand::Int(3),
+            },
+            Instruction::MakeTuple {
+                arity: 3,
+                dest: Register(0),
+            },
+            Instruction::TupleArity {
+                tuple: Register(0),
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(3));
+    }
+
+    #[test]
+    fn test_tuple_element_out_of_bounds_crashes() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::Push {
+                source: Operand::Int(1),
+            },
+            Instruction::MakeTuple {
+                arity: 1,
+                dest: Register(0),
+            },
+            // Try to access index 5 (out of bounds)
+            Instruction::TupleElement {
+                tuple: Register(0),
+                index: 5,
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let (_, _, _, crashed) = scheduler.process_count();
+        assert_eq!(crashed, 1);
+    }
+
+    #[test]
+    fn test_nested_tuples() {
+        let mut scheduler = Scheduler::new();
+
+        // Create {{:inner, 1}, :outer}
+        let program = vec![
+            // Create inner tuple {:inner, 1}
+            Instruction::LoadAtom {
+                name: "inner".to_string(),
+                dest: Register(0),
+            },
+            Instruction::Push {
+                source: Operand::Reg(Register(0)),
+            },
+            Instruction::Push {
+                source: Operand::Int(1),
+            },
+            Instruction::MakeTuple {
+                arity: 2,
+                dest: Register(0),
+            },
+            // Create outer tuple {inner_tuple, :outer}
+            Instruction::LoadAtom {
+                name: "outer".to_string(),
+                dest: Register(1),
+            },
+            Instruction::Push {
+                source: Operand::Reg(Register(0)),
+            },
+            Instruction::Push {
+                source: Operand::Reg(Register(1)),
+            },
+            Instruction::MakeTuple {
+                arity: 2,
+                dest: Register(2),
+            },
+            // Extract inner tuple
+            Instruction::TupleElement {
+                tuple: Register(2),
+                index: 0,
+                dest: Register(3),
+            },
+            // Extract element from inner tuple
+            Instruction::TupleElement {
+                tuple: Register(3),
+                index: 1,
+                dest: Register(4),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        // R4 should have the integer 1 from the inner tuple
+        assert_eq!(process.registers[4], Value::Int(1));
     }
 }

@@ -111,6 +111,22 @@ pub enum Instruction {
     /// Pop a value from the data stack into a register
     /// Crashes if stack is empty
     Pop { dest: Register },
+
+    // ========== Atoms & Tuples ==========
+    /// Load an atom into a register
+    LoadAtom { name: String, dest: Register },
+
+    /// Create a tuple from the top `arity` stack elements
+    /// Elements are popped in reverse order (first pushed = first element)
+    MakeTuple { arity: u8, dest: Register },
+
+    /// Get an element from a tuple by index (0-based)
+    /// Crashes if not a tuple or index out of bounds
+    TupleElement { tuple: Register, index: u8, dest: Register },
+
+    /// Get the arity (size) of a tuple
+    /// Crashes if not a tuple
+    TupleArity { tuple: Register, dest: Register },
 }
 
 /// An operand for arithmetic/comparison operations

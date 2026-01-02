@@ -316,6 +316,41 @@ fn parse_program(program: JsValue) -> Result<Vec<Instruction>, JsError> {
                 Instruction::Pop { dest }
             }
 
+            // Atoms & Tuples
+            "load_atom" => {
+                let name = Reflect::get(&obj, &"name".into())
+                    .ok()
+                    .and_then(|v| v.as_string())
+                    .unwrap_or_default();
+                let dest = get_register(&obj, "dest")?;
+                Instruction::LoadAtom { name, dest }
+            }
+
+            "make_tuple" => {
+                let arity = Reflect::get(&obj, &"arity".into())
+                    .ok()
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0) as u8;
+                let dest = get_register(&obj, "dest")?;
+                Instruction::MakeTuple { arity, dest }
+            }
+
+            "tuple_element" => {
+                let tuple = get_register(&obj, "tuple")?;
+                let index = Reflect::get(&obj, &"index".into())
+                    .ok()
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0) as u8;
+                let dest = get_register(&obj, "dest")?;
+                Instruction::TupleElement { tuple, index, dest }
+            }
+
+            "tuple_arity" => {
+                let tuple = get_register(&obj, "tuple")?;
+                let dest = get_register(&obj, "dest")?;
+                Instruction::TupleArity { tuple, dest }
+            }
+
             other => return Err(JsError::new(&format!("unknown op: {}", other))),
         };
 
