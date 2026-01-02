@@ -249,9 +249,7 @@ impl Codegen {
             Expr::StructInit { fields, .. } => fields.iter().any(|(_, e)| Self::contains_call(e)),
             Expr::EnumVariant { args, .. } => args.iter().any(|e| Self::contains_call(e)),
             Expr::FieldAccess { expr, .. } => Self::contains_call(expr),
-            Expr::MethodCall { receiver, args, .. } => {
-                Self::contains_call(receiver) || args.iter().any(|a| Self::contains_call(a))
-            }
+            Expr::MethodCall { .. } => true, // Method calls are calls
             Expr::Send { to, msg } => Self::contains_call(to) || Self::contains_call(msg),
             Expr::Return(Some(e)) => Self::contains_call(e),
             _ => false,
@@ -762,8 +760,43 @@ impl Codegen {
                 Ok(Register(0))
             }
 
-            Expr::MethodCall { .. } => {
-                Err(CodegenError::new("method calls not yet implemented"))
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+            } => {
+                // UFCS: x.foo(y, z) becomes foo(x, y, z)
+                let saved_next = self.regs.next_reg;
+
+                // Compile receiver into R0
+                let receiver_reg = self.compile_expr(receiver)?;
+                if receiver_reg.0 != 0 {
+                    self.emit(Instruction::Move {
+                        source: receiver_reg,
+                        dest: Register(0),
+                    });
+                }
+
+                // Compile remaining arguments into R1, R2, ...
+                for (i, arg) in args.iter().enumerate() {
+                    let arg_reg = self.compile_expr(arg)?;
+                    let dest_reg = (i + 1) as u8; // +1 because receiver is in R0
+                    if arg_reg.0 != dest_reg {
+                        self.emit(Instruction::Move {
+                            source: arg_reg,
+                            dest: Register(dest_reg),
+                        });
+                    }
+                }
+
+                // Call the method as a local function
+                self.emit(Instruction::CallLocal {
+                    function: method.clone(),
+                    arity: (args.len() + 1) as u8, // +1 for receiver
+                });
+
+                self.regs.next_reg = saved_next.max(1);
+                Ok(Register(0))
             }
 
             Expr::Path { segments } => {

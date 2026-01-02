@@ -31,22 +31,18 @@ mod option {
         }
     }
 
-    // Test safe_div
+    // Test safe_div with method chaining
     pub fn test_div() -> int {
-        let result = safe_div(10, 2);
-        unwrap_or(result, 0)
+        safe_div(10, 2).unwrap_or(0)
     }
 
-    // Test div by zero
+    // Test div by zero with method chaining
     pub fn test_div_zero() -> int {
-        let result = safe_div(10, 0);
-        unwrap_or(result, -1)
+        safe_div(10, 0).unwrap_or(-1)
     }
 
-    // Test map
+    // Test map with method chaining
     pub fn test_map() -> int {
-        let opt = Some(21);
-        let doubled = map_double(opt);
-        unwrap_or(doubled, 0)
+        Some(21).map_double().unwrap_or(0)
     }
 }

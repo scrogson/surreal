@@ -1,0 +1,74 @@
+// Result type example with method chaining
+
+mod result {
+    enum Result {
+        Ok(int),
+        Err(int),
+    }
+
+    // Parse a "number" (simulated: positive = ok, negative = error)
+    pub fn parse(n: int) -> Result {
+        if n >= 0 {
+            Ok(n)
+        } else {
+            Err(-1)
+        }
+    }
+
+    // Unwrap or return default (can be called as res.unwrap_or(default))
+    pub fn unwrap_or(res: Result, default: int) -> int {
+        match res {
+            Ok(v) => v,
+            Err(_) => default,
+        }
+    }
+
+    // Check if result is ok
+    pub fn is_ok(res: Result) -> int {
+        match res {
+            Ok(_) => 1,
+            Err(_) => 0,
+        }
+    }
+
+    // Check if result is error
+    pub fn is_err(res: Result) -> int {
+        match res {
+            Ok(_) => 0,
+            Err(_) => 1,
+        }
+    }
+
+    // Map over Ok value (can be called as res.map(factor))
+    pub fn map(res: Result, factor: int) -> Result {
+        match res {
+            Ok(v) => Ok(v * factor),
+            Err(e) => Err(e),
+        }
+    }
+
+    // Test parse success with method syntax
+    pub fn test_parse_ok() -> int {
+        parse(42).unwrap_or(-999)
+    }
+
+    // Test parse failure with method syntax
+    pub fn test_parse_err() -> int {
+        parse(-5).unwrap_or(-999)
+    }
+
+    // Test is_ok on success
+    pub fn test_is_ok_success() -> int {
+        parse(10).is_ok()
+    }
+
+    // Test is_ok on error
+    pub fn test_is_ok_error() -> int {
+        parse(-10).is_ok()
+    }
+
+    // Test map with method chaining
+    pub fn test_map() -> int {
+        parse(7).map(6).unwrap_or(0)
+    }
+}
