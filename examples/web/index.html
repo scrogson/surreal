@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ToyBEAM - BEAM VM in WebAssembly</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+      max-width: 1000px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #1a1a2e;
+      color: #eee;
+    }
+    h1 { color: #9d4edd; margin-bottom: 5px; }
+    h2 { color: #7b2cbf; margin-top: 30px; }
+    .subtitle { color: #888; margin-bottom: 20px; }
+    pre {
+      background: #16213e;
+      padding: 15px;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 10px 0;
+    }
+    code { color: #00d9ff; }
+    .comment { color: #6a9955; }
+    button {
+      background: #9d4edd;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+      margin: 5px 5px 5px 0;
+    }
+    button:hover { background: #7b2cbf; }
+    .demo-section {
+      background: #16213e;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 20px 0;
+    }
+    .demo-title {
+      color: #9d4edd;
+      margin: 0 0 10px 0;
+      font-size: 18px;
+    }
+    .output {
+      background: #0f0f23;
+      padding: 10px 15px;
+      border-radius: 5px;
+      font-family: monospace;
+      white-space: pre-wrap;
+      min-height: 40px;
+      max-height: 200px;
+      overflow-y: auto;
+      margin-top: 10px;
+      border-left: 3px solid #9d4edd;
+    }
+    .stats {
+      color: #888;
+      font-size: 12px;
+      margin-top: 5px;
+    }
+    .code-label {
+      color: #888;
+      font-size: 12px;
+      margin-bottom: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h1>ToyBEAM</h1>
+  <p class="subtitle">A toy BEAM virtual machine running in WebAssembly (~49KB)</p>
+
+  <!-- Ping Pong Demo -->
+  <div class="demo-section">
+    <h3 class="demo-title">Ping-Pong (spawn + message passing)</h3>
+    <div class="code-label">Code:</div>
+    <pre><code><span class="comment">// Pong: wait for message, reply to parent</span>
+const pong = [
+  { op: "receive", dest: 0 },
+  { op: "send", to: "parent", msg: "pong!" },
+  { op: "end" }
+];
+
+<span class="comment">// Ping: spawn pong, send message, wait for reply</span>
+const ping = [
+  { op: "spawn", code: pong, dest: 0 },
+  { op: "send", to: { type: "reg", reg: 0 }, msg: "ping!" },
+  { op: "receive", dest: 1 },
+  { op: "print", source: { type: "reg", reg: 1 } },
+  { op: "end" }
+];</code></pre>
+    <button onclick="runPingPong()">Run</button>
+    <div class="output" id="pingpong-output"></div>
+    <div class="stats" id="pingpong-stats"></div>
+  </div>
+
+  <!-- Crash Demo -->
+  <div class="demo-section">
+    <h3 class="demo-title">Crash Notification (spawn_link)</h3>
+    <div class="code-label">Code:</div>
+    <pre><code><span class="comment">// Worker: do work then crash</span>
+const crasher = [
+  { op: "work", amount: 2 },
+  { op: "crash" }
+];
+
+<span class="comment">// Supervisor: spawn+link, wait for crash notification</span>
+const supervisor = [
+  { op: "spawn_link", code: crasher, dest: 0 },
+  { op: "receive", dest: 1 },  <span class="comment">// Gets "CRASH&lt;pid&gt;"</span>
+  { op: "print", source: { type: "reg", reg: 1 } },
+  { op: "end" }
+];</code></pre>
+    <button onclick="runCrashDemo()">Run</button>
+    <div class="output" id="crash-output"></div>
+    <div class="stats" id="crash-stats"></div>
+  </div>
+
+  <!-- Monitor Demo -->
+  <div class="demo-section">
+    <h3 class="demo-title">Monitor (one-way notification)</h3>
+    <div class="code-label">Code:</div>
+    <pre><code><span class="comment">// Worker: do work then crash</span>
+const worker = [
+  { op: "work", amount: 2 },
+  { op: "crash" }
+];
+
+<span class="comment">// Observer: spawn, monitor (one-way), wait for DOWN</span>
+const observer = [
+  { op: "spawn", code: worker, dest: 0 },
+  { op: "monitor", target: { type: "reg", reg: 0 } },
+  { op: "receive", dest: 1 },  <span class="comment">// Gets "DOWN&lt;pid,reason&gt;"</span>
+  { op: "print", source: { type: "reg", reg: 1 } },
+  { op: "end" }
+];</code></pre>
+    <button onclick="runMonitorDemo()">Run</button>
+    <div class="output" id="monitor-output"></div>
+    <div class="stats" id="monitor-stats"></div>
+  </div>
+
+  <!-- Timeout Demo -->
+  <div class="demo-section">
+    <h3 class="demo-title">Receive with Timeout</h3>
+    <div class="code-label">Code:</div>
+    <pre><code><span class="comment">// Wait for a message that never comes</span>
+const waiter = [
+  { op: "receive_timeout", dest: 0, timeout: 5 },
+  { op: "print", source: { type: "reg", reg: 0 } },  <span class="comment">// Prints "TIMEOUT"</span>
+  { op: "end" }
+];</code></pre>
+    <button onclick="runTimeoutDemo()">Run</button>
+    <div class="output" id="timeout-output"></div>
+    <div class="stats" id="timeout-stats"></div>
+  </div>
+
+  <!-- Registry Demo -->
+  <div class="demo-section">
+    <h3 class="demo-title">Process Registry (named processes)</h3>
+    <div class="code-label">Code:</div>
+    <pre><code><span class="comment">// Server registers, signals ready, handles requests</span>
+const server = [
+  { op: "register", name: "myserver" },
+  { op: "send", to: "parent", msg: "ready" },
+  { op: "receive", dest: 0 },
+  { op: "print", source: { type: "reg", reg: 0 } },
+  { op: "send", to: "parent", msg: "handled!" },
+  { op: "end" }
+];
+
+<span class="comment">// Client spawns server, waits for ready, sends by name</span>
+const client = [
+  { op: "spawn", code: server, dest: 0 },
+  { op: "receive", dest: 1 },          <span class="comment">// wait for "ready"</span>
+  { op: "send", to: { type: "named", name: "myserver" }, msg: "ping" },
+  { op: "receive", dest: 1 },
+  { op: "print", source: { type: "reg", reg: 1 } },
+  { op: "end" }
+];</code></pre>
+    <button onclick="runRegistryDemo()">Run</button>
+    <div class="output" id="registry-output"></div>
+    <div class="stats" id="registry-stats"></div>
+  </div>
+
+  <!-- Many Processes Demo -->
+  <div class="demo-section">
+    <h3 class="demo-title">Spawn 100 Processes</h3>
+    <div class="code-label">Code:</div>
+    <pre><code><span class="comment">// Each worker prints its PID then exits</span>
+const worker = [
+  { op: "print", source: "self" },
+  { op: "end" }
+];
+
+<span class="comment">// Spawner creates 100 workers</span>
+for (let i = 0; i < 100; i++) {
+  spawner.push({ op: "spawn", code: worker, dest: 0 });
+}</code></pre>
+    <button onclick="runManyProcesses()">Run</button>
+    <div class="output" id="many-output"></div>
+    <div class="stats" id="many-stats"></div>
+  </div>
+
+  <script type="module">
+    import init, { VM } from './pkg/toybeam.js';
+
+    await init();
+    console.log("ToyBEAM initialized!");
+
+    function log(id, msg) {
+      document.getElementById(id + '-output').textContent += msg + '\n';
+    }
+
+    function showOutput(id, vm) {
+      const output = vm.take_output();
+      for (const line of output) {
+        log(id, line);
+      }
+    }
+
+    function stats(id, vm) {
+      const s = vm.stats();
+      document.getElementById(id + '-stats').textContent =
+        `Processes: ${vm.process_count()} | Ready: ${s[0]} | Waiting: ${s[1]} | Done: ${s[2]} | Crashed: ${s[3]}`;
+    }
+
+    function clear(id) {
+      document.getElementById(id + '-output').textContent = '';
+      document.getElementById(id + '-stats').textContent = '';
+    }
+
+    window.runPingPong = function() {
+      clear('pingpong');
+      const vm = new VM();
+
+      const pong = [
+        { op: "receive", dest: 0 },
+        { op: "send", to: "parent", msg: "pong!" },
+        { op: "end" }
+      ];
+
+      const ping = [
+        { op: "spawn", code: pong, dest: 0 },
+        { op: "send", to: { type: "reg", reg: 0 }, msg: "ping!" },
+        { op: "receive", dest: 1 },
+        { op: "print", source: { type: "reg", reg: 1 } },
+        { op: "end" }
+      ];
+
+      vm.spawn(ping);
+      vm.run();
+      showOutput('pingpong', vm);
+      stats('pingpong', vm);
+    };
+
+    window.runCrashDemo = function() {
+      clear('crash');
+      const vm = new VM();
+
+      const crasher = [
+        { op: "work", amount: 2 },
+        { op: "crash" }
+      ];
+
+      const supervisor = [
+        { op: "spawn_link", code: crasher, dest: 0 },
+        { op: "receive", dest: 1 },
+        { op: "print", source: { type: "reg", reg: 1 } },
+        { op: "end" }
+      ];
+
+      vm.spawn(supervisor);
+      vm.run();
+      showOutput('crash', vm);
+      stats('crash', vm);
+    };
+
+    window.runMonitorDemo = function() {
+      clear('monitor');
+      const vm = new VM();
+
+      const worker = [
+        { op: "work", amount: 2 },
+        { op: "crash" }
+      ];
+
+      const observer = [
+        { op: "spawn", code: worker, dest: 0 },
+        { op: "monitor", target: { type: "reg", reg: 0 } },
+        { op: "receive", dest: 1 },
+        { op: "print", source: { type: "reg", reg: 1 } },
+        { op: "end" }
+      ];
+
+      vm.spawn(observer);
+      vm.run();
+      showOutput('monitor', vm);
+      stats('monitor', vm);
+    };
+
+    window.runTimeoutDemo = function() {
+      clear('timeout');
+      const vm = new VM();
+
+      const waiter = [
+        { op: "receive_timeout", dest: 0, timeout: 5 },
+        { op: "print", source: { type: "reg", reg: 0 } },
+        { op: "end" }
+      ];
+
+      vm.spawn(waiter);
+
+      let steps = 0;
+      while (vm.step(1) !== "idle" && steps < 20) {
+        steps++;
+      }
+      showOutput('timeout', vm);
+      log('timeout', `(timed out after ${steps} scheduler steps)`);
+      stats('timeout', vm);
+    };
+
+    window.runRegistryDemo = function() {
+      clear('registry');
+      const vm = new VM();
+
+      const server = [
+        { op: "register", name: "myserver" },
+        { op: "send", to: "parent", msg: "ready" },
+        { op: "receive", dest: 0 },
+        { op: "print", source: { type: "reg", reg: 0 } },
+        { op: "send", to: "parent", msg: "handled!" },
+        { op: "end" }
+      ];
+
+      const client = [
+        { op: "spawn", code: server, dest: 0 },
+        { op: "receive", dest: 1 },  // wait for "ready"
+        { op: "send", to: { type: "named", name: "myserver" }, msg: "ping" },
+        { op: "receive", dest: 1 },
+        { op: "print", source: { type: "reg", reg: 1 } },
+        { op: "end" }
+      ];
+
+      vm.spawn(client);
+      vm.run();
+      showOutput('registry', vm);
+      stats('registry', vm);
+    };
+
+    window.runManyProcesses = function() {
+      clear('many');
+      const vm = new VM();
+      const start = performance.now();
+
+      // Each worker prints its own PID
+      const worker = [
+        { op: "print", source: "self" },
+        { op: "end" }
+      ];
+
+      const spawner = [];
+      for (let i = 0; i < 100; i++) {
+        spawner.push({ op: "spawn", code: worker, dest: 0 });
+      }
+      spawner.push({ op: "end" });
+
+      vm.spawn(spawner);
+      vm.run();
+
+      const elapsed = performance.now() - start;
+      showOutput('many', vm);
+      log('many', `(completed in ${elapsed.toFixed(2)}ms)`);
+      stats('many', vm);
+    };
+  </script>
+</body>
+</html>
