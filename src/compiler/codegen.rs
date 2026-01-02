@@ -515,6 +515,10 @@ impl Codegen {
                 let result_reg = self.regs.alloc();
                 let mut end_jumps = Vec::new();
 
+                // Save register state before processing arms
+                // Each arm can allocate temporaries that should be reset for the next arm
+                let base_next_reg = self.regs.next_reg;
+
                 for (i, arm) in arms.iter().enumerate() {
                     let is_last = i == arms.len() - 1;
                     let fail_target = if is_last {
@@ -568,6 +572,11 @@ impl Codegen {
                                 self.patch_jump(guard_jump, next_arm);
                             }
                         }
+
+                        // Reset register allocation for next arm
+                        // Keep result_reg but reset temporaries
+                        self.regs.next_reg = base_next_reg;
+                        self.regs.locals.clear();
                     }
                 }
 
@@ -1296,5 +1305,131 @@ mod tests {
 
         let process = scheduler.processes.get(&crate::Pid(0)).unwrap();
         assert_eq!(process.registers[0], crate::Value::Int(14));
+    }
+
+    #[test]
+    fn test_compile_match_with_guard() {
+        let source = r#"
+            mod test {
+                pub fn classify(n: int) -> int {
+                    match n {
+                        x if x < 0 => 0 - 1,
+                        x if x == 0 => 0,
+                        x if x > 0 => 1,
+                        _ => 99,
+                    }
+                }
+            }
+        "#;
+
+        let module = compile(source).unwrap();
+
+        let mut scheduler = Scheduler::new();
+        scheduler.load_module(module).unwrap();
+
+        // Test negative: classify(-5) = -1
+        use crate::instruction::{Instruction, Register};
+        let program = vec![
+            Instruction::LoadInt {
+                value: -5,
+                dest: Register(0),
+            },
+            Instruction::CallMFA {
+                module: "test".to_string(),
+                function: "classify".to_string(),
+                arity: 1,
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_completion(&mut scheduler);
+
+        let process = scheduler.processes.get(&crate::Pid(0)).unwrap();
+        assert_eq!(process.registers[0], crate::Value::Int(-1));
+    }
+
+    #[test]
+    fn test_compile_match_guard_zero() {
+        let source = r#"
+            mod test {
+                pub fn classify(n: int) -> int {
+                    match n {
+                        x if x < 0 => 0 - 1,
+                        x if x == 0 => 0,
+                        x if x > 0 => 1,
+                        _ => 99,
+                    }
+                }
+            }
+        "#;
+
+        let module = compile(source).unwrap();
+
+        let mut scheduler = Scheduler::new();
+        scheduler.load_module(module).unwrap();
+
+        // Test zero: classify(0) = 0
+        use crate::instruction::{Instruction, Register};
+        let program = vec![
+            Instruction::LoadInt {
+                value: 0,
+                dest: Register(0),
+            },
+            Instruction::CallMFA {
+                module: "test".to_string(),
+                function: "classify".to_string(),
+                arity: 1,
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_completion(&mut scheduler);
+
+        let process = scheduler.processes.get(&crate::Pid(0)).unwrap();
+        assert_eq!(process.registers[0], crate::Value::Int(0));
+    }
+
+    #[test]
+    fn test_compile_match_guard_positive() {
+        let source = r#"
+            mod test {
+                pub fn classify(n: int) -> int {
+                    match n {
+                        x if x < 0 => 0 - 1,
+                        x if x == 0 => 0,
+                        x if x > 0 => 1,
+                        _ => 99,
+                    }
+                }
+            }
+        "#;
+
+        let module = compile(source).unwrap();
+
+        let mut scheduler = Scheduler::new();
+        scheduler.load_module(module).unwrap();
+
+        // Test positive: classify(42) = 1
+        use crate::instruction::{Instruction, Register};
+        let program = vec![
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(0),
+            },
+            Instruction::CallMFA {
+                module: "test".to_string(),
+                function: "classify".to_string(),
+                arity: 1,
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_completion(&mut scheduler);
+
+        let process = scheduler.processes.get(&crate::Pid(0)).unwrap();
+        assert_eq!(process.registers[0], crate::Value::Int(1));
     }
 }
