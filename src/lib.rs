@@ -10,6 +10,7 @@
 //! - Receive with timeout
 //! - Cooperative scheduling with reduction budgets
 
+pub mod compiler;
 mod instruction;
 mod message;
 mod module;
