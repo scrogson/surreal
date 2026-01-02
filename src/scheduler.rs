@@ -432,6 +432,14 @@ impl Scheduler {
                 ExecResult::Continue(1)
             }
 
+            Instruction::Move { source, dest } => {
+                if let Some(p) = self.processes.get_mut(&pid) {
+                    let value = p.registers[source.0 as usize].clone();
+                    p.registers[dest.0 as usize] = value;
+                }
+                ExecResult::Continue(1)
+            }
+
             Instruction::Add { a, b, dest } => {
                 self.arith_op(pid, &a, &b, dest, |x, y| x.wrapping_add(y))
             }

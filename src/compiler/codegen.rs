@@ -172,9 +172,8 @@ impl Codegen {
 
         // Move result to R0 if not already there
         if result_reg.0 != 0 {
-            self.emit(Instruction::Add {
-                a: Operand::Reg(result_reg),
-                b: Operand::Int(0),
+            self.emit(Instruction::Move {
+                source: result_reg,
                 dest: Register(0),
             });
         }
@@ -248,6 +247,7 @@ impl Codegen {
             }
             Expr::Tuple(elems) | Expr::List(elems) => elems.iter().any(|e| Self::contains_call(e)),
             Expr::StructInit { fields, .. } => fields.iter().any(|(_, e)| Self::contains_call(e)),
+            Expr::EnumVariant { args, .. } => args.iter().any(|e| Self::contains_call(e)),
             Expr::FieldAccess { expr, .. } => Self::contains_call(expr),
             Expr::MethodCall { receiver, args, .. } => {
                 Self::contains_call(receiver) || args.iter().any(|a| Self::contains_call(a))
@@ -476,9 +476,8 @@ impl Codegen {
 
                 // Then branch
                 let then_result = self.compile_block(then_block)?;
-                self.emit(Instruction::Add {
-                    a: Operand::Reg(then_result),
-                    b: Operand::Int(0),
+                self.emit(Instruction::Move {
+                    source: then_result,
                     dest: result_reg,
                 });
 
@@ -491,9 +490,8 @@ impl Codegen {
 
                 if let Some(else_blk) = else_block {
                     let else_result = self.compile_block(else_blk)?;
-                    self.emit(Instruction::Add {
-                        a: Operand::Reg(else_result),
-                        b: Operand::Int(0),
+                    self.emit(Instruction::Move {
+                        source: else_result,
                         dest: result_reg,
                     });
                 } else {
@@ -518,6 +516,7 @@ impl Codegen {
                 // Save register state before processing arms
                 // Each arm can allocate temporaries that should be reset for the next arm
                 let base_next_reg = self.regs.next_reg;
+                let base_locals = self.regs.locals.clone();
 
                 for (i, arm) in arms.iter().enumerate() {
                     let is_last = i == arms.len() - 1;
@@ -550,9 +549,8 @@ impl Codegen {
 
                     // Compile body
                     let body_result = self.compile_expr(&arm.body)?;
-                    self.emit(Instruction::Add {
-                        a: Operand::Reg(body_result),
-                        b: Operand::Int(0),
+                    self.emit(Instruction::Move {
+                        source: body_result,
                         dest: result_reg,
                     });
 
@@ -574,9 +572,9 @@ impl Codegen {
                         }
 
                         // Reset register allocation for next arm
-                        // Keep result_reg but reset temporaries
+                        // Keep result_reg but reset temporaries and restore base locals
                         self.regs.next_reg = base_next_reg;
-                        self.regs.locals.clear();
+                        self.regs.locals = base_locals.clone();
                     }
                 }
 
@@ -665,6 +663,47 @@ impl Codegen {
                 Ok(dest)
             }
 
+            Expr::EnumVariant {
+                type_name: _,
+                variant,
+                args,
+            } => {
+                if args.is_empty() {
+                    // Unit variant: just an atom
+                    let dest = self.regs.alloc();
+                    self.emit(Instruction::LoadAtom {
+                        name: variant.clone(),
+                        dest,
+                    });
+                    Ok(dest)
+                } else {
+                    // Tuple variant: {:Variant, arg1, arg2, ...}
+                    let tag_reg = self.regs.alloc();
+                    self.emit(Instruction::LoadAtom {
+                        name: variant.clone(),
+                        dest: tag_reg,
+                    });
+                    self.emit(Instruction::Push {
+                        source: Operand::Reg(tag_reg),
+                    });
+
+                    for arg in args {
+                        let arg_reg = self.compile_expr(arg)?;
+                        self.emit(Instruction::Push {
+                            source: Operand::Reg(arg_reg),
+                        });
+                    }
+
+                    let dest = self.regs.alloc();
+                    self.emit(Instruction::MakeTuple {
+                        arity: (args.len() + 1) as u8, // +1 for tag
+                        dest,
+                    });
+
+                    Ok(dest)
+                }
+            }
+
             Expr::FieldAccess { expr, field } => {
                 // For now, assume expr is a struct (tagged tuple)
                 // Field access becomes tuple element access
@@ -685,9 +724,8 @@ impl Codegen {
                     let arg_reg = self.compile_expr(arg)?;
                     if arg_reg.0 != i as u8 {
                         // Move to correct register
-                        self.emit(Instruction::Add {
-                            a: Operand::Reg(arg_reg),
-                            b: Operand::Int(0),
+                        self.emit(Instruction::Move {
+                            source: arg_reg,
                             dest: Register(i as u8),
                         });
                     }
@@ -789,9 +827,8 @@ impl Codegen {
                     arm_entries.push(arm_start);
 
                     let body_result = self.compile_expr(&arm.body)?;
-                    self.emit(Instruction::Add {
-                        a: Operand::Reg(body_result),
-                        b: Operand::Int(0),
+                    self.emit(Instruction::Move {
+                        source: body_result,
                         dest: result_reg,
                     });
 
@@ -804,9 +841,8 @@ impl Codegen {
                 let timeout_entry = self.code.len();
                 if let Some((_, timeout_block)) = timeout {
                     let timeout_result = self.compile_block(timeout_block)?;
-                    self.emit(Instruction::Add {
-                        a: Operand::Reg(timeout_result),
-                        b: Operand::Int(0),
+                    self.emit(Instruction::Move {
+                        source: timeout_result,
                         dest: result_reg,
                     });
                 }
@@ -846,9 +882,8 @@ impl Codegen {
                         for (i, arg) in args.iter().enumerate() {
                             let arg_reg = self.compile_expr(arg)?;
                             if arg_reg.0 != i as u8 {
-                                self.emit(Instruction::Add {
-                                    a: Operand::Reg(arg_reg),
-                                    b: Operand::Int(0),
+                                self.emit(Instruction::Move {
+                                    source: arg_reg,
                                     dest: Register(i as u8),
                                 });
                             }
@@ -908,9 +943,8 @@ impl Codegen {
 
                 // Move to R0 if needed
                 if result.0 != 0 {
-                    self.emit(Instruction::Add {
-                        a: Operand::Reg(result),
-                        b: Operand::Int(0),
+                    self.emit(Instruction::Move {
+                        source: result,
                         dest: Register(0),
                     });
                 }

@@ -549,8 +549,67 @@ impl<'source> Parser<'source> {
                 return Ok(Expr::StructInit { name, fields });
             }
 
-            // Otherwise it's just an identifier (type name)
-            return Ok(Expr::Ident(name));
+            // Check for qualified enum variant: TypeIdent::Variant or TypeIdent::Variant(args)
+            if self.check(&Token::ColonColon) {
+                self.advance();
+                let variant = self.expect_type_ident()?;
+
+                // Check for args: TypeIdent::Variant(args)
+                if self.check(&Token::LParen) {
+                    self.advance();
+                    let mut args = Vec::new();
+                    if !self.check(&Token::RParen) {
+                        loop {
+                            args.push(self.parse_expr()?);
+                            if !self.check(&Token::Comma) {
+                                break;
+                            }
+                            self.advance();
+                        }
+                    }
+                    self.expect(&Token::RParen)?;
+                    return Ok(Expr::EnumVariant {
+                        type_name: Some(name),
+                        variant,
+                        args,
+                    });
+                }
+
+                // Unit variant: TypeIdent::Variant
+                return Ok(Expr::EnumVariant {
+                    type_name: Some(name),
+                    variant,
+                    args: vec![],
+                });
+            }
+
+            // Check for enum variant without type: Variant(args)
+            if self.check(&Token::LParen) {
+                self.advance();
+                let mut args = Vec::new();
+                if !self.check(&Token::RParen) {
+                    loop {
+                        args.push(self.parse_expr()?);
+                        if !self.check(&Token::Comma) {
+                            break;
+                        }
+                        self.advance();
+                    }
+                }
+                self.expect(&Token::RParen)?;
+                return Ok(Expr::EnumVariant {
+                    type_name: None,
+                    variant: name,
+                    args,
+                });
+            }
+
+            // Unit variant without type qualifier: Variant (just an atom)
+            return Ok(Expr::EnumVariant {
+                type_name: None,
+                variant: name,
+                args: vec![],
+            });
         }
 
         // Parenthesized expression or tuple
@@ -861,8 +920,33 @@ impl<'source> Parser<'source> {
                 return Ok(Pattern::Struct { name, fields });
             }
 
-            // Just a type name as pattern (treated as ident for now)
-            return Ok(Pattern::Ident(name));
+            // Unqualified enum variant pattern: Variant(...)
+            if self.check(&Token::LParen) {
+                self.advance();
+                let mut fields = Vec::new();
+                if !self.check(&Token::RParen) {
+                    loop {
+                        fields.push(self.parse_pattern()?);
+                        if !self.check(&Token::Comma) {
+                            break;
+                        }
+                        self.advance();
+                    }
+                }
+                self.expect(&Token::RParen)?;
+                return Ok(Pattern::Enum {
+                    name: String::new(), // No type qualifier
+                    variant: name,
+                    fields,
+                });
+            }
+
+            // Just a type name as pattern (unit enum variant)
+            return Ok(Pattern::Enum {
+                name: String::new(),
+                variant: name,
+                fields: vec![],
+            });
         }
 
         // Tuple pattern

@@ -118,6 +118,15 @@ pub enum Expr {
         name: String,
         fields: Vec<(String, Expr)>,
     },
+    /// Enum variant construction: `Some(42)` or `Option::Some(42)`.
+    EnumVariant {
+        /// Optional type name (e.g., `Option` in `Option::Some`)
+        type_name: Option<String>,
+        /// Variant name (e.g., `Some`)
+        variant: String,
+        /// Arguments for tuple variants
+        args: Vec<Expr>,
+    },
     /// Field access: `expr.field`.
     FieldAccess { expr: Box<Expr>, field: String },
     /// Module path access: `Module::item`.

@@ -1,0 +1,52 @@
+// Option type example
+
+mod option {
+    enum Option {
+        Some(int),
+        None,
+    }
+
+    // Safe division that returns Option
+    pub fn safe_div(a: int, b: int) -> Option {
+        if b == 0 {
+            None
+        } else {
+            Some(a / b)
+        }
+    }
+
+    // Unwrap with default
+    pub fn unwrap_or(opt: Option, default: int) -> int {
+        match opt {
+            Some(x) => x,
+            None => default,
+        }
+    }
+
+    // Map over Option
+    pub fn map_double(opt: Option) -> Option {
+        match opt {
+            Some(x) => Some(x * 2),
+            None => None,
+        }
+    }
+
+    // Test safe_div
+    pub fn test_div() -> int {
+        let result = safe_div(10, 2);
+        unwrap_or(result, 0)
+    }
+
+    // Test div by zero
+    pub fn test_div_zero() -> int {
+        let result = safe_div(10, 0);
+        unwrap_or(result, -1)
+    }
+
+    // Test map
+    pub fn test_map() -> int {
+        let opt = Some(21);
+        let doubled = map_double(opt);
+        unwrap_or(doubled, 0)
+    }
+}

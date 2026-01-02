@@ -53,6 +53,9 @@ pub enum Instruction {
     /// Load an immediate integer into a register
     LoadInt { value: i64, dest: Register },
 
+    /// Move (copy) any value from source register to dest register
+    Move { source: Register, dest: Register },
+
     /// Add two operands, store result in dest
     Add { a: Operand, b: Operand, dest: Register },
 
