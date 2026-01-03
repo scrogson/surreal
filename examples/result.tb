@@ -1,13 +1,14 @@
-// Result type example with method chaining
+// Result type example with generics and method chaining
 
 mod result {
-    enum Result {
-        Ok(int),
-        Err(int),
+    // Generic Result type
+    enum Result<T, E> {
+        Ok(T),
+        Err(E),
     }
 
     // Parse a "number" (simulated: positive = ok, negative = error)
-    pub fn parse(n: int) -> Result {
+    pub fn parse(n: int) -> Result<int, int> {
         if n >= 0 {
             Ok(n)
         } else {
@@ -15,32 +16,48 @@ mod result {
         }
     }
 
-    // Unwrap or return default (can be called as res.unwrap_or(default))
-    pub fn unwrap_or(res: Result, default: int) -> int {
+    // Unwrap or return default (generic version)
+    pub fn unwrap_or<T, E>(res: Result<T, E>, default: T) -> T {
         match res {
             Ok(v) => v,
             Err(_) => default,
         }
     }
 
-    // Check if result is ok
-    pub fn is_ok(res: Result) -> int {
+    // Check if result is ok (generic version)
+    pub fn is_ok<T, E>(res: Result<T, E>) -> bool {
         match res {
-            Ok(_) => 1,
-            Err(_) => 0,
+            Ok(_) => true,
+            Err(_) => false,
         }
     }
 
-    // Check if result is error
-    pub fn is_err(res: Result) -> int {
+    // Check if result is error (generic version)
+    pub fn is_err<T, E>(res: Result<T, E>) -> bool {
         match res {
-            Ok(_) => 0,
-            Err(_) => 1,
+            Ok(_) => false,
+            Err(_) => true,
         }
     }
 
-    // Map over Ok value (can be called as res.map(factor))
-    pub fn map(res: Result, factor: int) -> Result {
+    // Map over Ok value (generic version)
+    pub fn map<T, U, E>(res: Result<T, E>, f: Fn) -> Result<U, E> {
+        match res {
+            Ok(v) => Ok(f(v)),
+            Err(e) => Err(e),
+        }
+    }
+
+    // Map over Err value (generic version)
+    pub fn map_err<T, E, F>(res: Result<T, E>, f: Fn) -> Result<T, F> {
+        match res {
+            Ok(v) => Ok(v),
+            Err(e) => Err(f(e)),
+        }
+    }
+
+    // Map that multiplies by a factor (concrete version for testing)
+    pub fn map_mul(res: Result<int, int>, factor: int) -> Result<int, int> {
         match res {
             Ok(v) => Ok(v * factor),
             Err(e) => Err(e),
@@ -69,6 +86,6 @@ mod result {
 
     // Test map with method chaining
     pub fn test_map() -> int {
-        parse(7).map(6).unwrap_or(0)
+        parse(7).map_mul(6).unwrap_or(0)
     }
 }

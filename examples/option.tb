@@ -1,13 +1,14 @@
-// Option type example
+// Option type example with generics
 
 mod option {
-    enum Option {
-        Some(int),
+    // Generic Option type
+    enum Option<T> {
+        Some(T),
         None,
     }
 
-    // Safe division that returns Option
-    pub fn safe_div(a: int, b: int) -> Option {
+    // Safe division that returns Option<int>
+    pub fn safe_div(a: int, b: int) -> Option<int> {
         if b == 0 {
             None
         } else {
@@ -15,16 +16,24 @@ mod option {
         }
     }
 
-    // Unwrap with default
-    pub fn unwrap_or(opt: Option, default: int) -> int {
+    // Unwrap with default (generic version)
+    pub fn unwrap_or<T>(opt: Option<T>, default: T) -> T {
         match opt {
             Some(x) => x,
             None => default,
         }
     }
 
-    // Map over Option
-    pub fn map_double(opt: Option) -> Option {
+    // Map over Option (generic version)
+    pub fn map<T, U>(opt: Option<T>, f: Fn) -> Option<U> {
+        match opt {
+            Some(x) => Some(f(x)),
+            None => None,
+        }
+    }
+
+    // Map that doubles an int
+    pub fn map_double(opt: Option<int>) -> Option<int> {
         match opt {
             Some(x) => Some(x * 2),
             None => None,
