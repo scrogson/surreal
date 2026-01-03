@@ -45,6 +45,19 @@ fn log(msg: &str) {
     println!("{}", msg);
 }
 
+/// A pending timer
+#[derive(Debug, Clone)]
+pub struct Timer {
+    /// Unique timer reference
+    pub timer_ref: u64,
+    /// Process that will receive the message
+    pub target: Pid,
+    /// Message to send when timer fires
+    pub message: Value,
+    /// Remaining reductions until timer fires
+    pub remaining: u32,
+}
+
 /// The scheduler / VM state
 #[derive(Debug)]
 pub struct Scheduler {
@@ -57,8 +70,10 @@ pub struct Scheduler {
     pub modules: HashMap<String, Module>,
     /// Output buffer from print instructions
     pub output: Vec<String>,
-    /// Global reference counter for make_ref
+    /// Global reference counter for make_ref and timer_ref
     pub next_ref: u64,
+    /// Pending timers
+    pub timers: Vec<Timer>,
 }
 
 impl Scheduler {
@@ -71,6 +86,7 @@ impl Scheduler {
             modules: HashMap::new(),
             output: Vec::new(),
             next_ref: 0,
+            timers: Vec::new(),
         }
     }
 
@@ -140,11 +156,14 @@ impl Scheduler {
         // Tick timeouts for waiting processes
         self.tick_timeouts();
 
+        // Tick timers and fire expired ones
+        self.tick_timers(budget);
+
         while remaining > 0 {
             // Get next ready process
             let Some(pid) = self.ready_queue.pop_front() else {
-                // No ready processes - check if any are waiting with timeouts
-                if self.has_pending_timeouts() {
+                // No ready processes - check if any are waiting with timeouts or timers
+                if self.has_pending_timeouts() || !self.timers.is_empty() {
                     return StepResult::Busy; // Keep ticking
                 }
                 return StepResult::Idle;
@@ -155,7 +174,7 @@ impl Scheduler {
             remaining = remaining.saturating_sub(used);
         }
 
-        if self.ready_queue.is_empty() && !self.has_pending_timeouts() {
+        if self.ready_queue.is_empty() && !self.has_pending_timeouts() && self.timers.is_empty() {
             StepResult::Idle
         } else {
             StepResult::Busy
@@ -189,6 +208,39 @@ impl Scheduler {
 
         for pid in to_wake {
             self.ready_queue.push_back(pid);
+        }
+    }
+
+    /// Tick timers and fire any that have expired
+    fn tick_timers(&mut self, elapsed: u32) {
+        let mut fired = Vec::new();
+        let mut i = 0;
+
+        while i < self.timers.len() {
+            let timer = &mut self.timers[i];
+            timer.remaining = timer.remaining.saturating_sub(elapsed);
+
+            if timer.remaining == 0 {
+                // Timer fired - collect it for processing
+                fired.push(self.timers.remove(i));
+            } else {
+                i += 1;
+            }
+        }
+
+        // Deliver messages for fired timers
+        for timer in fired {
+            if let Some(process) = self.processes.get_mut(&timer.target) {
+                // Send the message
+                let msg_str = format!("{:?}", timer.message);
+                process.mailbox.push_back(Message::User(msg_str));
+
+                // Wake up if waiting
+                if process.status == ProcessStatus::Waiting {
+                    process.status = ProcessStatus::Ready;
+                    self.ready_queue.push_back(timer.target);
+                }
+            }
         }
     }
 
@@ -1795,6 +1847,117 @@ impl Scheduler {
                     _ => return ExecResult::Crash,
                 };
                 process.registers[dest.0 as usize] = Value::Float(b.powf(e));
+                ExecResult::Continue(1)
+            }
+
+            // ========== Timers ==========
+            Instruction::SendAfter { delay, to, msg, dest } => {
+                let Some(process) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Some(target_pid) = self.resolve_pid(pid, &to) else {
+                    // Target process not found
+                    return ExecResult::Crash;
+                };
+                let message = process.registers[msg.0 as usize].clone();
+
+                // Create timer reference
+                let timer_ref = self.next_ref;
+                self.next_ref += 1;
+
+                // Add timer to queue
+                self.timers.push(Timer {
+                    timer_ref,
+                    target: target_pid,
+                    message,
+                    remaining: delay,
+                });
+
+                // Store timer ref in dest register
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::Ref(timer_ref);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::StartTimer { delay, msg, dest } => {
+                let Some(process) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let message_value = process.registers[msg.0 as usize].clone();
+
+                // Create timer reference
+                let timer_ref = self.next_ref;
+                self.next_ref += 1;
+
+                // Build {:timeout, ref, msg} tuple
+                let timeout_msg = Value::Tuple(vec![
+                    Value::Atom("timeout".to_string()),
+                    Value::Ref(timer_ref),
+                    message_value,
+                ]);
+
+                // Add timer to queue (sends to self)
+                self.timers.push(Timer {
+                    timer_ref,
+                    target: pid,
+                    message: timeout_msg,
+                    remaining: delay,
+                });
+
+                // Store timer ref in dest register
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::Ref(timer_ref);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::CancelTimer { timer_ref, dest } => {
+                let Some(process) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Ref(ref_id) = process.registers[timer_ref.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+
+                // Find and remove the timer
+                let result = if let Some(idx) = self.timers.iter().position(|t| t.timer_ref == ref_id) {
+                    let timer = self.timers.remove(idx);
+                    Value::Int(timer.remaining as i64)
+                } else {
+                    // Timer already fired or doesn't exist
+                    Value::Atom("ok".to_string())
+                };
+
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = result;
+                ExecResult::Continue(1)
+            }
+
+            Instruction::ReadTimer { timer_ref, dest } => {
+                let Some(process) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Ref(ref_id) = process.registers[timer_ref.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+
+                // Find the timer and get remaining time
+                let remaining = self
+                    .timers
+                    .iter()
+                    .find(|t| t.timer_ref == ref_id)
+                    .map(|t| Value::Int(t.remaining as i64))
+                    .unwrap_or(Value::Int(0));
+
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = remaining;
                 ExecResult::Continue(1)
             }
         }
@@ -7293,5 +7456,277 @@ mod tests {
             }
             _ => panic!("Expected DOWN tuple, got {:?}", observer_process.registers[1]),
         }
+    }
+
+    // ========== Timer Tests ==========
+
+    #[test]
+    fn test_start_timer() {
+        // StartTimer sends {:timeout, ref, msg} to self after delay
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Load message value
+            Instruction::LoadAtom {
+                name: "ping".to_string(),
+                dest: Register(0),
+            },
+            // Start timer with 5 reduction delay
+            Instruction::StartTimer {
+                delay: 5,
+                msg: Register(0),
+                dest: Register(1),
+            },
+            // Wait for the timer message
+            Instruction::Receive { dest: Register(2) },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.status, ProcessStatus::Done);
+
+        // R1 should have the timer ref
+        assert!(matches!(process.registers[1], Value::Ref(_)));
+
+        // R2 should have received the timeout tuple (as string from debug format)
+        match &process.registers[2] {
+            Value::String(s) => {
+                assert!(s.contains("timeout"));
+                assert!(s.contains("ping"));
+            }
+            _ => panic!("Expected timeout message string, got {:?}", process.registers[2]),
+        }
+    }
+
+    #[test]
+    fn test_send_after() {
+        // SendAfter sends a message to another process after delay
+        let mut scheduler = Scheduler::new();
+
+        // Receiver waits for message
+        let receiver = vec![
+            Instruction::Receive { dest: Register(0) },
+            Instruction::End,
+        ];
+
+        // Sender spawns receiver, then sends after delay
+        let sender = vec![
+            Instruction::Spawn {
+                code: receiver,
+                dest: Register(0),
+            },
+            // Load message
+            Instruction::LoadAtom {
+                name: "hello".to_string(),
+                dest: Register(1),
+            },
+            // Send after 5 reductions
+            Instruction::SendAfter {
+                delay: 5,
+                to: Source::Reg(Register(0)),
+                msg: Register(1),
+                dest: Register(2),
+            },
+            // Wait a bit for timer to fire
+            Instruction::Work { amount: 10 },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(sender);
+        run_to_idle(&mut scheduler);
+
+        // Check receiver got the message
+        let receiver_process = scheduler.processes.get(&Pid(1)).unwrap();
+        assert_eq!(receiver_process.status, ProcessStatus::Done);
+        match &receiver_process.registers[0] {
+            Value::String(s) => assert!(s.contains("hello")),
+            _ => panic!("Expected message, got {:?}", receiver_process.registers[0]),
+        }
+    }
+
+    #[test]
+    fn test_cancel_timer() {
+        // CancelTimer stops a pending timer
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Load message
+            Instruction::LoadAtom {
+                name: "ping".to_string(),
+                dest: Register(0),
+            },
+            // Start timer with long delay
+            Instruction::StartTimer {
+                delay: 1000,
+                msg: Register(0),
+                dest: Register(1),
+            },
+            // Cancel it immediately
+            Instruction::CancelTimer {
+                timer_ref: Register(1),
+                dest: Register(2),
+            },
+            // Try to receive with timeout (should timeout, not receive timer msg)
+            Instruction::ReceiveTimeout {
+                dest: Register(3),
+                timeout: 10,
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.status, ProcessStatus::Done);
+
+        // R2 should have remaining time (close to 1000)
+        match &process.registers[2] {
+            Value::Int(remaining) => assert!(*remaining > 900),
+            _ => panic!("Expected remaining time, got {:?}", process.registers[2]),
+        }
+
+        // R3 should have TIMEOUT (timer was cancelled)
+        assert_eq!(
+            process.registers[3],
+            Value::String("TIMEOUT".to_string())
+        );
+
+        // Timer queue should be empty
+        assert!(scheduler.timers.is_empty());
+    }
+
+    #[test]
+    fn test_read_timer() {
+        // ReadTimer returns remaining time
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::LoadAtom {
+                name: "ping".to_string(),
+                dest: Register(0),
+            },
+            Instruction::StartTimer {
+                delay: 100,
+                msg: Register(0),
+                dest: Register(1),
+            },
+            // Read timer immediately
+            Instruction::ReadTimer {
+                timer_ref: Register(1),
+                dest: Register(2),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+
+        // R2 should have remaining time (may be slightly less due to processing)
+        match &process.registers[2] {
+            Value::Int(remaining) => assert!(*remaining > 0 && *remaining <= 100),
+            _ => panic!("Expected remaining time, got {:?}", process.registers[2]),
+        }
+    }
+
+    #[test]
+    fn test_timer_fires_after_delay() {
+        // Verify timer fires after specified delay
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::LoadAtom {
+                name: "tick".to_string(),
+                dest: Register(0),
+            },
+            // Start timer with delay
+            Instruction::StartTimer {
+                delay: 10,
+                msg: Register(0),
+                dest: Register(1),
+            },
+            // Do enough work that timer fires
+            Instruction::Work { amount: 20 },
+            // Receive the timer message (should be available now)
+            Instruction::ReceiveTimeout {
+                dest: Register(2),
+                timeout: 5,
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.status, ProcessStatus::Done);
+
+        // R2 should have the timer message (not TIMEOUT)
+        match &process.registers[2] {
+            Value::String(s) => {
+                assert!(s.contains("timeout") && s.contains("tick"));
+            }
+            _ => panic!("Expected timer message, got {:?}", process.registers[2]),
+        }
+    }
+
+    #[test]
+    fn test_multiple_timers() {
+        // Multiple timers fire in order
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create three timers with different delays
+            Instruction::LoadInt {
+                value: 1,
+                dest: Register(0),
+            },
+            Instruction::StartTimer {
+                delay: 10,
+                msg: Register(0),
+                dest: Register(4),
+            },
+            Instruction::LoadInt {
+                value: 2,
+                dest: Register(0),
+            },
+            Instruction::StartTimer {
+                delay: 20,
+                msg: Register(0),
+                dest: Register(5),
+            },
+            Instruction::LoadInt {
+                value: 3,
+                dest: Register(0),
+            },
+            Instruction::StartTimer {
+                delay: 30,
+                msg: Register(0),
+                dest: Register(6),
+            },
+            // Wait for all timers
+            Instruction::Work { amount: 50 },
+            // Receive all three messages
+            Instruction::Receive { dest: Register(1) },
+            Instruction::Receive { dest: Register(2) },
+            Instruction::Receive { dest: Register(3) },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.status, ProcessStatus::Done);
+
+        // All three timer refs should be present
+        assert!(matches!(process.registers[4], Value::Ref(_)));
+        assert!(matches!(process.registers[5], Value::Ref(_)));
+        assert!(matches!(process.registers[6], Value::Ref(_)));
     }
 }

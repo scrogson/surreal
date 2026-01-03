@@ -403,6 +403,27 @@ pub enum Instruction {
 
     /// Power: base^exponent (both operands, result is float)
     Pow { base: Register, exp: Register, dest: Register },
+
+    // ========== Timers ==========
+    /// Send a message to a process after a delay (in reductions)
+    /// Returns a timer reference in dest for cancellation
+    SendAfter {
+        delay: u32,
+        to: Source,
+        msg: Register,
+        dest: Register,
+    },
+
+    /// Start a timer that sends {:timeout, ref, msg} to self after delay
+    /// Returns the timer reference in dest
+    StartTimer { delay: u32, msg: Register, dest: Register },
+
+    /// Cancel a pending timer by its reference
+    /// Returns the remaining time if timer was active, or :ok if already fired
+    CancelTimer { timer_ref: Register, dest: Register },
+
+    /// Read the remaining time on a timer (0 if already fired or cancelled)
+    ReadTimer { timer_ref: Register, dest: Register },
 }
 
 /// An operand for arithmetic/comparison operations
