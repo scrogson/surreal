@@ -13,17 +13,7 @@
 ; Classes (structs and enums)
 (struct_definition) @class.outer
 
-(struct_definition
-  name: (type_identifier)
-  "{" @class.inner.start
-  "}" @class.inner.end)
-
 (enum_definition) @class.outer
-
-(enum_definition
-  name: (type_identifier)
-  "{" @class.inner.start
-  "}" @class.inner.end)
 
 ; Blocks
 (block) @block.outer
@@ -48,9 +38,6 @@
 
 ; Calls
 (call_expression) @call.outer
-
-(call_expression
-  arguments: ((_) @call.inner))
 
 ; Statements
 (let_statement) @statement.outer
