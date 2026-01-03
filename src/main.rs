@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use toybeam::{
-    compiler::{compile, emit_core_erlang},
+    compiler::{compile, CoreErlangEmitter, ModuleLoader},
     Instruction, Register, Scheduler, StepResult, Value,
 };
 
@@ -53,43 +53,53 @@ fn print_usage() {
 }
 
 fn compile_to_core_erlang(filename: &str) -> ExitCode {
-    // Read source file
-    let source = match fs::read_to_string(filename) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Error reading {}: {}", filename, e);
-            return ExitCode::from(1);
-        }
-    };
-
-    // Compile to Core Erlang
-    let core_erlang = match emit_core_erlang(&source) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Compile error: {}", e);
-            return ExitCode::from(1);
-        }
-    };
-
-    // Determine output filename
     let input_path = Path::new(filename);
-    let stem = input_path.file_stem().unwrap_or_default().to_str().unwrap_or("output");
-    let output_filename = format!("{}.core", stem);
 
-    // Write Core Erlang file
-    match fs::write(&output_filename, &core_erlang) {
-        Ok(_) => {
-            println!("Wrote {}", output_filename);
-            println!();
-            println!("To compile to BEAM:");
-            println!("  erlc +from_core {}", output_filename);
-            ExitCode::SUCCESS
-        }
+    // Use ModuleLoader for multi-file projects
+    let mut loader = ModuleLoader::new();
+    let main_module = match loader.load_project(input_path) {
+        Ok(m) => m,
         Err(e) => {
-            eprintln!("Error writing {}: {}", output_filename, e);
-            ExitCode::from(1)
+            eprintln!("Error: {}", e);
+            return ExitCode::from(1);
+        }
+    };
+
+    // Emit Core Erlang for all loaded modules
+    let mut output_files = Vec::new();
+
+    for module in loader.modules() {
+        let mut emitter = CoreErlangEmitter::new();
+        let core_erlang = match emitter.emit_module(module) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Compile error in {}: {}", module.name, e);
+                return ExitCode::from(1);
+            }
+        };
+
+        let output_filename = format!("{}.core", module.name);
+        match fs::write(&output_filename, &core_erlang) {
+            Ok(_) => {
+                println!("Wrote {}", output_filename);
+                output_files.push(output_filename);
+            }
+            Err(e) => {
+                eprintln!("Error writing {}.core: {}", module.name, e);
+                return ExitCode::from(1);
+            }
         }
     }
+
+    if !output_files.is_empty() {
+        println!();
+        println!("To compile to BEAM:");
+        println!("  erlc +from_core {}", output_files.join(" "));
+    }
+
+    // Return the main module name for reference
+    let _ = main_module;
+    ExitCode::SUCCESS
 }
 
 fn run_program(args: &[String]) -> ExitCode {

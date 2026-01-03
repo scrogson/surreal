@@ -16,6 +16,9 @@ num-traits = "0.2"
 js-sys = "0.3"
 web-sys = { version = "0.3", features = ["console"] }
 
+[dev-dependencies]
+tempfile = "3"
+
 [profile.release]
 opt-level = "s"
 lto = true

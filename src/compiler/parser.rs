@@ -39,6 +39,22 @@ impl<'source> Parser<'source> {
         Ok(Module { name, items })
     }
 
+    /// Parse a source file as an implicit module.
+    /// Used for lib.tb, main.tb, or any file loaded via `mod foo;`.
+    /// The module name is derived from the filename.
+    pub fn parse_file(&mut self, module_name: &str) -> ParseResult<Module> {
+        let mut items = Vec::new();
+
+        while !self.is_at_end() {
+            items.push(self.parse_item()?);
+        }
+
+        Ok(Module {
+            name: module_name.to_string(),
+            items,
+        })
+    }
+
     /// Parse a top-level item.
     pub fn parse_item(&mut self) -> ParseResult<Item> {
         let is_pub = self.check(&Token::Pub);
@@ -52,13 +68,23 @@ impl<'source> Parser<'source> {
             Ok(Item::Struct(self.parse_struct(is_pub)?))
         } else if self.check(&Token::Enum) {
             Ok(Item::Enum(self.parse_enum(is_pub)?))
+        } else if self.check(&Token::Mod) {
+            self.parse_mod_decl(is_pub)
         } else {
             let span = self.current_span();
             Err(ParseError::new(
-                "expected `fn`, `struct`, or `enum`",
+                "expected `fn`, `struct`, `enum`, or `mod`",
                 span,
             ))
         }
+    }
+
+    /// Parse a module declaration: `mod foo;`
+    fn parse_mod_decl(&mut self, is_pub: bool) -> ParseResult<Item> {
+        self.expect(&Token::Mod)?;
+        let name = self.expect_ident()?;
+        self.expect(&Token::Semi)?;
+        Ok(Item::ModDecl(ModDecl { name, is_pub }))
     }
 
     /// Parse a function definition.

@@ -28,6 +28,16 @@ pub enum Item {
     Function(Function),
     Struct(StructDef),
     Enum(EnumDef),
+    /// External module declaration: `mod foo;`
+    ModDecl(ModDecl),
+}
+
+/// External module declaration.
+/// Used to load a module from a separate file.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModDecl {
+    pub name: String,
+    pub is_pub: bool,
 }
 
 /// A function definition.

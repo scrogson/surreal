@@ -135,6 +135,11 @@ impl Codegen {
                     // Structs and enums don't generate code directly
                     // They're used for pattern matching at runtime
                 }
+                Item::ModDecl(_) => {
+                    // Module declarations should be resolved by the loader
+                    // before codegen runs. If we reach here, it's an error.
+                    // For now, just skip them to allow single-module compilation.
+                }
             }
         }
 
