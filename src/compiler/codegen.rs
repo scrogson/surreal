@@ -1,6 +1,6 @@
 //! Code generation from AST to ToyBEAM bytecode.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::compiler::ast::{
     BinOp, BitEndianness, BitSegmentType, BitSignedness, BitStringSegment, Block, Expr, Function,
@@ -107,6 +107,8 @@ pub struct Codegen {
     pending_jumps: Vec<usize>,
     /// Imported names: local_name → (module, original_name)
     imports: HashMap<String, (String, String)>,
+    /// Impl block methods: (type_name, method_name) for resolving Type::method() calls
+    impl_methods: HashSet<(String, String)>,
 }
 
 impl Codegen {
@@ -120,6 +122,7 @@ impl Codegen {
             regs: RegisterAllocator::new(),
             pending_jumps: Vec::new(),
             imports: HashMap::new(),
+            impl_methods: HashSet::new(),
         }
     }
 
@@ -149,10 +152,21 @@ impl Codegen {
         let mut codegen = Codegen::new();
         codegen.module_name = ast.name.clone();
 
-        // First pass: collect all imports
+        // First pass: collect imports and register impl methods
         for item in &ast.items {
-            if let Item::Use(use_decl) = item {
-                codegen.collect_imports(use_decl);
+            match item {
+                Item::Use(use_decl) => {
+                    codegen.collect_imports(use_decl);
+                }
+                Item::Impl(impl_block) => {
+                    // Register impl methods for Type::method() resolution
+                    for method in &impl_block.methods {
+                        codegen
+                            .impl_methods
+                            .insert((impl_block.type_name.clone(), method.name.clone()));
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -161,6 +175,21 @@ impl Codegen {
             match item {
                 Item::Function(func) => {
                     codegen.compile_function(func)?;
+                }
+                Item::Impl(impl_block) => {
+                    // Compile impl block methods with mangled names: TypeName_methodname
+                    for method in &impl_block.methods {
+                        let mangled_name = format!("{}_{}", impl_block.type_name, method.name);
+                        let mangled_method = Function {
+                            name: mangled_name,
+                            type_params: method.type_params.clone(),
+                            params: method.params.clone(),
+                            return_type: method.return_type.clone(),
+                            body: method.body.clone(),
+                            is_pub: method.is_pub,
+                        };
+                        codegen.compile_function(&mangled_method)?;
+                    }
                 }
                 Item::Struct(_) | Item::Enum(_) => {
                     // Structs and enums don't generate code directly
@@ -258,7 +287,7 @@ impl Codegen {
     /// Check if an expression contains a function call (which could clobber registers).
     fn contains_call(expr: &Expr) -> bool {
         match expr {
-            Expr::Call { .. } | Expr::Spawn(_) | Expr::SpawnClosure(_) => true,
+            Expr::Call { .. } | Expr::Spawn(_) | Expr::SpawnClosure(_) | Expr::Pipe { .. } => true,
             Expr::Binary { left, right, .. } => Self::contains_call(left) || Self::contains_call(right),
             Expr::Unary { expr, .. } => Self::contains_call(expr),
             Expr::If { cond, then_block, else_block } => {
@@ -687,10 +716,17 @@ impl Codegen {
 
             Expr::StructInit { name, fields } => {
                 // Represent as tagged tuple: {:StructName, field1, field2, ...}
+                // Check if the struct name is imported
+                let tag_name = if let Some((module, original_name)) = self.imports.get(name) {
+                    format!("{}_{}", module, original_name)
+                } else {
+                    name.clone()
+                };
+
                 // First push the tag atom
                 let tag_reg = self.regs.alloc();
                 self.emit(Instruction::LoadAtom {
-                    name: name.clone(),
+                    name: tag_name,
                     dest: tag_reg,
                 });
                 self.emit(Instruction::Push {
@@ -802,12 +838,27 @@ impl Codegen {
                     }
                     Expr::Path { segments } => {
                         if segments.len() == 2 {
-                            // Module::function call
-                            self.emit(Instruction::CallMFA {
-                                module: segments[0].clone(),
-                                function: segments[1].clone(),
-                                arity: args.len() as u8,
-                            });
+                            // Check if this is an impl method call: Type::method()
+                            let type_name = &segments[0];
+                            let method_name = &segments[1];
+                            if self
+                                .impl_methods
+                                .contains(&(type_name.clone(), method_name.clone()))
+                            {
+                                // Call the mangled impl method
+                                let mangled_name = format!("{}_{}", type_name, method_name);
+                                self.emit(Instruction::CallLocal {
+                                    function: mangled_name,
+                                    arity: args.len() as u8,
+                                });
+                            } else {
+                                // Module::function call
+                                self.emit(Instruction::CallMFA {
+                                    module: segments[0].clone(),
+                                    function: segments[1].clone(),
+                                    arity: args.len() as u8,
+                                });
+                            }
                         } else {
                             return Err(CodegenError::new("invalid call path"));
                         }
@@ -1124,6 +1175,45 @@ impl Codegen {
 
                 Ok(dest)
             }
+
+            Expr::Pipe { left, right } => {
+                // Transform `left |> right` where right is typically a call expression.
+                // `a |> f(b, c)` becomes `f(a, b, c)`
+                // `a |> f` becomes `f(a)`
+                match right.as_ref() {
+                    Expr::Call { func, args } => {
+                        // Prepend left as first argument
+                        let mut new_args = vec![left.as_ref().clone()];
+                        new_args.extend(args.iter().cloned());
+                        let new_call = Expr::Call {
+                            func: func.clone(),
+                            args: new_args,
+                        };
+                        self.compile_expr(&new_call)
+                    }
+                    Expr::Ident(name) => {
+                        // Bare function: `a |> f` becomes `f(a)`
+                        let new_call = Expr::Call {
+                            func: Box::new(Expr::Ident(name.clone())),
+                            args: vec![left.as_ref().clone()],
+                        };
+                        self.compile_expr(&new_call)
+                    }
+                    Expr::Path { segments } => {
+                        // Path without call: `a |> Module::func` becomes `Module::func(a)`
+                        let new_call = Expr::Call {
+                            func: Box::new(Expr::Path {
+                                segments: segments.clone(),
+                            }),
+                            args: vec![left.as_ref().clone()],
+                        };
+                        self.compile_expr(&new_call)
+                    }
+                    _ => Err(CodegenError::new(
+                        "pipe right-hand side must be a function call or identifier",
+                    )),
+                }
+            }
         }
     }
 
@@ -1182,7 +1272,13 @@ impl Codegen {
 
             AstPattern::Struct { name, fields } => {
                 // Struct pattern becomes tuple pattern: {:Name, field1, field2, ...}
-                let mut vm_patterns = vec![VmPattern::Atom(name.clone())];
+                // Check if the struct name is imported
+                let tag_name = if let Some((module, original_name)) = self.imports.get(name) {
+                    format!("{}_{}", module, original_name)
+                } else {
+                    name.clone()
+                };
+                let mut vm_patterns = vec![VmPattern::Atom(tag_name)];
                 for (_, field_pattern) in fields {
                     vm_patterns.push(self.compile_pattern(field_pattern)?);
                 }

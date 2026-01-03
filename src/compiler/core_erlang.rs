@@ -3,7 +3,7 @@
 //! This module generates Core Erlang source code from the AST,
 //! which can then be compiled to BEAM bytecode using `erlc +from_core`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::compiler::ast::{
     BinOp, BitEndianness, BitSegmentType, BitSignedness, BitStringSegment, Block, Expr, Function,
@@ -46,6 +46,8 @@ pub struct CoreErlangEmitter {
     module_name: String,
     /// Imported names: local_name → (module, original_name)
     imports: HashMap<String, (String, String)>,
+    /// Impl block methods: (type_name, method_name) for resolving Type::method() calls
+    impl_methods: HashSet<(String, String)>,
 }
 
 impl CoreErlangEmitter {
@@ -56,6 +58,7 @@ impl CoreErlangEmitter {
             var_counter: 0,
             module_name: String::new(),
             imports: HashMap::new(),
+            impl_methods: HashSet::new(),
         }
     }
 
@@ -214,32 +217,46 @@ impl CoreErlangEmitter {
     pub fn emit_module(&mut self, module: &Module) -> CoreErlangResult<String> {
         self.module_name = module.name.clone();
 
-        // First pass: collect all imports
+        // First pass: collect imports and register impl methods
         for item in &module.items {
-            if let Item::Use(use_decl) = item {
-                self.collect_imports(use_decl);
+            match item {
+                Item::Use(use_decl) => {
+                    self.collect_imports(use_decl);
+                }
+                Item::Impl(impl_block) => {
+                    // Register impl methods for Type::method() resolution
+                    for method in &impl_block.methods {
+                        self.impl_methods
+                            .insert((impl_block.type_name.clone(), method.name.clone()));
+                    }
+                }
+                _ => {}
             }
         }
 
         // Module header
         self.emit(&format!("module '{}'", module.name));
 
-        // Collect exported functions
-        let exports: Vec<String> = module
-            .items
-            .iter()
-            .filter_map(|item| {
-                if let Item::Function(f) = item {
-                    if f.is_pub {
-                        Some(format!("'{}'/{}", f.name, f.params.len()))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
+        // Collect exported functions (including impl block methods)
+        let mut exports: Vec<String> = Vec::new();
+
+        for item in &module.items {
+            match item {
+                Item::Function(f) if f.is_pub => {
+                    exports.push(format!("'{}'/{}", f.name, f.params.len()));
                 }
-            })
-            .collect();
+                Item::Impl(impl_block) => {
+                    for method in &impl_block.methods {
+                        if method.is_pub {
+                            let mangled_name =
+                                format!("{}_{}", impl_block.type_name, method.name);
+                            exports.push(format!("'{}'/{}", mangled_name, method.params.len()));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
 
         self.emit(" [");
         self.emit(&exports.join(", "));
@@ -249,11 +266,29 @@ impl CoreErlangEmitter {
         self.emit("    attributes []");
         self.newline();
 
-        // Emit each function
+        // Emit each function (including impl block methods)
         for item in &module.items {
-            if let Item::Function(f) = item {
-                self.newline();
-                self.emit_function(f)?;
+            match item {
+                Item::Function(f) => {
+                    self.newline();
+                    self.emit_function(f)?;
+                }
+                Item::Impl(impl_block) => {
+                    for method in &impl_block.methods {
+                        let mangled_name = format!("{}_{}", impl_block.type_name, method.name);
+                        let mangled_method = Function {
+                            name: mangled_name,
+                            type_params: method.type_params.clone(),
+                            params: method.params.clone(),
+                            return_type: method.return_type.clone(),
+                            body: method.body.clone(),
+                            is_pub: method.is_pub,
+                        };
+                        self.newline();
+                        self.emit_function(&mangled_method)?;
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -542,15 +577,30 @@ impl CoreErlangEmitter {
                         }
                     }
                     Expr::Path { segments } if segments.len() == 2 => {
-                        // Module:Function call
-                        self.emit(&format!(
-                            "call '{}':'{}'",
-                            segments[0].to_lowercase(),
-                            segments[1]
-                        ));
-                        self.emit("(");
-                        self.emit_args(args)?;
-                        self.emit(")");
+                        // Check if this is an impl method call: Type::method()
+                        let type_name = &segments[0];
+                        let method_name = &segments[1];
+                        if self
+                            .impl_methods
+                            .contains(&(type_name.clone(), method_name.clone()))
+                        {
+                            // Call the mangled impl method
+                            let mangled_name = format!("{}_{}", type_name, method_name);
+                            self.emit(&format!("apply '{}'/{}", mangled_name, args.len()));
+                            self.emit("(");
+                            self.emit_args(args)?;
+                            self.emit(")");
+                        } else {
+                            // Module:Function call
+                            self.emit(&format!(
+                                "call '{}':'{}'",
+                                segments[0].to_lowercase(),
+                                segments[1]
+                            ));
+                            self.emit("(");
+                            self.emit_args(args)?;
+                            self.emit(")");
+                        }
                     }
                     _ => {
                         // Higher-order function application
@@ -714,13 +764,20 @@ impl CoreErlangEmitter {
                 )));
             }
 
-            Expr::StructInit { name: _, fields } => {
-                // Structs become maps in Erlang
+            Expr::StructInit { name, fields } => {
+                // Structs become maps in Erlang with a __struct__ tag
+                // Check if the struct name is imported
+                let struct_tag = if let Some((module, original_name)) = self.imports.get(name) {
+                    format!("{}_{}", module.to_lowercase(), original_name)
+                } else {
+                    name.clone()
+                };
+
                 self.emit("~{");
-                for (i, (field_name, value)) in fields.iter().enumerate() {
-                    if i > 0 {
-                        self.emit(", ");
-                    }
+                // Add __struct__ tag first
+                self.emit(&format!("'__struct__' => '{}'", struct_tag));
+                for (field_name, value) in fields.iter() {
+                    self.emit(", ");
                     self.emit(&format!("'{}' => ", field_name));
                     self.emit_expr(value)?;
                 }
@@ -762,6 +819,47 @@ impl CoreErlangEmitter {
                         segments[0].to_lowercase(),
                         segments[1]
                     ));
+                }
+            }
+
+            Expr::Pipe { left, right } => {
+                // Transform `left |> right` where right is typically a call expression.
+                // `a |> f(b, c)` becomes `f(a, b, c)`
+                // `a |> f` becomes `f(a)`
+                match right.as_ref() {
+                    Expr::Call { func, args } => {
+                        // Prepend left as first argument
+                        let mut new_args = vec![left.as_ref().clone()];
+                        new_args.extend(args.iter().cloned());
+                        let new_call = Expr::Call {
+                            func: func.clone(),
+                            args: new_args,
+                        };
+                        self.emit_expr(&new_call)?;
+                    }
+                    Expr::Ident(name) => {
+                        // Bare function: `a |> f` becomes `f(a)`
+                        let new_call = Expr::Call {
+                            func: Box::new(Expr::Ident(name.clone())),
+                            args: vec![left.as_ref().clone()],
+                        };
+                        self.emit_expr(&new_call)?;
+                    }
+                    Expr::Path { segments } => {
+                        // Path without call: `a |> Module::func` becomes `Module::func(a)`
+                        let new_call = Expr::Call {
+                            func: Box::new(Expr::Path {
+                                segments: segments.clone(),
+                            }),
+                            args: vec![left.as_ref().clone()],
+                        };
+                        self.emit_expr(&new_call)?;
+                    }
+                    _ => {
+                        return Err(CoreErlangError::new(
+                            "pipe right-hand side must be a function call or identifier",
+                        ));
+                    }
                 }
             }
         }
@@ -1072,13 +1170,20 @@ impl CoreErlangEmitter {
                 self.emit("]");
             }
 
-            Pattern::Struct { name: _, fields } => {
-                // Struct patterns become map patterns
+            Pattern::Struct { name, fields } => {
+                // Struct patterns become map patterns with __struct__ tag
+                // Check if the struct name is imported
+                let struct_tag = if let Some((module, original_name)) = self.imports.get(name) {
+                    format!("{}_{}", module.to_lowercase(), original_name)
+                } else {
+                    name.clone()
+                };
+
                 self.emit("~{");
-                for (i, (field_name, pat)) in fields.iter().enumerate() {
-                    if i > 0 {
-                        self.emit(", ");
-                    }
+                // Match __struct__ tag first
+                self.emit(&format!("'__struct__' := '{}'", struct_tag));
+                for (field_name, pat) in fields.iter() {
+                    self.emit(", ");
                     self.emit(&format!("'{}' := ", field_name));
                     self.emit_pattern(pat)?;
                 }

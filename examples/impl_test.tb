@@ -1,0 +1,48 @@
+// Test impl blocks and pipe operator
+
+struct Point {
+    x: int,
+    y: int,
+}
+
+impl Point {
+    pub fn new(x: int, y: int) -> Point {
+        Point { x: x, y: y }
+    }
+
+    pub fn origin() -> Point {
+        Point::new(0, 0)
+    }
+
+    pub fn add(self, dx: int, dy: int) -> Point {
+        Point { x: self.x + dx, y: self.y + dy }
+    }
+
+    pub fn sum(a: int, b: int) -> int {
+        a + b
+    }
+}
+
+// Test static method calls
+pub fn test_new() -> Point {
+    Point::new(1, 2)
+}
+
+pub fn test_origin() -> Point {
+    Point::origin()
+}
+
+pub fn test_sum() -> int {
+    Point::sum(10, 20)
+}
+
+// Test pipe operator
+pub fn test_pipe() -> Point {
+    Point::origin() |> Point::add(5, 10)
+}
+
+pub fn test_pipe_chain() -> Point {
+    Point::origin()
+        |> Point::add(1, 2)
+        |> Point::add(3, 4)
+}

@@ -32,6 +32,15 @@ pub enum Item {
     ModDecl(ModDecl),
     /// Use declaration: `use foo::bar;`
     Use(UseDecl),
+    /// Impl block: `impl Point { ... }`
+    Impl(ImplBlock),
+}
+
+/// Impl block for associated functions and methods.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImplBlock {
+    pub type_name: String,
+    pub methods: Vec<Function>,
 }
 
 /// External module declaration.
@@ -182,6 +191,8 @@ pub enum Expr {
     SpawnClosure(Block),
     /// Message send: `pid ! message`.
     Send { to: Box<Expr>, msg: Box<Expr> },
+    /// Pipe expression: `expr |> func(args)` transforms to `func(expr, args)`.
+    Pipe { left: Box<Expr>, right: Box<Expr> },
     /// Receive expression.
     Receive {
         arms: Vec<MatchArm>,

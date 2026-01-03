@@ -43,6 +43,8 @@ pub enum Token {
     Use,
     #[token("as")]
     As,
+    #[token("impl")]
+    Impl,
     #[token("true")]
     True,
     #[token("false")]
@@ -109,6 +111,8 @@ pub enum Token {
     Arrow,
     #[token("=>")]
     FatArrow,
+    #[token("|>")]
+    PipeRight,
     #[token("::")]
     ColonColon,
 
@@ -178,6 +182,7 @@ impl std::fmt::Display for Token {
             Token::Return => write!(f, "return"),
             Token::Use => write!(f, "use"),
             Token::As => write!(f, "as"),
+            Token::Impl => write!(f, "impl"),
             Token::True => write!(f, "true"),
             Token::False => write!(f, "false"),
             Token::Int(n) => write!(f, "{}", n),
@@ -204,6 +209,7 @@ impl std::fmt::Display for Token {
             Token::OrOr => write!(f, "||"),
             Token::Arrow => write!(f, "->"),
             Token::FatArrow => write!(f, "=>"),
+            Token::PipeRight => write!(f, "|>"),
             Token::ColonColon => write!(f, "::"),
             Token::Plus => write!(f, "+"),
             Token::Minus => write!(f, "-"),
@@ -316,12 +322,11 @@ mod tests {
     #[test]
     fn test_rust_keywords_are_valid_idents() {
         // This isn't Rust - we can use most Rust keywords as identifiers
-        // (except `use` and `as` which are now keywords in ToyBEAM)
-        let mut lex = Token::lexer("loop while for impl trait type crate super");
+        // (except `use`, `as`, and `impl` which are now keywords in ToyBEAM)
+        let mut lex = Token::lexer("loop while for trait type crate super");
         assert_eq!(lex.next(), Some(Ok(Token::Ident("loop".to_string()))));
         assert_eq!(lex.next(), Some(Ok(Token::Ident("while".to_string()))));
         assert_eq!(lex.next(), Some(Ok(Token::Ident("for".to_string()))));
-        assert_eq!(lex.next(), Some(Ok(Token::Ident("impl".to_string()))));
         assert_eq!(lex.next(), Some(Ok(Token::Ident("trait".to_string()))));
         assert_eq!(lex.next(), Some(Ok(Token::Ident("type".to_string()))));
         assert_eq!(lex.next(), Some(Ok(Token::Ident("crate".to_string()))));

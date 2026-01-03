@@ -62,6 +62,11 @@ impl<'source> Parser<'source> {
             return self.parse_use_decl();
         }
 
+        // Impl blocks don't have pub modifier (methods inside can be pub)
+        if self.check(&Token::Impl) {
+            return self.parse_impl_block();
+        }
+
         let is_pub = self.check(&Token::Pub);
         if is_pub {
             self.advance();
@@ -78,7 +83,7 @@ impl<'source> Parser<'source> {
         } else {
             let span = self.current_span();
             Err(ParseError::new(
-                "expected `fn`, `struct`, `enum`, `mod`, or `use`",
+                "expected `fn`, `struct`, `enum`, `mod`, `impl`, or `use`",
                 span,
             ))
         }
@@ -90,6 +95,39 @@ impl<'source> Parser<'source> {
         let name = self.expect_ident()?;
         self.expect(&Token::Semi)?;
         Ok(Item::ModDecl(ModDecl { name, is_pub }))
+    }
+
+    /// Parse an impl block: `impl Point { fn new() -> Point { ... } }`
+    fn parse_impl_block(&mut self) -> ParseResult<Item> {
+        use crate::compiler::ast::ImplBlock;
+
+        self.expect(&Token::Impl)?;
+
+        // Parse the type name (must be a TypeIdent like Point, not lowercase)
+        let type_name = self.expect_type_ident()?;
+
+        self.expect(&Token::LBrace)?;
+
+        // Parse methods inside the impl block
+        let mut methods = Vec::new();
+        while !self.check(&Token::RBrace) && !self.is_at_end() {
+            // Methods can have pub modifier
+            let is_pub = self.check(&Token::Pub);
+            if is_pub {
+                self.advance();
+            }
+
+            if self.check(&Token::Fn) {
+                methods.push(self.parse_function(is_pub)?);
+            } else {
+                let span = self.current_span();
+                return Err(ParseError::new("expected `fn` in impl block", span));
+            }
+        }
+
+        self.expect(&Token::RBrace)?;
+
+        Ok(Item::Impl(ImplBlock { type_name, methods }))
     }
 
     /// Parse a use declaration: `use foo::bar;` or `use foo::{a, b};` or `use foo::*;`
@@ -188,6 +226,26 @@ impl<'source> Parser<'source> {
 
     /// Parse a function parameter.
     fn parse_param(&mut self) -> ParseResult<Param> {
+        // Special handling for `self` without type annotation
+        if self.check(&Token::SelfKw) {
+            self.advance();
+            let pattern = Pattern::Ident("self".to_string());
+
+            // Optional type annotation for self
+            let ty = if self.check(&Token::Colon) {
+                self.advance();
+                self.parse_type()?
+            } else {
+                // Use `Self` as placeholder type (resolved during codegen)
+                Type::Named {
+                    name: "Self".to_string(),
+                    type_args: vec![],
+                }
+            };
+
+            return Ok(Param { pattern, ty });
+        }
+
         let pattern = self.parse_pattern()?;
         self.expect(&Token::Colon)?;
         let ty = self.parse_type()?;
@@ -351,7 +409,24 @@ impl<'source> Parser<'source> {
 
     /// Parse an expression.
     pub fn parse_expr(&mut self) -> ParseResult<Expr> {
-        self.parse_or_expr()
+        self.parse_pipe_expr()
+    }
+
+    /// Parse pipe expressions: `expr |> func(args)`.
+    /// Pipe has lowest precedence and is left-associative.
+    fn parse_pipe_expr(&mut self) -> ParseResult<Expr> {
+        let mut left = self.parse_or_expr()?;
+
+        while self.check(&Token::PipeRight) {
+            self.advance();
+            let right = self.parse_or_expr()?;
+            left = Expr::Pipe {
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+
+        Ok(left)
     }
 
     /// Parse || expressions.
@@ -619,6 +694,12 @@ impl<'source> Parser<'source> {
             return Ok(Expr::Bool(false));
         }
 
+        // Self keyword as identifier (for impl methods)
+        if self.check(&Token::SelfKw) {
+            self.advance();
+            return Ok(Expr::Ident("self".to_string()));
+        }
+
         // Identifier or type identifier (for struct init or enum)
         if let Some(Token::Ident(name)) = self.peek().cloned() {
             self.advance();
@@ -648,38 +729,54 @@ impl<'source> Parser<'source> {
                 return Ok(Expr::StructInit { name, fields });
             }
 
-            // Check for qualified enum variant: TypeIdent::Variant or TypeIdent::Variant(args)
+            // Check for qualified path: Type::variant or Type::method
             if self.check(&Token::ColonColon) {
                 self.advance();
-                let variant = self.expect_type_ident()?;
 
-                // Check for args: TypeIdent::Variant(args)
-                if self.check(&Token::LParen) {
+                // Could be TypeIdent (enum variant) or Ident (static method)
+                if let Some(Token::TypeIdent(variant)) = self.peek().cloned() {
                     self.advance();
-                    let mut args = Vec::new();
-                    if !self.check(&Token::RParen) {
-                        loop {
-                            args.push(self.parse_expr()?);
-                            if !self.check(&Token::Comma) {
-                                break;
+
+                    // Check for args: TypeIdent::Variant(args)
+                    if self.check(&Token::LParen) {
+                        self.advance();
+                        let mut args = Vec::new();
+                        if !self.check(&Token::RParen) {
+                            loop {
+                                args.push(self.parse_expr()?);
+                                if !self.check(&Token::Comma) {
+                                    break;
+                                }
+                                self.advance();
                             }
-                            self.advance();
                         }
+                        self.expect(&Token::RParen)?;
+                        return Ok(Expr::EnumVariant {
+                            type_name: Some(name),
+                            variant,
+                            args,
+                        });
                     }
-                    self.expect(&Token::RParen)?;
+
+                    // Unit variant: TypeIdent::Variant
                     return Ok(Expr::EnumVariant {
                         type_name: Some(name),
                         variant,
-                        args,
+                        args: vec![],
                     });
+                } else if let Some(Token::Ident(method)) = self.peek().cloned() {
+                    // Static method path: Type::method
+                    self.advance();
+                    return Ok(Expr::Path {
+                        segments: vec![name, method],
+                    });
+                } else {
+                    let span = self.current_span();
+                    return Err(ParseError::new(
+                        "expected identifier or type identifier after `::`",
+                        span,
+                    ));
                 }
-
-                // Unit variant: TypeIdent::Variant
-                return Ok(Expr::EnumVariant {
-                    type_name: Some(name),
-                    variant,
-                    args: vec![],
-                });
             }
 
             // Check for enum variant without type: Variant(args)
@@ -1066,6 +1163,12 @@ impl<'source> Parser<'source> {
         if let Some(Token::Ident(name)) = self.peek().cloned() {
             self.advance();
             return Ok(Pattern::Ident(name));
+        }
+
+        // Self keyword as identifier pattern (for impl methods)
+        if self.check(&Token::SelfKw) {
+            self.advance();
+            return Ok(Pattern::Ident("self".to_string()));
         }
 
         // Type identifier (struct or enum pattern)
@@ -2096,5 +2199,44 @@ mod tests {
         // Should have 10 functions
         assert_eq!(module.items.len(), 10);
         assert_eq!(module.name, "binaries");
+    }
+
+    #[test]
+    fn test_parse_impl_block() {
+        let source = r#"
+            mod test {
+                struct Point {
+                    x: int,
+                    y: int,
+                }
+
+                impl Point {
+                    pub fn new(x: int, y: int) -> Point {
+                        Point { x: x, y: y }
+                    }
+
+                    fn private_method() -> int {
+                        42
+                    }
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().expect("impl block should parse");
+
+        // Should have struct and impl
+        assert_eq!(module.items.len(), 2);
+
+        // Check the impl block
+        if let Item::Impl(impl_block) = &module.items[1] {
+            assert_eq!(impl_block.type_name, "Point");
+            assert_eq!(impl_block.methods.len(), 2);
+            assert_eq!(impl_block.methods[0].name, "new");
+            assert!(impl_block.methods[0].is_pub);
+            assert_eq!(impl_block.methods[1].name, "private_method");
+            assert!(!impl_block.methods[1].is_pub);
+        } else {
+            panic!("expected impl block");
+        }
     }
 }
