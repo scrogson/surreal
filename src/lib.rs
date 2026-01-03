@@ -23,7 +23,10 @@ mod value;
 pub mod wasm;
 
 // Re-export public API
-pub use instruction::{Instruction, Operand, Pattern, Register, Source};
+pub use instruction::{
+    BitSegment, BitType, Endianness, Instruction, Operand, Pattern, Register, SegmentSource,
+    Signedness, Source,
+};
 pub use message::{Message, SystemMsg};
 pub use module::{FunctionDef, Module};
 pub use pid::Pid;

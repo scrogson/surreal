@@ -2,6 +2,136 @@
 
 use crate::Pid;
 
+// ========== Bit Syntax Types ==========
+
+/// Type specifier for a binary segment
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BitType {
+    /// Integer (default)
+    Integer,
+    /// IEEE 754 float (32 or 64 bits)
+    Float,
+    /// Raw binary/bytes
+    Binary,
+    /// UTF-8 encoded codepoint
+    Utf8,
+}
+
+/// Endianness for multi-byte values
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Endianness {
+    /// Big endian (network byte order, default)
+    Big,
+    /// Little endian
+    Little,
+}
+
+/// Signedness for integer values
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Signedness {
+    /// Unsigned (default)
+    Unsigned,
+    /// Signed (two's complement)
+    Signed,
+}
+
+/// A segment specification for binary construction or matching
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BitSegment {
+    /// Type of the segment
+    pub bit_type: BitType,
+    /// Size in bits (None means use default for type or "rest" for binary)
+    pub size: Option<u32>,
+    /// Endianness for multi-byte values
+    pub endianness: Endianness,
+    /// Signedness for integers
+    pub signedness: Signedness,
+}
+
+impl Default for BitSegment {
+    fn default() -> Self {
+        BitSegment {
+            bit_type: BitType::Integer,
+            size: Some(8), // default is 8 bits for integer
+            endianness: Endianness::Big,
+            signedness: Signedness::Unsigned,
+        }
+    }
+}
+
+impl BitSegment {
+    /// Create a default integer segment with specified size in bits
+    pub fn integer(bits: u32) -> Self {
+        BitSegment {
+            bit_type: BitType::Integer,
+            size: Some(bits),
+            endianness: Endianness::Big,
+            signedness: Signedness::Unsigned,
+        }
+    }
+
+    /// Create a binary segment that matches the rest
+    pub fn binary_rest() -> Self {
+        BitSegment {
+            bit_type: BitType::Binary,
+            size: None, // rest of binary
+            endianness: Endianness::Big,
+            signedness: Signedness::Unsigned,
+        }
+    }
+
+    /// Create a binary segment with fixed byte size
+    pub fn binary(bytes: u32) -> Self {
+        BitSegment {
+            bit_type: BitType::Binary,
+            size: Some(bytes * 8),
+            endianness: Endianness::Big,
+            signedness: Signedness::Unsigned,
+        }
+    }
+
+    /// Create a 32-bit float segment
+    pub fn float32() -> Self {
+        BitSegment {
+            bit_type: BitType::Float,
+            size: Some(32),
+            endianness: Endianness::Big,
+            signedness: Signedness::Unsigned,
+        }
+    }
+
+    /// Create a 64-bit float segment
+    pub fn float64() -> Self {
+        BitSegment {
+            bit_type: BitType::Float,
+            size: Some(64),
+            endianness: Endianness::Big,
+            signedness: Signedness::Unsigned,
+        }
+    }
+
+    /// Set endianness to little
+    pub fn little(mut self) -> Self {
+        self.endianness = Endianness::Little;
+        self
+    }
+
+    /// Set signedness to signed
+    pub fn signed(mut self) -> Self {
+        self.signedness = Signedness::Signed;
+        self
+    }
+}
+
+/// Source of a segment value for binary construction
+#[derive(Debug, Clone)]
+pub enum SegmentSource {
+    /// Immediate integer value
+    Int(i64),
+    /// Value from register
+    Reg(Register),
+}
+
 /// Bytecode instructions
 #[derive(Debug, Clone)]
 pub enum Instruction {
@@ -395,6 +525,71 @@ pub enum Instruction {
     /// Convert a binary to a string (assumes UTF-8)
     /// Crashes if binary is not valid UTF-8
     BinaryToString { source: Register, dest: Register },
+
+    // ========== Bit Syntax ==========
+    /// Construct a binary from segments
+    /// Each segment specifies a value, type, size, endianness, and signedness
+    /// Usage: push segment values to stack, then call with segment specs
+    BinaryConstructSegments {
+        /// Segment specifications (in order)
+        segments: Vec<(SegmentSource, BitSegment)>,
+        /// Destination register for the constructed binary
+        dest: Register,
+    },
+
+    /// Start matching a binary - prepares for segment extraction
+    /// Stores match state (current position) internally
+    BinaryMatchStart {
+        /// Source binary to match
+        source: Register,
+    },
+
+    /// Match a segment from the binary at current position
+    /// Advances the match position by the segment size
+    /// Jumps to fail_target if match fails (not enough bytes, etc.)
+    BinaryMatchSegment {
+        /// Segment specification
+        segment: BitSegment,
+        /// Destination register for extracted value
+        dest: Register,
+        /// Jump target if match fails
+        fail_target: usize,
+    },
+
+    /// Get the remaining bytes after matching
+    /// Returns the rest of the binary as a new binary value
+    BinaryMatchRest {
+        /// Destination register for remaining bytes
+        dest: Register,
+    },
+
+    /// Get an integer from a binary at bit offset with specified segment
+    /// For random access bit extraction
+    BinaryGetInteger {
+        /// Source binary
+        bin: Register,
+        /// Bit offset (from start)
+        bit_offset: Register,
+        /// Segment specification
+        segment: BitSegment,
+        /// Destination register
+        dest: Register,
+    },
+
+    /// Put an integer into a binary at bit offset with specified segment
+    /// Creates a new binary with the value inserted
+    BinaryPutInteger {
+        /// Source binary
+        bin: Register,
+        /// Bit offset (from start)
+        bit_offset: Register,
+        /// Value to insert
+        value: Register,
+        /// Segment specification
+        segment: BitSegment,
+        /// Destination register
+        dest: Register,
+    },
 
     // ========== References ==========
     /// Create a new unique reference

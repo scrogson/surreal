@@ -1864,6 +1864,363 @@ impl Scheduler {
                 ExecResult::Continue(1)
             }
 
+            // ========== Bit Syntax ==========
+            Instruction::BinaryConstructSegments { segments, dest } => {
+                let Some(process) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+
+                let mut result = Vec::new();
+
+                for (source, segment) in segments {
+                    let value = match source {
+                        crate::SegmentSource::Int(n) => n,
+                        crate::SegmentSource::Reg(r) => {
+                            match &process.registers[r.0 as usize] {
+                                Value::Int(n) => *n,
+                                Value::Binary(bytes) => {
+                                    // Binary segment: append the bytes directly
+                                    if segment.bit_type == crate::BitType::Binary {
+                                        result.extend_from_slice(bytes);
+                                        continue;
+                                    }
+                                    return ExecResult::Crash;
+                                }
+                                _ => return ExecResult::Crash,
+                            }
+                        }
+                    };
+
+                    match segment.bit_type {
+                        crate::BitType::Integer => {
+                            let size_bits = segment.size.unwrap_or(8);
+                            let size_bytes = (size_bits as usize + 7) / 8;
+
+                            // Convert to bytes based on endianness
+                            let bytes = match segment.endianness {
+                                crate::Endianness::Big => {
+                                    let mut bytes = Vec::with_capacity(size_bytes);
+                                    for i in (0..size_bytes).rev() {
+                                        bytes.push(((value >> (i * 8)) & 0xFF) as u8);
+                                    }
+                                    bytes
+                                }
+                                crate::Endianness::Little => {
+                                    let mut bytes = Vec::with_capacity(size_bytes);
+                                    for i in 0..size_bytes {
+                                        bytes.push(((value >> (i * 8)) & 0xFF) as u8);
+                                    }
+                                    bytes
+                                }
+                            };
+                            result.extend(bytes);
+                        }
+                        crate::BitType::Float => {
+                            let size_bits = segment.size.unwrap_or(64);
+                            let f = value as f64;
+                            if size_bits == 64 {
+                                let bytes = match segment.endianness {
+                                    crate::Endianness::Big => f.to_be_bytes(),
+                                    crate::Endianness::Little => f.to_le_bytes(),
+                                };
+                                result.extend_from_slice(&bytes);
+                            } else if size_bits == 32 {
+                                let f32_val = f as f32;
+                                let bytes = match segment.endianness {
+                                    crate::Endianness::Big => f32_val.to_be_bytes(),
+                                    crate::Endianness::Little => f32_val.to_le_bytes(),
+                                };
+                                result.extend_from_slice(&bytes);
+                            } else {
+                                return ExecResult::Crash;
+                            }
+                        }
+                        crate::BitType::Binary => {
+                            // Already handled above for register source
+                            return ExecResult::Crash;
+                        }
+                        crate::BitType::Utf8 => {
+                            // Encode the integer as a UTF-8 codepoint
+                            if let Some(c) = char::from_u32(value as u32) {
+                                let mut buf = [0u8; 4];
+                                let s = c.encode_utf8(&mut buf);
+                                result.extend_from_slice(s.as_bytes());
+                            } else {
+                                return ExecResult::Crash;
+                            }
+                        }
+                    }
+                }
+
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::Binary(result);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::BinaryMatchStart { source } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Binary(bytes) = &process.registers[source.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let bytes_clone = bytes.clone();
+                process.binary_match_state = Some((bytes_clone, 0));
+                ExecResult::Continue(1)
+            }
+
+            Instruction::BinaryMatchSegment {
+                segment,
+                dest,
+                fail_target,
+            } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+
+                let Some((ref bytes, ref mut bit_pos)) = process.binary_match_state else {
+                    return ExecResult::Jump(fail_target, 1);
+                };
+
+                let size_bits = match segment.size {
+                    Some(s) => s as usize,
+                    None => {
+                        // For binary type with no size, match rest
+                        if segment.bit_type == crate::BitType::Binary {
+                            (bytes.len() * 8).saturating_sub(*bit_pos)
+                        } else {
+                            return ExecResult::Jump(fail_target, 1);
+                        }
+                    }
+                };
+
+                // Check we have enough bits
+                let remaining_bits = bytes.len() * 8 - *bit_pos;
+                if size_bits > remaining_bits {
+                    return ExecResult::Jump(fail_target, 1);
+                }
+
+                // For now, only support byte-aligned access
+                if *bit_pos % 8 != 0 || size_bits % 8 != 0 {
+                    // TODO: implement bit-level access
+                    return ExecResult::Jump(fail_target, 1);
+                }
+
+                let byte_pos = *bit_pos / 8;
+                let size_bytes = size_bits / 8;
+
+                let value = match segment.bit_type {
+                    crate::BitType::Integer => {
+                        let mut n: i64 = 0;
+                        match segment.endianness {
+                            crate::Endianness::Big => {
+                                for i in 0..size_bytes {
+                                    n = (n << 8) | (bytes[byte_pos + i] as i64);
+                                }
+                            }
+                            crate::Endianness::Little => {
+                                for i in (0..size_bytes).rev() {
+                                    n = (n << 8) | (bytes[byte_pos + i] as i64);
+                                }
+                            }
+                        }
+                        // Handle signedness
+                        if segment.signedness == crate::Signedness::Signed && size_bytes < 8 {
+                            let sign_bit = 1i64 << (size_bits - 1);
+                            if n & sign_bit != 0 {
+                                n |= !((1i64 << size_bits) - 1);
+                            }
+                        }
+                        Value::Int(n)
+                    }
+                    crate::BitType::Float => {
+                        if size_bits == 64 {
+                            let mut arr = [0u8; 8];
+                            arr.copy_from_slice(&bytes[byte_pos..byte_pos + 8]);
+                            let f = match segment.endianness {
+                                crate::Endianness::Big => f64::from_be_bytes(arr),
+                                crate::Endianness::Little => f64::from_le_bytes(arr),
+                            };
+                            Value::Float(f)
+                        } else if size_bits == 32 {
+                            let mut arr = [0u8; 4];
+                            arr.copy_from_slice(&bytes[byte_pos..byte_pos + 4]);
+                            let f = match segment.endianness {
+                                crate::Endianness::Big => f32::from_be_bytes(arr) as f64,
+                                crate::Endianness::Little => f32::from_le_bytes(arr) as f64,
+                            };
+                            Value::Float(f)
+                        } else {
+                            return ExecResult::Jump(fail_target, 1);
+                        }
+                    }
+                    crate::BitType::Binary => {
+                        Value::Binary(bytes[byte_pos..byte_pos + size_bytes].to_vec())
+                    }
+                    crate::BitType::Utf8 => {
+                        // Try to decode a UTF-8 codepoint
+                        let slice = &bytes[byte_pos..];
+                        if let Some(c) = std::str::from_utf8(slice).ok().and_then(|s| s.chars().next()) {
+                            let char_len = c.len_utf8();
+                            if char_len <= slice.len() {
+                                // Update size_bits to reflect actual UTF-8 character length
+                                *bit_pos += char_len * 8;
+                                process.registers[dest.0 as usize] = Value::Int(c as i64);
+                                return ExecResult::Continue(1);
+                            }
+                        }
+                        return ExecResult::Jump(fail_target, 1);
+                    }
+                };
+
+                *bit_pos += size_bits;
+                process.registers[dest.0 as usize] = value;
+                ExecResult::Continue(1)
+            }
+
+            Instruction::BinaryMatchRest { dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+
+                let Some((ref bytes, bit_pos)) = process.binary_match_state else {
+                    return ExecResult::Crash;
+                };
+
+                // Only support byte-aligned rest
+                if bit_pos % 8 != 0 {
+                    return ExecResult::Crash;
+                }
+
+                let byte_pos = bit_pos / 8;
+                let rest = bytes[byte_pos..].to_vec();
+                process.registers[dest.0 as usize] = Value::Binary(rest);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::BinaryGetInteger {
+                bin,
+                bit_offset,
+                segment,
+                dest,
+            } => {
+                let Some(process) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+
+                let Value::Binary(bytes) = &process.registers[bin.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let Value::Int(offset) = &process.registers[bit_offset.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+
+                let bit_pos = *offset as usize;
+                let size_bits = segment.size.unwrap_or(8) as usize;
+
+                // Only support byte-aligned access for now
+                if bit_pos % 8 != 0 || size_bits % 8 != 0 {
+                    return ExecResult::Crash;
+                }
+
+                let byte_pos = bit_pos / 8;
+                let size_bytes = size_bits / 8;
+
+                if byte_pos + size_bytes > bytes.len() {
+                    return ExecResult::Crash;
+                }
+
+                let mut n: i64 = 0;
+                match segment.endianness {
+                    crate::Endianness::Big => {
+                        for i in 0..size_bytes {
+                            n = (n << 8) | (bytes[byte_pos + i] as i64);
+                        }
+                    }
+                    crate::Endianness::Little => {
+                        for i in (0..size_bytes).rev() {
+                            n = (n << 8) | (bytes[byte_pos + i] as i64);
+                        }
+                    }
+                }
+
+                // Handle signedness
+                if segment.signedness == crate::Signedness::Signed && size_bytes < 8 {
+                    let sign_bit = 1i64 << (size_bits - 1);
+                    if n & sign_bit != 0 {
+                        n |= !((1i64 << size_bits) - 1);
+                    }
+                }
+
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::Int(n);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::BinaryPutInteger {
+                bin,
+                bit_offset,
+                value,
+                segment,
+                dest,
+            } => {
+                let Some(process) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+
+                let Value::Binary(bytes) = &process.registers[bin.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let Value::Int(offset) = &process.registers[bit_offset.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let Value::Int(val) = &process.registers[value.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+
+                let bit_pos = *offset as usize;
+                let size_bits = segment.size.unwrap_or(8) as usize;
+
+                // Only support byte-aligned access for now
+                if bit_pos % 8 != 0 || size_bits % 8 != 0 {
+                    return ExecResult::Crash;
+                }
+
+                let byte_pos = bit_pos / 8;
+                let size_bytes = size_bits / 8;
+
+                // Create new binary with value inserted
+                let mut new_bytes = bytes.clone();
+
+                // Extend if needed
+                while new_bytes.len() < byte_pos + size_bytes {
+                    new_bytes.push(0);
+                }
+
+                match segment.endianness {
+                    crate::Endianness::Big => {
+                        for i in 0..size_bytes {
+                            new_bytes[byte_pos + i] = ((val >> ((size_bytes - 1 - i) * 8)) & 0xFF) as u8;
+                        }
+                    }
+                    crate::Endianness::Little => {
+                        for i in 0..size_bytes {
+                            new_bytes[byte_pos + i] = ((val >> (i * 8)) & 0xFF) as u8;
+                        }
+                    }
+                }
+
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::Binary(new_bytes);
+                ExecResult::Continue(1)
+            }
+
             // ========== References ==========
             Instruction::MakeRef { dest } => {
                 let ref_id = self.next_ref;
@@ -9487,5 +9844,402 @@ mod tests {
         let process = scheduler.processes.get(&Pid(0)).unwrap();
         assert_eq!(process.registers[2], Value::Int(1)); // i64::MAX < i64::MAX + 1
         assert_eq!(process.registers[3], Value::Int(1)); // i64::MAX + 1 > i64::MAX
+    }
+
+    // ========== Bit Syntax Tests ==========
+
+    #[test]
+    fn test_binary_construct_segments() {
+        let mut scheduler = Scheduler::new();
+
+        // Construct a binary with two 8-bit integers
+        let program = vec![
+            Instruction::BinaryConstructSegments {
+                segments: vec![
+                    (
+                        crate::SegmentSource::Int(0x12),
+                        crate::BitSegment::integer(8),
+                    ),
+                    (
+                        crate::SegmentSource::Int(0x34),
+                        crate::BitSegment::integer(8),
+                    ),
+                ],
+                dest: Register(0),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Binary(vec![0x12, 0x34]));
+    }
+
+    #[test]
+    fn test_binary_construct_16bit_big_endian() {
+        let mut scheduler = Scheduler::new();
+
+        // Construct a binary with a 16-bit big-endian integer
+        let program = vec![
+            Instruction::BinaryConstructSegments {
+                segments: vec![(
+                    crate::SegmentSource::Int(0x1234),
+                    crate::BitSegment::integer(16),
+                )],
+                dest: Register(0),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Binary(vec![0x12, 0x34]));
+    }
+
+    #[test]
+    fn test_binary_construct_16bit_little_endian() {
+        let mut scheduler = Scheduler::new();
+
+        // Construct a binary with a 16-bit little-endian integer
+        let program = vec![
+            Instruction::BinaryConstructSegments {
+                segments: vec![(
+                    crate::SegmentSource::Int(0x1234),
+                    crate::BitSegment::integer(16).little(),
+                )],
+                dest: Register(0),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Binary(vec![0x34, 0x12]));
+    }
+
+    #[test]
+    fn test_binary_construct_with_register() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::LoadInt {
+                value: 0xAB,
+                dest: Register(0),
+            },
+            Instruction::BinaryConstructSegments {
+                segments: vec![
+                    (
+                        crate::SegmentSource::Reg(Register(0)),
+                        crate::BitSegment::integer(8),
+                    ),
+                    (
+                        crate::SegmentSource::Int(0xCD),
+                        crate::BitSegment::integer(8),
+                    ),
+                ],
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Binary(vec![0xAB, 0xCD]));
+    }
+
+    #[test]
+    fn test_binary_match_segments() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create a binary <<0x12, 0x34, 0x56, 0x78>>
+            Instruction::MakeBinary {
+                bytes: vec![0x12, 0x34, 0x56, 0x78],
+                dest: Register(0),
+            },
+            // Start matching
+            Instruction::BinaryMatchStart {
+                source: Register(0),
+            },
+            // Match first 8-bit segment
+            Instruction::BinaryMatchSegment {
+                segment: crate::BitSegment::integer(8),
+                dest: Register(1),
+                fail_target: 100,
+            },
+            // Match second 16-bit segment (big endian)
+            Instruction::BinaryMatchSegment {
+                segment: crate::BitSegment::integer(16),
+                dest: Register(2),
+                fail_target: 100,
+            },
+            // Get the rest
+            Instruction::BinaryMatchRest {
+                dest: Register(3),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(0x12));
+        assert_eq!(process.registers[2], Value::Int(0x3456));
+        assert_eq!(process.registers[3], Value::Binary(vec![0x78]));
+    }
+
+    #[test]
+    fn test_binary_match_little_endian() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::MakeBinary {
+                bytes: vec![0x34, 0x12],
+                dest: Register(0),
+            },
+            Instruction::BinaryMatchStart {
+                source: Register(0),
+            },
+            Instruction::BinaryMatchSegment {
+                segment: crate::BitSegment::integer(16).little(),
+                dest: Register(1),
+                fail_target: 100,
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(0x1234));
+    }
+
+    #[test]
+    fn test_binary_match_signed() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // 0xFF as signed 8-bit is -1
+            Instruction::MakeBinary {
+                bytes: vec![0xFF],
+                dest: Register(0),
+            },
+            Instruction::BinaryMatchStart {
+                source: Register(0),
+            },
+            Instruction::BinaryMatchSegment {
+                segment: crate::BitSegment::integer(8).signed(),
+                dest: Register(1),
+                fail_target: 100,
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(-1));
+    }
+
+    #[test]
+    fn test_binary_match_float64() {
+        let mut scheduler = Scheduler::new();
+
+        // Create binary from f64 bytes (big endian)
+        let f: f64 = 3.14159;
+        let bytes = f.to_be_bytes().to_vec();
+
+        let program = vec![
+            Instruction::MakeBinary {
+                bytes: bytes.clone(),
+                dest: Register(0),
+            },
+            Instruction::BinaryMatchStart {
+                source: Register(0),
+            },
+            Instruction::BinaryMatchSegment {
+                segment: crate::BitSegment::float64(),
+                dest: Register(1),
+                fail_target: 100,
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Float(3.14159));
+    }
+
+    #[test]
+    fn test_binary_match_fail_not_enough_bytes() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::MakeBinary {
+                bytes: vec![0x12],
+                dest: Register(0),
+            },
+            Instruction::BinaryMatchStart {
+                source: Register(0),
+            },
+            // Try to match 16 bits from a 1-byte binary - should fail
+            Instruction::BinaryMatchSegment {
+                segment: crate::BitSegment::integer(16),
+                dest: Register(1),
+                fail_target: 5, // Jump to LoadInt at index 5
+            },
+            Instruction::LoadInt {
+                value: 999, // Should not reach here
+                dest: Register(2),
+            },
+            Instruction::End,
+            // Fail target: index 5
+            Instruction::LoadInt {
+                value: -1, // Match failed indicator
+                dest: Register(2),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[2], Value::Int(-1));
+    }
+
+    #[test]
+    fn test_binary_get_integer() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::MakeBinary {
+                bytes: vec![0x00, 0x12, 0x34, 0x56],
+                dest: Register(0),
+            },
+            Instruction::LoadInt {
+                value: 8, // bit offset
+                dest: Register(1),
+            },
+            Instruction::BinaryGetInteger {
+                bin: Register(0),
+                bit_offset: Register(1),
+                segment: crate::BitSegment::integer(16),
+                dest: Register(2),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[2], Value::Int(0x1234));
+    }
+
+    #[test]
+    fn test_binary_put_integer() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::MakeBinary {
+                bytes: vec![0x00, 0x00, 0x00, 0x00],
+                dest: Register(0),
+            },
+            Instruction::LoadInt {
+                value: 8, // bit offset
+                dest: Register(1),
+            },
+            Instruction::LoadInt {
+                value: 0xABCD, // value to insert
+                dest: Register(2),
+            },
+            Instruction::BinaryPutInteger {
+                bin: Register(0),
+                bit_offset: Register(1),
+                value: Register(2),
+                segment: crate::BitSegment::integer(16),
+                dest: Register(3),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(
+            process.registers[3],
+            Value::Binary(vec![0x00, 0xAB, 0xCD, 0x00])
+        );
+    }
+
+    #[test]
+    fn test_binary_construct_and_match_roundtrip() {
+        let mut scheduler = Scheduler::new();
+
+        // Construct a binary, then match it back
+        let program = vec![
+            // Construct <<0x12:8, 0x3456:16/big, 0x78:8>>
+            Instruction::BinaryConstructSegments {
+                segments: vec![
+                    (
+                        crate::SegmentSource::Int(0x12),
+                        crate::BitSegment::integer(8),
+                    ),
+                    (
+                        crate::SegmentSource::Int(0x3456),
+                        crate::BitSegment::integer(16),
+                    ),
+                    (
+                        crate::SegmentSource::Int(0x78),
+                        crate::BitSegment::integer(8),
+                    ),
+                ],
+                dest: Register(0),
+            },
+            // Now match it back
+            Instruction::BinaryMatchStart {
+                source: Register(0),
+            },
+            Instruction::BinaryMatchSegment {
+                segment: crate::BitSegment::integer(8),
+                dest: Register(1),
+                fail_target: 100,
+            },
+            Instruction::BinaryMatchSegment {
+                segment: crate::BitSegment::integer(16),
+                dest: Register(2),
+                fail_target: 100,
+            },
+            Instruction::BinaryMatchSegment {
+                segment: crate::BitSegment::integer(8),
+                dest: Register(3),
+                fail_target: 100,
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Binary(vec![0x12, 0x34, 0x56, 0x78]));
+        assert_eq!(process.registers[1], Value::Int(0x12));
+        assert_eq!(process.registers[2], Value::Int(0x3456));
+        assert_eq!(process.registers[3], Value::Int(0x78));
     }
 }

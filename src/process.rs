@@ -61,6 +61,8 @@ pub struct Process {
     pub try_stack: Vec<TryFrame>,
     /// Current exception being handled (class, reason, stacktrace)
     pub current_exception: Option<(Value, Value, Vec<String>)>,
+    /// Binary match state: (binary bytes, current bit position)
+    pub binary_match_state: Option<(Vec<u8>, usize)>,
 }
 
 /// Process execution status
@@ -99,6 +101,7 @@ impl Process {
             dictionary: HashMap::new(),
             try_stack: Vec::new(),
             current_exception: None,
+            binary_match_state: None,
         }
     }
 
@@ -124,6 +127,7 @@ impl Process {
             dictionary: HashMap::new(),
             try_stack: Vec::new(),
             current_exception: None,
+            binary_match_state: None,
         }
     }
 }
