@@ -13,12 +13,98 @@ module.exports = grammar({
   ],
 
   rules: {
-    source_file: ($) => $.module,
+    // Source file can be either a wrapped module or items directly (file-based module)
+    source_file: ($) => choice($.module, repeat($._item)),
 
     module: ($) =>
       seq("mod", field("name", $.identifier), "{", repeat($._item), "}"),
 
-    _item: ($) => choice($.function_definition, $.struct_definition, $.enum_definition),
+    _item: ($) =>
+      choice(
+        $.function_definition,
+        $.struct_definition,
+        $.enum_definition,
+        $.mod_declaration,
+        $.use_declaration,
+        $.impl_block,
+        $.trait_definition,
+        $.trait_impl
+      ),
+
+    // Module declaration: `mod foo;`
+    mod_declaration: ($) =>
+      seq(optional($.visibility), "mod", field("name", $.identifier), ";"),
+
+    // Use declaration: `use foo::bar;` or `use foo::{a, b};` or `use foo::*;`
+    use_declaration: ($) => seq("use", $.use_tree, ";"),
+
+    use_tree: ($) =>
+      choice(
+        // Simple path: use foo::bar; or use foo::bar as baz;
+        seq(
+          field("module", $.identifier),
+          "::",
+          field("name", $.identifier),
+          optional(seq("as", field("alias", $.identifier)))
+        ),
+        // Glob import: use foo::*;
+        seq(field("module", $.identifier), "::", "*"),
+        // Group import: use foo::{a, b as c};
+        seq(
+          field("module", $.identifier),
+          "::",
+          "{",
+          commaSep($.use_tree_item),
+          "}"
+        )
+      ),
+
+    use_tree_item: ($) =>
+      seq(
+        field("name", $.identifier),
+        optional(seq("as", field("alias", $.identifier)))
+      ),
+
+    // Impl block: `impl Point { ... }`
+    impl_block: ($) =>
+      seq(
+        "impl",
+        field("type", $.type_identifier),
+        "{",
+        repeat($.function_definition),
+        "}"
+      ),
+
+    // Trait definition: `trait Display { fn display(self) -> String; }`
+    trait_definition: ($) =>
+      seq(
+        "trait",
+        field("name", $.type_identifier),
+        "{",
+        repeat($.trait_method),
+        "}"
+      ),
+
+    trait_method: ($) =>
+      seq(
+        "fn",
+        field("name", $.identifier),
+        $.parameters,
+        optional(seq("->", field("return_type", $._type))),
+        ";"
+      ),
+
+    // Trait implementation: `impl Display for Point { ... }`
+    trait_impl: ($) =>
+      seq(
+        "impl",
+        field("trait", $.type_identifier),
+        "for",
+        field("type", $.type_identifier),
+        "{",
+        repeat($.function_definition),
+        "}"
+      ),
 
     // Function definition
     function_definition: ($) =>
@@ -40,7 +126,17 @@ module.exports = grammar({
 
     parameters: ($) => seq("(", commaSep($.parameter), ")"),
 
-    parameter: ($) => seq(field("pattern", $._pattern), ":", field("type", $._type)),
+    parameter: ($) =>
+      choice(
+        // Self parameter with optional type: `self` or `self: Type`
+        // (must come first as separate alternative to avoid conflict with pattern)
+        $.self_parameter,
+        // Regular parameter: `name: Type`
+        seq(field("pattern", $._pattern), ":", field("type", $._type))
+      ),
+
+    self_parameter: ($) =>
+      seq("self", optional(seq(":", field("type", $._type)))),
 
     // Struct definition
     struct_definition: ($) =>
@@ -93,7 +189,7 @@ module.exports = grammar({
 
     list_type: ($) => seq("[", $._type, "]"),
 
-    primitive_type: ($) => choice("int", "bool", "string", "atom", "pid"),
+    primitive_type: ($) => choice("int", "bool", "string", "atom", "pid", "binary"),
 
     // Statements
     block: ($) => seq("{", repeat($._statement), optional($._expression), "}"),
@@ -117,6 +213,7 @@ module.exports = grammar({
     _expression: ($) =>
       choice(
         $.identifier,
+        $.self_expression,
         $._literal,
         $.binary_expression,
         $.unary_expression,
@@ -136,10 +233,24 @@ module.exports = grammar({
         $.receive_expression,
         $.return_expression,
         $.bitstring_expression,
+        $.pipe_expression,
         $.parenthesized_expression
       ),
 
     parenthesized_expression: ($) => seq("(", $._expression, ")"),
+
+    self_expression: ($) => "self",
+
+    // Pipe expression: `expr |> func(args)`
+    pipe_expression: ($) =>
+      prec.left(
+        0,
+        seq(
+          field("left", $._expression),
+          "|>",
+          field("right", $._expression)
+        )
+      ),
 
     binary_expression: ($) =>
       choice(
@@ -312,13 +423,20 @@ module.exports = grammar({
       seq(
         field("name", $.type_identifier),
         "{",
-        commaSep($.field_pattern),
+        commaSep(choice($.field_pattern, $.shorthand_field_pattern, $.rest_pattern)),
         optional(","),
         "}"
       ),
 
+    // Full field pattern: `x: pattern`
     field_pattern: ($) =>
       seq(field("name", $.identifier), ":", field("pattern", $._pattern)),
+
+    // Shorthand field pattern: just `x` binds field x to variable x
+    shorthand_field_pattern: ($) => field("name", $.identifier),
+
+    // Rest pattern: `..` ignores remaining fields
+    rest_pattern: ($) => "..",
 
     enum_pattern: ($) =>
       seq(

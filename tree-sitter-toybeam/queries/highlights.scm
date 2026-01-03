@@ -15,6 +15,12 @@
   "return"
   "true"
   "false"
+  "use"
+  "as"
+  "impl"
+  "trait"
+  "for"
+  "self"
 ] @keyword
 
 ; Operators
@@ -38,6 +44,7 @@
   "=>"
   "::"
   "|"
+  "|>"
 ] @operator
 
 ; Binary syntax operators
@@ -48,6 +55,9 @@
 
 ; Binary segment specifiers (these are inside segment_specifier node)
 (segment_specifier) @keyword.modifier
+
+; Rest pattern
+(rest_pattern) @punctuation.special
 
 ; Punctuation
 [
@@ -82,6 +92,9 @@
 (function_definition
   name: (identifier) @function)
 
+(trait_method
+  name: (identifier) @function)
+
 (call_expression
   function: (identifier) @function.call)
 
@@ -96,6 +109,10 @@
   pattern: (identifier) @variable)
 
 (identifier) @variable
+
+; Self keyword
+(self_expression) @variable.builtin
+(self_parameter) @variable.builtin
 
 ; Struct and enum names
 (struct_definition
@@ -117,6 +134,19 @@
   type: (type_identifier) @type
   variant: (type_identifier) @constructor)
 
+; Impl blocks
+(impl_block
+  type: (type_identifier) @type)
+
+; Trait definitions
+(trait_definition
+  name: (type_identifier) @type.definition)
+
+; Trait implementations
+(trait_impl
+  trait: (type_identifier) @type
+  type: (type_identifier) @type)
+
 ; Fields
 (field_expression
   field: (identifier) @property)
@@ -130,9 +160,23 @@
 (field_pattern
   name: (identifier) @property)
 
+(shorthand_field_pattern
+  name: (identifier) @property)
+
 ; Module
 (module
   name: (identifier) @module)
+
+(mod_declaration
+  name: (identifier) @module)
+
+; Use declarations
+(use_declaration
+  (use_tree
+    module: (identifier) @module))
+
+(use_tree_item
+  name: (identifier) @variable)
 
 ; Path expressions
 (path_expression
