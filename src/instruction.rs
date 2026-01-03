@@ -288,6 +288,10 @@ pub enum Instruction {
     /// Stores 1 (true) or 0 (false)
     IsString { source: Register, dest: Register },
 
+    /// Check if value is a map
+    /// Stores 1 (true) or 0 (false)
+    IsMap { source: Register, dest: Register },
+
     // ========== Process Dictionary ==========
     /// Store value in process dictionary, returns old value (or None) in dest
     PutDict { key: Register, value: Register, dest: Register },
@@ -300,6 +304,45 @@ pub enum Instruction {
 
     /// Get all keys from process dictionary as a list
     GetDictKeys { dest: Register },
+
+    // ========== Maps ==========
+    /// Create a map from key-value pairs on the stack
+    /// Pops `count` pairs (2*count values: k1, v1, k2, v2, ...) from stack
+    MakeMap { count: u8, dest: Register },
+
+    /// Get value from map by key, crashes if key not found
+    MapGet { map: Register, key: Register, dest: Register },
+
+    /// Get value from map by key, returns default if not found
+    MapGetDefault {
+        map: Register,
+        key: Register,
+        default: Register,
+        dest: Register,
+    },
+
+    /// Insert/update key-value in map, returns new map (maps are immutable)
+    MapPut {
+        map: Register,
+        key: Register,
+        value: Register,
+        dest: Register,
+    },
+
+    /// Remove key from map, returns new map (maps are immutable)
+    MapRemove { map: Register, key: Register, dest: Register },
+
+    /// Check if key exists in map, stores 1 (true) or 0 (false)
+    MapHas { map: Register, key: Register, dest: Register },
+
+    /// Get number of entries in map
+    MapSize { map: Register, dest: Register },
+
+    /// Get all keys from map as a list
+    MapKeys { map: Register, dest: Register },
+
+    /// Get all values from map as a list
+    MapValues { map: Register, dest: Register },
 }
 
 /// An operand for arithmetic/comparison operations
@@ -359,4 +402,8 @@ pub enum Pattern {
         head: Box<Pattern>,
         tail: Box<Pattern>,
     },
+
+    /// Match a map containing specific key-value patterns
+    /// The map may contain additional keys not in the pattern
+    Map(Vec<(Pattern, Pattern)>),
 }

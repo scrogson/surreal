@@ -1401,6 +1401,145 @@ impl Scheduler {
                 process.registers[dest.0 as usize] = Value::List(keys);
                 ExecResult::Continue(1)
             }
+
+            // ========== Maps ==========
+            Instruction::MakeMap { count, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let mut map = std::collections::HashMap::new();
+                // Pop count pairs from stack (in reverse: v, k, v, k, ...)
+                for _ in 0..count {
+                    let Some(value) = process.stack.pop() else {
+                        return ExecResult::Crash;
+                    };
+                    let Some(key) = process.stack.pop() else {
+                        return ExecResult::Crash;
+                    };
+                    map.insert(key, value);
+                }
+                process.registers[dest.0 as usize] = Value::Map(map);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::MapGet { map, key, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Map(m) = &process.registers[map.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let key_val = &process.registers[key.0 as usize];
+                let Some(value) = m.get(key_val) else {
+                    return ExecResult::Crash; // Key not found
+                };
+                let value = value.clone();
+                process.registers[dest.0 as usize] = value;
+                ExecResult::Continue(1)
+            }
+
+            Instruction::MapGetDefault { map, key, default, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Map(m) = &process.registers[map.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let key_val = &process.registers[key.0 as usize];
+                let value = m
+                    .get(key_val)
+                    .cloned()
+                    .unwrap_or_else(|| process.registers[default.0 as usize].clone());
+                process.registers[dest.0 as usize] = value;
+                ExecResult::Continue(1)
+            }
+
+            Instruction::MapPut { map, key, value, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Map(m) = &process.registers[map.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let mut new_map = m.clone();
+                let key_val = process.registers[key.0 as usize].clone();
+                let val = process.registers[value.0 as usize].clone();
+                new_map.insert(key_val, val);
+                process.registers[dest.0 as usize] = Value::Map(new_map);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::MapRemove { map, key, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Map(m) = &process.registers[map.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let mut new_map = m.clone();
+                let key_val = &process.registers[key.0 as usize];
+                new_map.remove(key_val);
+                process.registers[dest.0 as usize] = Value::Map(new_map);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::MapHas { map, key, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Map(m) = &process.registers[map.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let key_val = &process.registers[key.0 as usize];
+                let has = m.contains_key(key_val);
+                process.registers[dest.0 as usize] = Value::Int(if has { 1 } else { 0 });
+                ExecResult::Continue(1)
+            }
+
+            Instruction::MapSize { map, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Map(m) = &process.registers[map.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let size = m.len() as i64;
+                process.registers[dest.0 as usize] = Value::Int(size);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::MapKeys { map, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Map(m) = &process.registers[map.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let keys: Vec<Value> = m.keys().cloned().collect();
+                process.registers[dest.0 as usize] = Value::List(keys);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::MapValues { map, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Map(m) = &process.registers[map.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let values: Vec<Value> = m.values().cloned().collect();
+                process.registers[dest.0 as usize] = Value::List(values);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::IsMap { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let is_map = matches!(process.registers[source.0 as usize], Value::Map(_));
+                process.registers[dest.0 as usize] = Value::Int(if is_map { 1 } else { 0 });
+                ExecResult::Continue(1)
+            }
         }
     }
 
@@ -1567,6 +1706,35 @@ impl Scheduler {
                 // Match tail against rest of list
                 let tail_value = Value::List(elements[1..].to_vec());
                 Self::match_pattern(&tail_value, tail, bindings)
+            }
+
+            Pattern::Map(pairs) => {
+                let Value::Map(map) = value else {
+                    return false;
+                };
+                // For each key-value pattern pair, find matching entry
+                for (key_pattern, value_pattern) in pairs {
+                    // Find a map entry where key matches the key pattern
+                    let mut found = false;
+                    for (k, v) in map.iter() {
+                        let mut key_bindings = Vec::new();
+                        if Self::match_pattern(k, key_pattern, &mut key_bindings) {
+                            // Key matches, now check if value matches
+                            let mut val_bindings = Vec::new();
+                            if Self::match_pattern(v, value_pattern, &mut val_bindings) {
+                                // Both match, add bindings
+                                bindings.extend(key_bindings);
+                                bindings.extend(val_bindings);
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                    if !found {
+                        return false;
+                    }
+                }
+                true
             }
         }
     }
@@ -5620,5 +5788,425 @@ mod tests {
 
         let process = scheduler.processes.get(&Pid(0)).unwrap();
         assert_eq!(process.registers[1], Value::None);
+    }
+
+    // ========== Map Tests ==========
+
+    #[test]
+    fn test_make_map() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Push key1, value1, key2, value2 onto stack
+            Instruction::LoadAtom {
+                name: "a".into(),
+                dest: Register(0),
+            },
+            Instruction::Push {
+                source: Operand::Reg(Register(0)),
+            },
+            Instruction::Push {
+                source: Operand::Int(1),
+            },
+            Instruction::LoadAtom {
+                name: "b".into(),
+                dest: Register(0),
+            },
+            Instruction::Push {
+                source: Operand::Reg(Register(0)),
+            },
+            Instruction::Push {
+                source: Operand::Int(2),
+            },
+            // Make map with 2 pairs
+            Instruction::MakeMap {
+                count: 2,
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        match &process.registers[1] {
+            Value::Map(m) => {
+                assert_eq!(m.len(), 2);
+                assert_eq!(m.get(&Value::Atom("a".into())), Some(&Value::Int(1)));
+                assert_eq!(m.get(&Value::Atom("b".into())), Some(&Value::Int(2)));
+            }
+            other => panic!("Expected Map, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_map_get() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create a map %{:x => 42}
+            Instruction::LoadAtom {
+                name: "x".into(),
+                dest: Register(0),
+            },
+            Instruction::Push {
+                source: Operand::Reg(Register(0)),
+            },
+            Instruction::Push {
+                source: Operand::Int(42),
+            },
+            Instruction::MakeMap {
+                count: 1,
+                dest: Register(1),
+            },
+            // Get value for key :x
+            Instruction::MapGet {
+                map: Register(1),
+                key: Register(0),
+                dest: Register(2),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[2], Value::Int(42));
+    }
+
+    #[test]
+    fn test_map_get_default() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create empty map
+            Instruction::MakeMap {
+                count: 0,
+                dest: Register(0),
+            },
+            // Try to get missing key with default
+            Instruction::LoadAtom {
+                name: "missing".into(),
+                dest: Register(1),
+            },
+            Instruction::LoadInt {
+                value: -1,
+                dest: Register(2),
+            },
+            Instruction::MapGetDefault {
+                map: Register(0),
+                key: Register(1),
+                default: Register(2),
+                dest: Register(3),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[3], Value::Int(-1));
+    }
+
+    #[test]
+    fn test_map_put() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create empty map
+            Instruction::MakeMap {
+                count: 0,
+                dest: Register(0),
+            },
+            // Put :key => 100
+            Instruction::LoadAtom {
+                name: "key".into(),
+                dest: Register(1),
+            },
+            Instruction::LoadInt {
+                value: 100,
+                dest: Register(2),
+            },
+            Instruction::MapPut {
+                map: Register(0),
+                key: Register(1),
+                value: Register(2),
+                dest: Register(3),
+            },
+            // Get value back
+            Instruction::MapGet {
+                map: Register(3),
+                key: Register(1),
+                dest: Register(4),
+            },
+            // Original map should be unchanged (size 0)
+            Instruction::MapSize {
+                map: Register(0),
+                dest: Register(5),
+            },
+            // New map should have size 1
+            Instruction::MapSize {
+                map: Register(3),
+                dest: Register(6),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[4], Value::Int(100));
+        assert_eq!(process.registers[5], Value::Int(0)); // Original unchanged
+        assert_eq!(process.registers[6], Value::Int(1)); // New has 1 entry
+    }
+
+    #[test]
+    fn test_map_remove() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create map with one entry
+            Instruction::LoadAtom {
+                name: "rem".into(),
+                dest: Register(0),
+            },
+            Instruction::Push {
+                source: Operand::Reg(Register(0)),
+            },
+            Instruction::Push {
+                source: Operand::Int(999),
+            },
+            Instruction::MakeMap {
+                count: 1,
+                dest: Register(1),
+            },
+            // Remove the key
+            Instruction::MapRemove {
+                map: Register(1),
+                key: Register(0),
+                dest: Register(2),
+            },
+            // Check sizes
+            Instruction::MapSize {
+                map: Register(1),
+                dest: Register(3),
+            },
+            Instruction::MapSize {
+                map: Register(2),
+                dest: Register(4),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[3], Value::Int(1)); // Original has 1
+        assert_eq!(process.registers[4], Value::Int(0)); // After remove has 0
+    }
+
+    #[test]
+    fn test_map_has() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create map %{:exists => 1}
+            Instruction::LoadAtom {
+                name: "exists".into(),
+                dest: Register(0),
+            },
+            Instruction::Push {
+                source: Operand::Reg(Register(0)),
+            },
+            Instruction::Push {
+                source: Operand::Int(1),
+            },
+            Instruction::MakeMap {
+                count: 1,
+                dest: Register(1),
+            },
+            // Check if :exists is in map
+            Instruction::MapHas {
+                map: Register(1),
+                key: Register(0),
+                dest: Register(2),
+            },
+            // Check if :missing is in map
+            Instruction::LoadAtom {
+                name: "missing".into(),
+                dest: Register(3),
+            },
+            Instruction::MapHas {
+                map: Register(1),
+                key: Register(3),
+                dest: Register(4),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[2], Value::Int(1)); // :exists is present
+        assert_eq!(process.registers[4], Value::Int(0)); // :missing is not
+    }
+
+    #[test]
+    fn test_map_keys_values() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create map %{:a => 1, :b => 2}
+            Instruction::LoadAtom {
+                name: "a".into(),
+                dest: Register(0),
+            },
+            Instruction::Push {
+                source: Operand::Reg(Register(0)),
+            },
+            Instruction::Push {
+                source: Operand::Int(1),
+            },
+            Instruction::LoadAtom {
+                name: "b".into(),
+                dest: Register(0),
+            },
+            Instruction::Push {
+                source: Operand::Reg(Register(0)),
+            },
+            Instruction::Push {
+                source: Operand::Int(2),
+            },
+            Instruction::MakeMap {
+                count: 2,
+                dest: Register(1),
+            },
+            // Get keys and values
+            Instruction::MapKeys {
+                map: Register(1),
+                dest: Register(2),
+            },
+            Instruction::MapValues {
+                map: Register(1),
+                dest: Register(3),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        match &process.registers[2] {
+            Value::List(keys) => {
+                assert_eq!(keys.len(), 2);
+                assert!(keys.contains(&Value::Atom("a".into())));
+                assert!(keys.contains(&Value::Atom("b".into())));
+            }
+            other => panic!("Expected List, got {:?}", other),
+        }
+        match &process.registers[3] {
+            Value::List(vals) => {
+                assert_eq!(vals.len(), 2);
+                assert!(vals.contains(&Value::Int(1)));
+                assert!(vals.contains(&Value::Int(2)));
+            }
+            other => panic!("Expected List, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_is_map() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create a map
+            Instruction::MakeMap {
+                count: 0,
+                dest: Register(0),
+            },
+            // Check is_map on map
+            Instruction::IsMap {
+                source: Register(0),
+                dest: Register(1),
+            },
+            // Check is_map on non-map
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(2),
+            },
+            Instruction::IsMap {
+                source: Register(2),
+                dest: Register(3),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(1)); // map is a map
+        assert_eq!(process.registers[3], Value::Int(0)); // int is not a map
+    }
+
+    #[test]
+    fn test_map_pattern_matching() {
+        let mut scheduler = Scheduler::new();
+
+        // Create a map and match it with a pattern
+        let program = vec![
+            // Create map %{:name => "Alice", :age => 30}
+            Instruction::LoadAtom {
+                name: "name".into(),
+                dest: Register(0),
+            },
+            Instruction::Push {
+                source: Operand::Reg(Register(0)),
+            },
+            Instruction::LoadAtom {
+                name: "Alice".into(),
+                dest: Register(0),
+            },
+            Instruction::Push {
+                source: Operand::Reg(Register(0)),
+            },
+            Instruction::LoadAtom {
+                name: "age".into(),
+                dest: Register(0),
+            },
+            Instruction::Push {
+                source: Operand::Reg(Register(0)),
+            },
+            Instruction::Push {
+                source: Operand::Int(30),
+            },
+            Instruction::MakeMap {
+                count: 2,
+                dest: Register(1),
+            },
+            // Match against pattern %{:age => age_val}
+            Instruction::Match {
+                source: Register(1),
+                pattern: Pattern::Map(vec![(
+                    Pattern::Atom("age".into()),
+                    Pattern::Variable(Register(2)),
+                )]),
+                fail_target: 100, // Should not fail
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[2], Value::Int(30));
     }
 }

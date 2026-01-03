@@ -1,5 +1,6 @@
 //! Runtime values stored in registers.
 
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use crate::Pid;
@@ -19,6 +20,8 @@ pub enum Value {
     Tuple(Vec<Value>),
     /// List - variable-size linked list of values
     List(Vec<Value>),
+    /// Map - key-value hash table (immutable, functional updates)
+    Map(HashMap<Value, Value>),
     /// Function reference (module:function/arity)
     Fun {
         module: String,
@@ -73,6 +76,16 @@ impl std::fmt::Debug for Value {
                 }
                 write!(f, "]")
             }
+            Value::Map(entries) => {
+                write!(f, "%{{")?;
+                for (i, (k, v)) in entries.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{:?} => {:?}", k, v)?;
+                }
+                write!(f, "}}")
+            }
             Value::Fun {
                 module,
                 function,
@@ -111,6 +124,23 @@ impl Hash for Value {
                 elems.len().hash(state);
                 for elem in elems {
                     elem.hash(state);
+                }
+            }
+            Value::Map(entries) => {
+                // Hash map entries in a deterministic order
+                // by collecting and sorting by key hash
+                entries.len().hash(state);
+                let mut pairs: Vec<_> = entries.iter().collect();
+                pairs.sort_by(|a, b| {
+                    let mut ha = std::collections::hash_map::DefaultHasher::new();
+                    let mut hb = std::collections::hash_map::DefaultHasher::new();
+                    a.0.hash(&mut ha);
+                    b.0.hash(&mut hb);
+                    ha.finish().cmp(&hb.finish())
+                });
+                for (k, v) in pairs {
+                    k.hash(state);
+                    v.hash(state);
                 }
             }
             Value::Fun {

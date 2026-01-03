@@ -131,6 +131,13 @@ fn format_value(value: &Value) -> String {
             let inner: Vec<String> = elems.iter().map(format_value).collect();
             format!("[{}]", inner.join(", "))
         }
+        Value::Map(entries) => {
+            let inner: Vec<String> = entries
+                .iter()
+                .map(|(k, v)| format!("{} => {}", format_value(k), format_value(v)))
+                .collect();
+            format!("%{{{}}}", inner.join(", "))
+        }
         Value::Fun { module, function, arity } => {
             format!("&{}:{}/{}", module, function, arity)
         }
