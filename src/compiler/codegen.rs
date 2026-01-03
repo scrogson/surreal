@@ -1518,12 +1518,25 @@ impl Default for Codegen {
 }
 
 /// Convenience function to compile source code to a VM module.
+/// Expects source with `mod name { ... }` wrapper.
 pub fn compile(source: &str) -> CodegenResult<Module> {
     use crate::compiler::Parser;
 
     let mut parser = Parser::new(source);
     let ast = parser
         .parse_module()
+        .map_err(|e| CodegenError::new(e.to_string()))?;
+
+    Codegen::compile_module(&ast)
+}
+
+/// Compile a file-based module (no `mod { }` wrapper needed).
+pub fn compile_file(source: &str, module_name: &str) -> CodegenResult<Module> {
+    use crate::compiler::Parser;
+
+    let mut parser = Parser::new(source);
+    let ast = parser
+        .parse_file(module_name)
         .map_err(|e| CodegenError::new(e.to_string()))?;
 
     Codegen::compile_module(&ast)

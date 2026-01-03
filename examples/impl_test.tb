@@ -46,3 +46,8 @@ pub fn test_pipe_chain() -> Point {
         |> Point::add(1, 2)
         |> Point::add(3, 4)
 }
+
+// Simple main for VM testing (no field access)
+pub fn main() -> int {
+    Point::sum(10, 20)
+}

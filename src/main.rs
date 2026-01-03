@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use toybeam::{
-    compiler::{compile, CoreErlangEmitter, ModuleLoader},
+    compiler::{compile_file, CoreErlangEmitter, ModuleLoader},
     Instruction, Register, Scheduler, StepResult, Value,
 };
 
@@ -104,6 +104,14 @@ fn compile_to_core_erlang(filename: &str) -> ExitCode {
 
 fn run_program(args: &[String]) -> ExitCode {
     let filename = &args[1];
+    let path = Path::new(filename);
+
+    // Derive module name from filename
+    let module_name = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown")
+        .to_string();
 
     // Read source file
     let source = match fs::read_to_string(filename) {
@@ -115,7 +123,7 @@ fn run_program(args: &[String]) -> ExitCode {
     };
 
     // Compile
-    let module = match compile(&source) {
+    let module = match compile_file(&source, &module_name) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("Compile error: {}", e);

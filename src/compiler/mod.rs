@@ -13,7 +13,7 @@ mod parser;
 mod token;
 
 pub use ast::*;
-pub use codegen::{compile, Codegen, CodegenError, CodegenResult};
+pub use codegen::{compile, compile_file, Codegen, CodegenError, CodegenResult};
 pub use core_erlang::{emit_core_erlang, CoreErlangEmitter, CoreErlangError};
 pub use error::{ParseError, ParseResult};
 pub use lexer::Lexer;
