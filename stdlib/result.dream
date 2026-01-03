@@ -41,14 +41,6 @@ pub fn unwrap_or<T, E>(res: Result<T, E>, default: T) -> T {
     }
 }
 
-/// Unwrap the result, calling a function to produce a default if Err.
-pub fn unwrap_or_else<T, E>(res: Result<T, E>, f: Fn) -> T {
-    match res {
-        Ok(x) => x,
-        Err(e) => f(e),
-    }
-}
-
 /// Unwrap the error value.
 /// Panics if the result is Ok.
 pub fn unwrap_err<T, E>(res: Result<T, E>) -> E {
@@ -58,51 +50,11 @@ pub fn unwrap_err<T, E>(res: Result<T, E>) -> E {
     }
 }
 
-/// Map a function over the Ok value.
-pub fn map<T, U, E>(res: Result<T, E>, f: Fn) -> Result<U, E> {
-    match res {
-        Ok(x) => Ok(f(x)),
-        Err(e) => Err(e),
-    }
-}
-
-/// Map a function over the Err value.
-pub fn map_err<T, E, F>(res: Result<T, E>, f: Fn) -> Result<T, F> {
-    match res {
-        Ok(x) => Ok(x),
-        Err(e) => Err(f(e)),
-    }
-}
-
-/// Map a function over the Ok value, returning a default if Err.
-pub fn map_or<T, U, E>(res: Result<T, E>, default: U, f: Fn) -> U {
-    match res {
-        Ok(x) => f(x),
-        Err(_) => default,
-    }
-}
-
-/// Apply a function that returns a Result to the Ok value.
-pub fn and_then<T, U, E>(res: Result<T, E>, f: Fn) -> Result<U, E> {
-    match res {
-        Ok(x) => f(x),
-        Err(e) => Err(e),
-    }
-}
-
 /// Return the result if Ok, otherwise return the other result.
 pub fn or<T, E, F>(res: Result<T, E>, other: Result<T, F>) -> Result<T, F> {
     match res {
         Ok(x) => Ok(x),
         Err(_) => other,
-    }
-}
-
-/// Return the result if Ok, otherwise call the function.
-pub fn or_else<T, E, F>(res: Result<T, E>, f: Fn) -> Result<T, F> {
-    match res {
-        Ok(x) => Ok(x),
-        Err(e) => f(e),
     }
 }
 

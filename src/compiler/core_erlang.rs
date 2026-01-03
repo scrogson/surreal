@@ -673,7 +673,12 @@ impl CoreErlangEmitter {
             }
 
             Expr::Ident(name) => {
-                self.emit(&Self::var_name(name));
+                // Handle `self` as a BIF call to erlang:self()
+                if name == "self" {
+                    self.emit("call 'erlang':'self'()");
+                } else {
+                    self.emit(&Self::var_name(name));
+                }
             }
 
             Expr::Unit => {

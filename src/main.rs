@@ -272,8 +272,96 @@ fn compile_and_emit(entry_file: &Path, build_dir: &Path, target: &str) -> ExitCo
     ExitCode::SUCCESS
 }
 
+/// Find the stdlib directory relative to the executable or current directory.
+fn find_stdlib_dir() -> Option<PathBuf> {
+    // Try relative to executable first
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            // Check ../stdlib (for target/debug/dream -> stdlib/)
+            let stdlib = exe_dir.join("../../stdlib");
+            if stdlib.exists() {
+                return Some(stdlib.canonicalize().unwrap_or(stdlib));
+            }
+            // Check alongside executable
+            let stdlib = exe_dir.join("stdlib");
+            if stdlib.exists() {
+                return Some(stdlib);
+            }
+        }
+    }
+
+    // Try current directory
+    let stdlib = PathBuf::from("stdlib");
+    if stdlib.exists() {
+        return Some(stdlib.canonicalize().unwrap_or(stdlib));
+    }
+
+    None
+}
+
+/// Get the stdlib output directory.
+fn stdlib_beam_dir() -> PathBuf {
+    // Use target/stdlib for compiled stdlib .beam files
+    PathBuf::from("target/stdlib")
+}
+
+/// Compile the stdlib to target/stdlib/ if needed.
+fn compile_stdlib() -> Result<PathBuf, String> {
+    let stdlib_dir = find_stdlib_dir().ok_or("Could not find stdlib directory")?;
+    let output_dir = stdlib_beam_dir();
+
+    // Create output directory
+    fs::create_dir_all(&output_dir)
+        .map_err(|e| format!("Failed to create stdlib output directory: {}", e))?;
+
+    // Find all .dream files in stdlib
+    let entries = fs::read_dir(&stdlib_dir)
+        .map_err(|e| format!("Failed to read stdlib directory: {}", e))?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) == Some("dream") {
+            // Check if .beam file exists and is newer than source
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            let beam_name = CoreErlangEmitter::beam_module_name(stem);
+            let beam_file = output_dir.join(format!("{}.beam", beam_name));
+
+            let needs_compile = if beam_file.exists() {
+                // Check if source is newer than beam
+                let src_modified = path.metadata().and_then(|m| m.modified()).ok();
+                let beam_modified = beam_file.metadata().and_then(|m| m.modified()).ok();
+                match (src_modified, beam_modified) {
+                    (Some(src), Some(beam)) => src > beam,
+                    _ => true,
+                }
+            } else {
+                true
+            };
+
+            if needs_compile {
+                let result = compile_and_emit(&path, &output_dir, "beam");
+                if result != ExitCode::SUCCESS {
+                    // Log warning but continue with other modules
+                    eprintln!("Warning: Failed to compile stdlib module: {}", path.display());
+                }
+            }
+        }
+    }
+
+    Ok(output_dir)
+}
+
 /// Build and run the project or a standalone file.
 fn cmd_run(file: Option<&Path>, function: &str, args: &[String]) -> ExitCode {
+    // Compile stdlib first
+    let stdlib_dir = match compile_stdlib() {
+        Ok(dir) => Some(dir),
+        Err(e) => {
+            eprintln!("Warning: {}", e);
+            None
+        }
+    };
+
     // Determine beam directory and module name based on mode
     let (beam_dir, module_name) = if let Some(source_file) = file {
         // Standalone file mode
@@ -336,13 +424,17 @@ fn cmd_run(file: Option<&Path>, function: &str, args: &[String]) -> ExitCode {
         module_name, function, args_str
     );
 
-    let status = Command::new("erl")
-        .arg("-pa")
-        .arg(&beam_dir)
-        .arg("-noshell")
-        .arg("-eval")
-        .arg(&eval_expr)
-        .status();
+    let mut cmd = Command::new("erl");
+    cmd.arg("-pa").arg(&beam_dir);
+
+    // Add stdlib to code path if available
+    if let Some(ref stdlib) = stdlib_dir {
+        cmd.arg("-pa").arg(stdlib);
+    }
+
+    cmd.arg("-noshell").arg("-eval").arg(&eval_expr);
+
+    let status = cmd.status();
 
     match status {
         Ok(s) if s.success() => ExitCode::SUCCESS,

@@ -41,65 +41,11 @@ pub fn unwrap_or<T>(opt: Option<T>, default: T) -> T {
     }
 }
 
-/// Unwrap the option, calling a function to produce a default if None.
-pub fn unwrap_or_else<T>(opt: Option<T>, f: Fn) -> T {
-    match opt {
-        Some(x) => x,
-        None => f(),
-    }
-}
-
-/// Map a function over the contained value.
-pub fn map<T, U>(opt: Option<T>, f: Fn) -> Option<U> {
-    match opt {
-        Some(x) => Some(f(x)),
-        None => None,
-    }
-}
-
-/// Map a function over the contained value, returning a default if None.
-pub fn map_or<T, U>(opt: Option<T>, default: U, f: Fn) -> U {
-    match opt {
-        Some(x) => f(x),
-        None => default,
-    }
-}
-
-/// Apply a function that returns an Option to the contained value.
-pub fn and_then<T, U>(opt: Option<T>, f: Fn) -> Option<U> {
-    match opt {
-        Some(x) => f(x),
-        None => None,
-    }
-}
-
 /// Return the option if it contains a value, otherwise return the other option.
 pub fn or<T>(opt: Option<T>, other: Option<T>) -> Option<T> {
     match opt {
         Some(x) => Some(x),
         None => other,
-    }
-}
-
-/// Return the option if it contains a value, otherwise call the function.
-pub fn or_else<T>(opt: Option<T>, f: Fn) -> Option<T> {
-    match opt {
-        Some(x) => Some(x),
-        None => f(),
-    }
-}
-
-/// Filter the option based on a predicate.
-pub fn filter<T>(opt: Option<T>, predicate: Fn) -> Option<T> {
-    match opt {
-        Some(x) => {
-            if predicate(x) {
-                Some(x)
-            } else {
-                None
-            }
-        }
-        None => None,
     }
 }
 
