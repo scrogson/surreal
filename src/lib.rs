@@ -1,7 +1,8 @@
-//! Dream - A BEAM virtual machine in Rust.
+//! Dream - A programming language with Rust-like syntax and Erlang-style concurrency.
 //!
-//! This is a lightweight BEAM-inspired VM that can compile to WebAssembly.
-//! It implements core BEAM primitives:
+//! Dream compiles to Core Erlang for BEAM execution or to bytecode for the Dream VM.
+//!
+//! ## Features
 //! - Process spawning with parent tracking
 //! - Message passing between processes
 //! - Process links (bidirectional crash notification)
@@ -11,6 +12,7 @@
 //! - Cooperative scheduling with reduction budgets
 
 pub mod compiler;
+pub mod config;
 mod instruction;
 mod message;
 mod module;

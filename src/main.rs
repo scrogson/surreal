@@ -1,73 +1,166 @@
-//! Dream CLI - Run Dream programs.
+//! Dream CLI - Build and run Dream programs.
 
-use std::env;
 use std::fs;
-use std::path::Path;
-use std::process::ExitCode;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitCode};
+
+use clap::{Parser, Subcommand};
 
 use dream::{
-    compiler::{compile_file, CoreErlangEmitter, ModuleLoader},
-    Instruction, Register, Scheduler, StepResult, Value,
+    compiler::{CoreErlangEmitter, ModuleLoader},
+    config::{generate_dream_toml, generate_main_dream, ProjectConfig},
 };
 
-fn main() -> ExitCode {
-    let args: Vec<String> = env::args().collect();
+#[derive(Parser)]
+#[command(name = "dream")]
+#[command(author, version, about = "Dream programming language", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
 
-    if args.len() < 2 {
-        print_usage();
+#[derive(Subcommand)]
+enum Commands {
+    /// Create a new Dream project
+    New {
+        /// Name of the project
+        name: String,
+    },
+    /// Build the project
+    Build {
+        /// Target: beam, core, or vm
+        #[arg(long, short, default_value = "beam")]
+        target: String,
+        /// Output directory
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+    },
+    /// Compile the project (alias for build)
+    Compile {
+        /// Target: beam, core, or vm
+        #[arg(long, short, default_value = "beam")]
+        target: String,
+        /// Output directory
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+    },
+    /// Build and run the project
+    Run {
+        /// Module to run (default: project name)
+        #[arg(short, long)]
+        module: Option<String>,
+        /// Function to call (default: main)
+        #[arg(short, long, default_value = "main")]
+        function: String,
+        /// Arguments to pass to the function
+        args: Vec<String>,
+    },
+    /// Show version information
+    Version,
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::New { name } => cmd_new(&name),
+        Commands::Build { target, output } | Commands::Compile { target, output } => {
+            cmd_build(&target, output.as_deref())
+        }
+        Commands::Run {
+            module,
+            function,
+            args,
+        } => cmd_run(module.as_deref(), &function, &args),
+        Commands::Version => {
+            println!("dream {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
+    }
+}
+
+/// Create a new Dream project.
+fn cmd_new(name: &str) -> ExitCode {
+    let project_dir = Path::new(name);
+
+    if project_dir.exists() {
+        eprintln!("Error: directory '{}' already exists", name);
         return ExitCode::from(1);
     }
 
-    // Check for --target flag
-    if args.len() >= 3 && args[1] == "--target" {
-        let target = &args[2];
-        if target == "beam" || target == "core" {
-            if args.len() < 4 {
-                eprintln!("Error: missing source file");
-                eprintln!("Usage: dream --target beam <file.dream>");
-                return ExitCode::from(1);
-            }
-            return compile_to_core_erlang(&args[3]);
-        } else {
-            eprintln!("Error: unknown target '{}'", target);
-            eprintln!("Available targets: beam, core");
-            return ExitCode::from(1);
-        }
+    // Create directory structure
+    let src_dir = project_dir.join("src");
+    if let Err(e) = fs::create_dir_all(&src_dir) {
+        eprintln!("Error creating directories: {}", e);
+        return ExitCode::from(1);
     }
 
-    // Normal execution mode
-    run_program(&args)
+    // Write dream.toml
+    let toml_path = project_dir.join("dream.toml");
+    if let Err(e) = fs::write(&toml_path, generate_dream_toml(name)) {
+        eprintln!("Error writing dream.toml: {}", e);
+        return ExitCode::from(1);
+    }
+
+    // Write src/main.dream
+    let main_path = src_dir.join("main.dream");
+    if let Err(e) = fs::write(&main_path, generate_main_dream(name)) {
+        eprintln!("Error writing main.dream: {}", e);
+        return ExitCode::from(1);
+    }
+
+    println!("Created project '{}'", name);
+    println!();
+    println!("  cd {}", name);
+    println!("  dream build");
+    println!("  dream run");
+
+    ExitCode::SUCCESS
 }
 
-fn print_usage() {
-    eprintln!("Usage: dream <file.dream> [function] [args...]");
-    eprintln!("       dream --target beam <file.dream>");
-    eprintln!();
-    eprintln!("Targets:");
-    eprintln!("  beam, core  Emit Core Erlang (.core file) for BEAM compilation");
-    eprintln!();
-    eprintln!("Examples:");
-    eprintln!("  dream examples/hello.dream              # Run main/0");
-    eprintln!("  dream examples/math.dream factorial 5   # Run factorial(5)");
-    eprintln!("  dream --target beam examples/math.dream # Emit math.core");
-}
-
-fn compile_to_core_erlang(filename: &str) -> ExitCode {
-    let input_path = Path::new(filename);
-
-    // Use ModuleLoader for multi-file projects
-    let mut loader = ModuleLoader::new();
-    let main_module = match loader.load_project(input_path) {
-        Ok(m) => m,
+/// Build the project.
+fn cmd_build(target: &str, output: Option<&Path>) -> ExitCode {
+    // Find project root and load config
+    let (project_root, config) = match ProjectConfig::from_project_root() {
+        Ok(result) => result,
         Err(e) => {
             eprintln!("Error: {}", e);
             return ExitCode::from(1);
         }
     };
 
-    // Emit Core Erlang for all loaded modules
-    let mut output_files = Vec::new();
+    let src_dir = config.src_dir(&project_root);
+    let build_dir = output
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| config.beam_dir(&project_root));
 
+    // Create build directory
+    if let Err(e) = fs::create_dir_all(&build_dir) {
+        eprintln!("Error creating build directory: {}", e);
+        return ExitCode::from(1);
+    }
+
+    println!("Compiling {}...", config.package.name);
+
+    // Find entry point
+    let entry_file = find_entry_file(&src_dir);
+    let entry_file = match entry_file {
+        Some(f) => f,
+        None => {
+            eprintln!("Error: no main.dream or lib.dream found in {}", src_dir.display());
+            return ExitCode::from(1);
+        }
+    };
+
+    // Load modules
+    let mut loader = ModuleLoader::new();
+    if let Err(e) = loader.load_project(&entry_file) {
+        eprintln!("Error loading project: {}", e);
+        return ExitCode::from(1);
+    }
+
+    // Compile each module to Core Erlang
+    let mut core_files = Vec::new();
     for module in loader.modules() {
         let mut emitter = CoreErlangEmitter::new();
         let core_erlang = match emitter.emit_module(module) {
@@ -78,181 +171,144 @@ fn compile_to_core_erlang(filename: &str) -> ExitCode {
             }
         };
 
-        let output_filename = format!("{}.core", module.name);
-        match fs::write(&output_filename, &core_erlang) {
-            Ok(_) => {
-                println!("Wrote {}", output_filename);
-                output_files.push(output_filename);
-            }
-            Err(e) => {
-                eprintln!("Error writing {}.core: {}", module.name, e);
-                return ExitCode::from(1);
-            }
+        let core_file = build_dir.join(format!("{}.core", module.name));
+        if let Err(e) = fs::write(&core_file, &core_erlang) {
+            eprintln!("Error writing {}: {}", core_file.display(), e);
+            return ExitCode::from(1);
         }
+
+        println!("  Compiled {}.core", module.name);
+        core_files.push(core_file);
     }
 
-    if !output_files.is_empty() {
+    // If target is "core", we're done
+    if target == "core" {
         println!();
-        println!("To compile to BEAM:");
-        println!("  erlc +from_core {}", output_files.join(" "));
+        println!("Build complete. Core Erlang files in {}", build_dir.display());
+        return ExitCode::SUCCESS;
     }
 
-    // Return the main module name for reference
-    let _ = main_module;
-    ExitCode::SUCCESS
-}
-
-fn run_program(args: &[String]) -> ExitCode {
-    let filename = &args[1];
-    let path = Path::new(filename);
-
-    // Derive module name from filename
-    let module_name = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown")
-        .to_string();
-
-    // Read source file
-    let source = match fs::read_to_string(filename) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Error reading {}: {}", filename, e);
+    // For "beam" target, invoke erlc
+    if target == "beam" {
+        // Check if erlc is available
+        if !command_exists("erlc") {
+            eprintln!();
+            eprintln!("Warning: erlc not found in PATH");
+            eprintln!("Install Erlang/OTP to compile to BEAM bytecode.");
+            eprintln!();
+            eprintln!("Core Erlang files are in {}", build_dir.display());
+            eprintln!("You can compile manually with: erlc +from_core *.core");
             return ExitCode::from(1);
         }
-    };
 
-    // Compile
-    let module = match compile_file(&source, &module_name) {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("Compile error: {}", e);
-            return ExitCode::from(1);
-        }
-    };
+        for core_file in &core_files {
+            let status = Command::new("erlc")
+                .arg("+from_core")
+                .arg("-o")
+                .arg(&build_dir)
+                .arg(core_file)
+                .status();
 
-    let module_name = module.name.clone();
-
-    // Determine function to call
-    let (func_name, func_args) = if args.len() >= 3 {
-        let func = args[2].clone();
-        let func_args: Vec<i64> = args[3..]
-            .iter()
-            .filter_map(|s| s.parse().ok())
-            .collect();
-        (func, func_args)
-    } else {
-        // Default to main/0
-        ("main".to_string(), vec![])
-    };
-
-    let arity = func_args.len() as u8;
-
-    // Check function exists
-    if module.get_function(&func_name, arity).is_none() {
-        eprintln!(
-            "Error: function {}/{}  not found in module {}",
-            func_name, arity, module_name
-        );
-        eprintln!();
-        eprintln!("Available functions:");
-        for ((name, ar), _) in &module.functions {
-            if module.is_exported(name, *ar) {
-                eprintln!("  {}/{}", name, ar);
+            match status {
+                Ok(s) if s.success() => {
+                    let beam_name = core_file.file_stem().unwrap().to_string_lossy();
+                    println!("  Compiled {}.beam", beam_name);
+                }
+                Ok(s) => {
+                    eprintln!("erlc failed with exit code {:?}", s.code());
+                    return ExitCode::from(1);
+                }
+                Err(e) => {
+                    eprintln!("Error running erlc: {}", e);
+                    return ExitCode::from(1);
+                }
             }
         }
-        return ExitCode::from(1);
     }
 
-    // Load module
-    let mut scheduler = Scheduler::new();
-    if let Err(e) = scheduler.load_module(module) {
-        eprintln!("Error loading module: {}", e);
-        return ExitCode::from(1);
-    }
-
-    // Build program to call the function
-    let mut program = Vec::new();
-
-    // Load arguments into registers
-    for (i, arg) in func_args.iter().enumerate() {
-        program.push(Instruction::LoadInt {
-            value: *arg,
-            dest: Register(i as u8),
-        });
-    }
-
-    // Call the function
-    program.push(Instruction::CallMFA {
-        module: module_name,
-        function: func_name,
-        arity,
-    });
-
-    program.push(Instruction::End);
-
-    // Spawn and run
-    scheduler.spawn(program);
-
-    loop {
-        let result = scheduler.step(1000);
-        if result == StepResult::Idle {
-            break;
-        }
-    }
-
-    // Get result from R0
-    if let Some(process) = scheduler.processes.values().next() {
-        let result = &process.registers[0];
-        println!("{}", format_value(result));
-    }
+    println!();
+    println!("Build complete.");
 
     ExitCode::SUCCESS
 }
 
-fn format_value(value: &Value) -> String {
-    match value {
-        Value::Int(n) => n.to_string(),
-        Value::BigInt(n) => n.to_string(),
-        Value::Float(f) => format!("{}", f),
-        Value::Atom(a) => format!(":{}", a),
-        Value::String(s) => format!("\"{}\"", s),
-        Value::Binary(bytes) => {
-            let inner: Vec<String> = bytes.iter().map(|b| b.to_string()).collect();
-            format!("<<{}>>", inner.join(", "))
-        }
-        Value::Pid(p) => format!("#PID<{}>", p.0),
-        Value::Ref(r) => format!("#Ref<{}>", r),
-        Value::Tuple(elems) => {
-            let inner: Vec<String> = elems.iter().map(format_value).collect();
-            format!("{{{}}}", inner.join(", "))
-        }
-        Value::List(elems) => {
-            let inner: Vec<String> = elems.iter().map(format_value).collect();
-            format!("[{}]", inner.join(", "))
-        }
-        Value::Map(entries) => {
-            let inner: Vec<String> = entries
-                .iter()
-                .map(|(k, v)| format!("{} => {}", format_value(k), format_value(v)))
-                .collect();
-            format!("%{{{}}}", inner.join(", "))
-        }
-        Value::Fun {
-            module,
-            function,
-            arity,
-        } => {
-            format!("&{}:{}/{}", module, function, arity)
-        }
-        Value::Closure {
-            module,
-            function,
-            arity,
-            ..
-        } => {
-            format!("#Closure<{}:{}/{}>", module, function, arity)
-        }
-        Value::None => "none".to_string(),
+/// Build and run the project.
+fn cmd_run(module: Option<&str>, function: &str, _args: &[String]) -> ExitCode {
+    // First, build the project
+    let build_result = cmd_build("beam", None);
+    if build_result != ExitCode::SUCCESS {
+        return build_result;
     }
+
+    // Find project root and load config
+    let (project_root, config) = match ProjectConfig::from_project_root() {
+        Ok(result) => result,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            return ExitCode::from(1);
+        }
+    };
+
+    let beam_dir = config.beam_dir(&project_root);
+
+    // Default module is "main" (from main.dream), not the package name
+    let module_name = module.unwrap_or("main");
+
+    // Check if erl is available
+    if !command_exists("erl") {
+        eprintln!("Error: erl not found in PATH");
+        eprintln!("Install Erlang/OTP to run on the BEAM.");
+        return ExitCode::from(1);
+    }
+
+    println!();
+    println!("Running {}:{}()...", module_name, function);
+    println!();
+
+    // Run with erl
+    let eval_expr = format!(
+        "io:format(\"~p~n\", [{}:{}()]), halt().",
+        module_name, function
+    );
+
+    let status = Command::new("erl")
+        .arg("-pa")
+        .arg(&beam_dir)
+        .arg("-noshell")
+        .arg("-eval")
+        .arg(&eval_expr)
+        .status();
+
+    match status {
+        Ok(s) if s.success() => ExitCode::SUCCESS,
+        Ok(s) => ExitCode::from(s.code().unwrap_or(1) as u8),
+        Err(e) => {
+            eprintln!("Error running erl: {}", e);
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// Find the entry file (main.dream or lib.dream) in the source directory.
+fn find_entry_file(src_dir: &Path) -> Option<PathBuf> {
+    let main = src_dir.join("main.dream");
+    if main.exists() {
+        return Some(main);
+    }
+
+    let lib = src_dir.join("lib.dream");
+    if lib.exists() {
+        return Some(lib);
+    }
+
+    None
+}
+
+/// Check if a command exists in PATH.
+fn command_exists(cmd: &str) -> bool {
+    Command::new("which")
+        .arg(cmd)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
