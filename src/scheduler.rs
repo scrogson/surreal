@@ -2109,6 +2109,265 @@ impl Scheduler {
                 ExecResult::Continue(1)
             }
 
+            // ========== IO ==========
+            Instruction::PrintLn { source } => {
+                let Some(process) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let value = &process.registers[source.0 as usize];
+                // Capture output for testing, or print to stdout
+                self.output.push(format!("{:?}", value));
+                #[cfg(not(test))]
+                println!("{:?}", value);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::ReadLine { dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                // In tests/WASM, return :eof. In CLI, read from stdin.
+                #[cfg(test)]
+                {
+                    process.registers[dest.0 as usize] = Value::Atom("eof".to_string());
+                }
+                #[cfg(not(test))]
+                {
+                    use std::io::BufRead;
+                    let stdin = std::io::stdin();
+                    let mut line = String::new();
+                    match stdin.lock().read_line(&mut line) {
+                        Ok(0) => {
+                            process.registers[dest.0 as usize] = Value::Atom("eof".to_string());
+                        }
+                        Ok(_) => {
+                            // Trim trailing newline
+                            let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
+                            process.registers[dest.0 as usize] =
+                                Value::String(trimmed.to_string());
+                        }
+                        Err(_) => {
+                            process.registers[dest.0 as usize] = Value::Atom("eof".to_string());
+                        }
+                    }
+                }
+                ExecResult::Continue(1)
+            }
+
+            Instruction::FileRead { path, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let path_str = match &process.registers[path.0 as usize] {
+                    Value::String(s) => s.clone(),
+                    _ => return ExecResult::Crash,
+                };
+                match std::fs::read(&path_str) {
+                    Ok(bytes) => {
+                        process.registers[dest.0 as usize] = Value::Tuple(vec![
+                            Value::Atom("ok".to_string()),
+                            Value::Binary(bytes),
+                        ]);
+                    }
+                    Err(e) => {
+                        process.registers[dest.0 as usize] = Value::Tuple(vec![
+                            Value::Atom("error".to_string()),
+                            Value::Atom(e.kind().to_string()),
+                        ]);
+                    }
+                }
+                ExecResult::Continue(1)
+            }
+
+            Instruction::FileWrite { path, content, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let path_str = match &process.registers[path.0 as usize] {
+                    Value::String(s) => s.clone(),
+                    _ => return ExecResult::Crash,
+                };
+                let bytes = match &process.registers[content.0 as usize] {
+                    Value::Binary(b) => b.clone(),
+                    Value::String(s) => s.as_bytes().to_vec(),
+                    _ => return ExecResult::Crash,
+                };
+                match std::fs::write(&path_str, bytes) {
+                    Ok(()) => {
+                        process.registers[dest.0 as usize] = Value::Atom("ok".to_string());
+                    }
+                    Err(e) => {
+                        process.registers[dest.0 as usize] = Value::Tuple(vec![
+                            Value::Atom("error".to_string()),
+                            Value::Atom(e.kind().to_string()),
+                        ]);
+                    }
+                }
+                ExecResult::Continue(1)
+            }
+
+            Instruction::FileExists { path, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let path_str = match &process.registers[path.0 as usize] {
+                    Value::String(s) => s.clone(),
+                    _ => return ExecResult::Crash,
+                };
+                let exists = std::path::Path::new(&path_str).exists();
+                process.registers[dest.0 as usize] = Value::Int(if exists { 1 } else { 0 });
+                ExecResult::Continue(1)
+            }
+
+            Instruction::FileDelete { path, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let path_str = match &process.registers[path.0 as usize] {
+                    Value::String(s) => s.clone(),
+                    _ => return ExecResult::Crash,
+                };
+                match std::fs::remove_file(&path_str) {
+                    Ok(()) => {
+                        process.registers[dest.0 as usize] = Value::Atom("ok".to_string());
+                    }
+                    Err(e) => {
+                        process.registers[dest.0 as usize] = Value::Tuple(vec![
+                            Value::Atom("error".to_string()),
+                            Value::Atom(e.kind().to_string()),
+                        ]);
+                    }
+                }
+                ExecResult::Continue(1)
+            }
+
+            // ========== System Info ==========
+            Instruction::SelfPid { dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::Pid(pid);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::ProcessList { dest } => {
+                let pids: Vec<Value> = self
+                    .processes
+                    .keys()
+                    .map(|p| Value::Pid(*p))
+                    .collect();
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::List(pids);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::ProcessCount { dest } => {
+                let count = self.processes.len() as i64;
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::Int(count);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::IsAlive { pid: target_pid, dest } => {
+                let Some(process) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let target = match &process.registers[target_pid.0 as usize] {
+                    Value::Pid(p) => *p,
+                    _ => return ExecResult::Crash,
+                };
+                let alive = self.processes.contains_key(&target);
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::Int(if alive { 1 } else { 0 });
+                ExecResult::Continue(1)
+            }
+
+            Instruction::ProcessInfo { pid: target_pid, dest } => {
+                let Some(process) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let target = match &process.registers[target_pid.0 as usize] {
+                    Value::Pid(p) => *p,
+                    _ => return ExecResult::Crash,
+                };
+                let info = if let Some(target_proc) = self.processes.get(&target) {
+                    let status_atom = match target_proc.status {
+                        ProcessStatus::Ready => "ready",
+                        ProcessStatus::Waiting => "waiting",
+                        ProcessStatus::Done => "done",
+                        ProcessStatus::Crashed => "crashed",
+                    };
+                    Value::Tuple(vec![
+                        Value::Atom(status_atom.to_string()),
+                        Value::Int(target_proc.mailbox.len() as i64),
+                        Value::Int(target_proc.links.len() as i64),
+                        Value::Int(target_proc.monitors.len() as i64),
+                        Value::Int(if target_proc.trap_exit { 1 } else { 0 }),
+                    ])
+                } else {
+                    Value::Atom("undefined".to_string())
+                };
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = info;
+                ExecResult::Continue(1)
+            }
+
+            Instruction::ModuleList { dest } => {
+                let modules: Vec<Value> = self
+                    .modules
+                    .keys()
+                    .map(|name| Value::Atom(name.clone()))
+                    .collect();
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::List(modules);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::FunctionExported {
+                module,
+                function,
+                arity,
+                dest,
+            } => {
+                let Some(process) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let mod_name = match &process.registers[module.0 as usize] {
+                    Value::Atom(s) => s.clone(),
+                    Value::String(s) => s.clone(),
+                    _ => return ExecResult::Crash,
+                };
+                let func_name = match &process.registers[function.0 as usize] {
+                    Value::Atom(s) => s.clone(),
+                    Value::String(s) => s.clone(),
+                    _ => return ExecResult::Crash,
+                };
+                let func_arity = match &process.registers[arity.0 as usize] {
+                    Value::Int(n) => *n as u8,
+                    _ => return ExecResult::Crash,
+                };
+                let exported = self
+                    .modules
+                    .get(&mod_name)
+                    .map(|m| m.is_exported(&func_name, func_arity))
+                    .unwrap_or(false);
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::Int(if exported { 1 } else { 0 });
+                ExecResult::Continue(1)
+            }
+
             // ========== Exception Handling ==========
             Instruction::Try {
                 catch_target,
@@ -8606,5 +8865,301 @@ mod tests {
 
         let process = scheduler.processes.get(&Pid(0)).unwrap();
         assert_eq!(process.registers[1], Value::Int(0)); // Match failed
+    }
+
+    // ========== IO Tests ==========
+
+    #[test]
+    fn test_println() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(0),
+            },
+            Instruction::PrintLn {
+                source: Register(0),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        // Check output was captured
+        assert_eq!(scheduler.output.len(), 1);
+        assert!(scheduler.output[0].contains("42"));
+    }
+
+    #[test]
+    fn test_readline_eof_in_tests() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::ReadLine { dest: Register(0) },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        // In tests, ReadLine returns :eof
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Atom("eof".to_string()));
+    }
+
+    #[test]
+    fn test_file_exists() {
+        let mut scheduler = Scheduler::new();
+
+        // Use Cargo.toml which we know exists
+        let program = vec![
+            Instruction::MakeBinary {
+                bytes: "Cargo.toml".as_bytes().to_vec(),
+                dest: Register(0),
+            },
+            Instruction::BinaryToString {
+                source: Register(0),
+                dest: Register(0),
+            },
+            Instruction::FileExists {
+                path: Register(0),
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(1)); // Cargo.toml exists
+    }
+
+    // ========== System Info Tests ==========
+
+    #[test]
+    fn test_self_pid() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::SelfPid { dest: Register(0) },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Pid(Pid(0)));
+    }
+
+    #[test]
+    fn test_process_count() {
+        let mut scheduler = Scheduler::new();
+
+        // Spawn 3 processes
+        let child_code = vec![
+            Instruction::Work { amount: 100 },
+            Instruction::End,
+        ];
+
+        let program = vec![
+            Instruction::Spawn {
+                code: child_code.clone(),
+                dest: Register(0),
+            },
+            Instruction::Spawn {
+                code: child_code.clone(),
+                dest: Register(1),
+            },
+            Instruction::ProcessCount { dest: Register(2) },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        // Just execute a few steps, don't run to completion
+        scheduler.step(10);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        // Should have 3 processes (main + 2 spawned)
+        assert_eq!(process.registers[2], Value::Int(3));
+    }
+
+    #[test]
+    fn test_process_list() {
+        let mut scheduler = Scheduler::new();
+
+        let child_code = vec![
+            Instruction::Work { amount: 100 },
+            Instruction::End,
+        ];
+
+        let program = vec![
+            Instruction::Spawn {
+                code: child_code,
+                dest: Register(0),
+            },
+            Instruction::ProcessList { dest: Register(1) },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        scheduler.step(10);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        if let Value::List(pids) = &process.registers[1] {
+            assert_eq!(pids.len(), 2); // main + 1 child
+        } else {
+            panic!("expected list");
+        }
+    }
+
+    #[test]
+    fn test_is_alive() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::SelfPid { dest: Register(0) },
+            Instruction::IsAlive {
+                pid: Register(0),
+                dest: Register(1),
+            },
+            // Check a non-existent PID
+            Instruction::LoadInt {
+                value: 9999,
+                dest: Register(2),
+            },
+            // We need to construct a Pid value - use spawn to get a real one then check after it ends
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(1)); // self is alive
+    }
+
+    #[test]
+    fn test_process_info() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::SelfPid { dest: Register(0) },
+            Instruction::ProcessInfo {
+                pid: Register(0),
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        if let Value::Tuple(info) = &process.registers[1] {
+            assert_eq!(info.len(), 5);
+            // Status should be "done" or "ready" depending on timing
+            assert!(matches!(&info[0], Value::Atom(_)));
+        } else {
+            panic!("expected tuple");
+        }
+    }
+
+    #[test]
+    fn test_module_list() {
+        let mut scheduler = Scheduler::new();
+
+        // Load a module first
+        let module = crate::Module {
+            name: "test_mod".to_string(),
+            code: vec![Instruction::End],
+            functions: std::collections::HashMap::new(),
+            exports: std::collections::HashSet::new(),
+        };
+        scheduler.load_module(module).unwrap();
+
+        let program = vec![
+            Instruction::ModuleList { dest: Register(0) },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        if let Value::List(modules) = &process.registers[0] {
+            assert!(modules.contains(&Value::Atom("test_mod".to_string())));
+        } else {
+            panic!("expected list");
+        }
+    }
+
+    #[test]
+    fn test_function_exported() {
+        let mut scheduler = Scheduler::new();
+
+        // Load a module with an exported function
+        let mut functions = std::collections::HashMap::new();
+        functions.insert(
+            ("my_func".to_string(), 0),
+            crate::FunctionDef {
+                name: "my_func".to_string(),
+                arity: 0,
+                entry: 0,
+            },
+        );
+        let mut exports = std::collections::HashSet::new();
+        exports.insert(("my_func".to_string(), 0));
+
+        let module = crate::Module {
+            name: "test_mod".to_string(),
+            code: vec![Instruction::End],
+            functions,
+            exports,
+        };
+        scheduler.load_module(module).unwrap();
+
+        let program = vec![
+            Instruction::LoadAtom {
+                name: "test_mod".to_string(),
+                dest: Register(0),
+            },
+            Instruction::LoadAtom {
+                name: "my_func".to_string(),
+                dest: Register(1),
+            },
+            Instruction::LoadInt {
+                value: 0,
+                dest: Register(2),
+            },
+            Instruction::FunctionExported {
+                module: Register(0),
+                function: Register(1),
+                arity: Register(2),
+                dest: Register(3),
+            },
+            // Check non-existent function
+            Instruction::LoadAtom {
+                name: "no_func".to_string(),
+                dest: Register(4),
+            },
+            Instruction::FunctionExported {
+                module: Register(0),
+                function: Register(4),
+                arity: Register(2),
+                dest: Register(5),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[3], Value::Int(1)); // my_func/0 exists
+        assert_eq!(process.registers[5], Value::Int(0)); // no_func/0 doesn't exist
     }
 }

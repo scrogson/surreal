@@ -460,6 +460,60 @@ pub enum Instruction {
     /// Read the remaining time on a timer (0 if already fired or cancelled)
     ReadTimer { timer_ref: Register, dest: Register },
 
+    // ========== IO ==========
+    /// Print a value to stdout with newline
+    PrintLn { source: Register },
+
+    /// Read a line from stdin into register as String
+    /// Returns :eof atom if end of input
+    ReadLine { dest: Register },
+
+    /// Read entire file contents as binary
+    /// Returns {:ok, binary} or {:error, reason}
+    FileRead { path: Register, dest: Register },
+
+    /// Write binary/string to file
+    /// Returns :ok or {:error, reason}
+    FileWrite { path: Register, content: Register, dest: Register },
+
+    /// Check if file exists
+    /// Returns 1 (true) or 0 (false)
+    FileExists { path: Register, dest: Register },
+
+    /// Delete a file
+    /// Returns :ok or {:error, reason}
+    FileDelete { path: Register, dest: Register },
+
+    // ========== System Info ==========
+    /// Get own PID into register
+    SelfPid { dest: Register },
+
+    /// Get list of all process PIDs
+    ProcessList { dest: Register },
+
+    /// Get count of live processes
+    ProcessCount { dest: Register },
+
+    /// Check if a process is alive
+    /// Returns 1 (true) or 0 (false)
+    IsAlive { pid: Register, dest: Register },
+
+    /// Get process info as tuple
+    /// Returns {status, mailbox_len, links_count, monitors_count, trap_exit}
+    ProcessInfo { pid: Register, dest: Register },
+
+    /// Get list of loaded module names
+    ModuleList { dest: Register },
+
+    /// Check if function is exported
+    /// Returns 1 (true) or 0 (false)
+    FunctionExported {
+        module: Register,
+        function: Register,
+        arity: Register,
+        dest: Register,
+    },
+
     // ========== Exception Handling ==========
     /// Begin a try block. Pushes exception handler onto try stack.
     /// catch_target: where to jump on exception
