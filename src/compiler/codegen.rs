@@ -715,7 +715,7 @@ impl Codegen {
             }
 
             Expr::StructInit { name, fields } => {
-                // Represent as tagged tuple: {:StructName, field1, field2, ...}
+                // Represent as map with __struct__ tag (like Elixir)
                 // Check if the struct name is imported
                 let tag_name = if let Some((module, original_name)) = self.imports.get(name) {
                     format!("{}_{}", module, original_name)
@@ -723,18 +723,38 @@ impl Codegen {
                     name.clone()
                 };
 
-                // First push the tag atom
-                let tag_reg = self.regs.alloc();
+                // Push __struct__ => StructName first
+                let struct_key_reg = self.regs.alloc();
                 self.emit(Instruction::LoadAtom {
-                    name: tag_name,
-                    dest: tag_reg,
+                    name: "__struct__".to_string(),
+                    dest: struct_key_reg,
                 });
                 self.emit(Instruction::Push {
-                    source: Operand::Reg(tag_reg),
+                    source: Operand::Reg(struct_key_reg),
                 });
 
-                // Push fields in order
-                for (_, value) in fields {
+                let struct_val_reg = self.regs.alloc();
+                self.emit(Instruction::LoadAtom {
+                    name: tag_name,
+                    dest: struct_val_reg,
+                });
+                self.emit(Instruction::Push {
+                    source: Operand::Reg(struct_val_reg),
+                });
+
+                // Push field key-value pairs
+                for (field_name, value) in fields {
+                    // Push key (field name as atom)
+                    let key_reg = self.regs.alloc();
+                    self.emit(Instruction::LoadAtom {
+                        name: field_name.clone(),
+                        dest: key_reg,
+                    });
+                    self.emit(Instruction::Push {
+                        source: Operand::Reg(key_reg),
+                    });
+
+                    // Push value
                     let value_reg = self.compile_expr(value)?;
                     self.emit(Instruction::Push {
                         source: Operand::Reg(value_reg),
@@ -742,8 +762,8 @@ impl Codegen {
                 }
 
                 let dest = self.regs.alloc();
-                self.emit(Instruction::MakeTuple {
-                    arity: (fields.len() + 1) as u8, // +1 for tag
+                self.emit(Instruction::MakeMap {
+                    count: (fields.len() + 1) as u8, // +1 for __struct__
                     dest,
                 });
 
@@ -792,14 +812,24 @@ impl Codegen {
             }
 
             Expr::FieldAccess { expr, field } => {
-                // For now, assume expr is a struct (tagged tuple)
-                // Field access becomes tuple element access
-                // TODO: Need struct metadata to know field indices
-                let _ = self.compile_expr(expr)?;
-                Err(CodegenError::new(format!(
-                    "field access not yet implemented: .{}",
-                    field
-                )))
+                // Structs are maps - use MapGet to access field
+                let map_reg = self.compile_expr(expr)?;
+
+                // Load field name as atom key
+                let key_reg = self.regs.alloc();
+                self.emit(Instruction::LoadAtom {
+                    name: field.clone(),
+                    dest: key_reg,
+                });
+
+                let dest = self.regs.alloc();
+                self.emit(Instruction::MapGet {
+                    map: map_reg,
+                    key: key_reg,
+                    dest,
+                });
+
+                Ok(dest)
             }
 
             Expr::Call { func, args } => {
