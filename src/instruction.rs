@@ -351,6 +351,41 @@ pub enum Instruction {
     /// Check if value is a reference
     /// Stores 1 (true) or 0 (false)
     IsRef { source: Register, dest: Register },
+
+    // ========== Floats ==========
+    /// Load a floating-point immediate into a register
+    LoadFloat { value: f64, dest: Register },
+
+    /// Check if value is a float
+    /// Stores 1 (true) or 0 (false)
+    IsFloat { source: Register, dest: Register },
+
+    /// Convert integer to float
+    IntToFloat { source: Register, dest: Register },
+
+    /// Convert float to integer (truncates toward zero)
+    FloatToInt { source: Register, dest: Register },
+
+    /// Floor: round down to nearest integer (as float)
+    Floor { source: Register, dest: Register },
+
+    /// Ceil: round up to nearest integer (as float)
+    Ceil { source: Register, dest: Register },
+
+    /// Round: round to nearest integer (as float)
+    Round { source: Register, dest: Register },
+
+    /// Trunc: truncate toward zero (as float)
+    Trunc { source: Register, dest: Register },
+
+    /// Square root
+    Sqrt { source: Register, dest: Register },
+
+    /// Absolute value (works for both int and float)
+    Abs { source: Register, dest: Register },
+
+    /// Power: base^exponent (both operands, result is float)
+    Pow { base: Register, exp: Register, dest: Register },
 }
 
 /// An operand for arithmetic/comparison operations

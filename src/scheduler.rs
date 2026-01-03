@@ -1563,6 +1563,134 @@ impl Scheduler {
                 process.registers[dest.0 as usize] = Value::Int(if is_ref { 1 } else { 0 });
                 ExecResult::Continue(1)
             }
+
+            // ========== Floats ==========
+            Instruction::LoadFloat { value, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::Float(value);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::IsFloat { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let is_float = matches!(process.registers[source.0 as usize], Value::Float(_));
+                process.registers[dest.0 as usize] = Value::Int(if is_float { 1 } else { 0 });
+                ExecResult::Continue(1)
+            }
+
+            Instruction::IntToFloat { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Int(n) = process.registers[source.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::Float(n as f64);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::FloatToInt { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Float(f) = process.registers[source.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::Int(f as i64);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::Floor { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Float(f) = process.registers[source.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::Float(f.floor());
+                ExecResult::Continue(1)
+            }
+
+            Instruction::Ceil { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Float(f) = process.registers[source.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::Float(f.ceil());
+                ExecResult::Continue(1)
+            }
+
+            Instruction::Round { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Float(f) = process.registers[source.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::Float(f.round());
+                ExecResult::Continue(1)
+            }
+
+            Instruction::Trunc { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Float(f) = process.registers[source.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::Float(f.trunc());
+                ExecResult::Continue(1)
+            }
+
+            Instruction::Sqrt { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let f = match process.registers[source.0 as usize] {
+                    Value::Float(f) => f,
+                    Value::Int(n) => n as f64,
+                    _ => return ExecResult::Crash,
+                };
+                process.registers[dest.0 as usize] = Value::Float(f.sqrt());
+                ExecResult::Continue(1)
+            }
+
+            Instruction::Abs { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let result = match process.registers[source.0 as usize] {
+                    Value::Float(f) => Value::Float(f.abs()),
+                    Value::Int(n) => Value::Int(n.abs()),
+                    _ => return ExecResult::Crash,
+                };
+                process.registers[dest.0 as usize] = result;
+                ExecResult::Continue(1)
+            }
+
+            Instruction::Pow { base, exp, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let b = match process.registers[base.0 as usize] {
+                    Value::Float(f) => f,
+                    Value::Int(n) => n as f64,
+                    _ => return ExecResult::Crash,
+                };
+                let e = match process.registers[exp.0 as usize] {
+                    Value::Float(f) => f,
+                    Value::Int(n) => n as f64,
+                    _ => return ExecResult::Crash,
+                };
+                process.registers[dest.0 as usize] = Value::Float(b.powf(e));
+                ExecResult::Continue(1)
+            }
         }
     }
 
@@ -6383,5 +6511,265 @@ mod tests {
         let process = scheduler.processes.get(&Pid(0)).unwrap();
         // Should retrieve the value using the ref key
         assert_eq!(process.registers[2], Value::Int(42));
+    }
+
+    // ========== Float Tests ==========
+
+    #[test]
+    fn test_load_float() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::LoadFloat {
+                value: 3.14,
+                dest: Register(0),
+            },
+            Instruction::LoadFloat {
+                value: -2.5,
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Float(3.14));
+        assert_eq!(process.registers[1], Value::Float(-2.5));
+    }
+
+    #[test]
+    fn test_is_float() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::LoadFloat {
+                value: 1.5,
+                dest: Register(0),
+            },
+            Instruction::IsFloat {
+                source: Register(0),
+                dest: Register(1),
+            },
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(2),
+            },
+            Instruction::IsFloat {
+                source: Register(2),
+                dest: Register(3),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(1)); // float is a float
+        assert_eq!(process.registers[3], Value::Int(0)); // int is not a float
+    }
+
+    #[test]
+    fn test_int_to_float() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(0),
+            },
+            Instruction::IntToFloat {
+                source: Register(0),
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Float(42.0));
+    }
+
+    #[test]
+    fn test_float_to_int() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::LoadFloat {
+                value: 3.7,
+                dest: Register(0),
+            },
+            Instruction::FloatToInt {
+                source: Register(0),
+                dest: Register(1),
+            },
+            Instruction::LoadFloat {
+                value: -2.9,
+                dest: Register(2),
+            },
+            Instruction::FloatToInt {
+                source: Register(2),
+                dest: Register(3),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(3)); // truncates toward zero
+        assert_eq!(process.registers[3], Value::Int(-2)); // truncates toward zero
+    }
+
+    #[test]
+    fn test_floor_ceil_round_trunc() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::LoadFloat {
+                value: 3.7,
+                dest: Register(0),
+            },
+            Instruction::Floor {
+                source: Register(0),
+                dest: Register(1),
+            },
+            Instruction::Ceil {
+                source: Register(0),
+                dest: Register(2),
+            },
+            Instruction::Round {
+                source: Register(0),
+                dest: Register(3),
+            },
+            Instruction::Trunc {
+                source: Register(0),
+                dest: Register(4),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Float(3.0)); // floor(3.7) = 3.0
+        assert_eq!(process.registers[2], Value::Float(4.0)); // ceil(3.7) = 4.0
+        assert_eq!(process.registers[3], Value::Float(4.0)); // round(3.7) = 4.0
+        assert_eq!(process.registers[4], Value::Float(3.0)); // trunc(3.7) = 3.0
+    }
+
+    #[test]
+    fn test_sqrt() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::LoadFloat {
+                value: 16.0,
+                dest: Register(0),
+            },
+            Instruction::Sqrt {
+                source: Register(0),
+                dest: Register(1),
+            },
+            // sqrt also works on int
+            Instruction::LoadInt {
+                value: 25,
+                dest: Register(2),
+            },
+            Instruction::Sqrt {
+                source: Register(2),
+                dest: Register(3),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Float(4.0));
+        assert_eq!(process.registers[3], Value::Float(5.0));
+    }
+
+    #[test]
+    fn test_abs() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::LoadFloat {
+                value: -3.5,
+                dest: Register(0),
+            },
+            Instruction::Abs {
+                source: Register(0),
+                dest: Register(1),
+            },
+            Instruction::LoadInt {
+                value: -42,
+                dest: Register(2),
+            },
+            Instruction::Abs {
+                source: Register(2),
+                dest: Register(3),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Float(3.5));
+        assert_eq!(process.registers[3], Value::Int(42));
+    }
+
+    #[test]
+    fn test_pow() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // 2^3 = 8
+            Instruction::LoadInt {
+                value: 2,
+                dest: Register(0),
+            },
+            Instruction::LoadInt {
+                value: 3,
+                dest: Register(1),
+            },
+            Instruction::Pow {
+                base: Register(0),
+                exp: Register(1),
+                dest: Register(2),
+            },
+            // 2.5^2 = 6.25
+            Instruction::LoadFloat {
+                value: 2.5,
+                dest: Register(3),
+            },
+            Instruction::LoadInt {
+                value: 2,
+                dest: Register(4),
+            },
+            Instruction::Pow {
+                base: Register(3),
+                exp: Register(4),
+                dest: Register(5),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[2], Value::Float(8.0));
+        assert_eq!(process.registers[5], Value::Float(6.25));
     }
 }

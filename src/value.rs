@@ -6,10 +6,12 @@ use std::hash::{Hash, Hasher};
 use crate::Pid;
 
 /// Runtime value stored in registers
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub enum Value {
     /// Integer
     Int(i64),
+    /// Floating-point number
+    Float(f64),
     /// Process identifier
     Pid(Pid),
     /// Unique reference (for request/response correlation)
@@ -55,6 +57,7 @@ impl std::fmt::Debug for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Int(n) => write!(f, "{}", n),
+            Value::Float(x) => write!(f, "{}", x),
             Value::Pid(p) => write!(f, "Pid({})", p.0),
             Value::Ref(r) => write!(f, "#Ref<{}>", r),
             Value::String(s) => write!(f, "{:?}", s),
@@ -114,6 +117,7 @@ impl Hash for Value {
         std::mem::discriminant(self).hash(state);
         match self {
             Value::Int(n) => n.hash(state),
+            Value::Float(f) => f.to_bits().hash(state),
             Value::Pid(p) => p.0.hash(state),
             Value::Ref(r) => r.hash(state),
             Value::String(s) => s.hash(state),
@@ -180,3 +184,37 @@ impl From<i64> for Value {
         Value::Int(n)
     }
 }
+
+impl From<f64> for Value {
+    fn from(f: f64) -> Self {
+        Value::Float(f)
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Int(a), Value::Int(b)) => a == b,
+            (Value::Float(a), Value::Float(b)) => a.to_bits() == b.to_bits(),
+            (Value::Pid(a), Value::Pid(b)) => a == b,
+            (Value::Ref(a), Value::Ref(b)) => a == b,
+            (Value::String(a), Value::String(b)) => a == b,
+            (Value::Atom(a), Value::Atom(b)) => a == b,
+            (Value::Tuple(a), Value::Tuple(b)) => a == b,
+            (Value::List(a), Value::List(b)) => a == b,
+            (Value::Map(a), Value::Map(b)) => a == b,
+            (Value::Fun { module: m1, function: f1, arity: a1 },
+             Value::Fun { module: m2, function: f2, arity: a2 }) => {
+                m1 == m2 && f1 == f2 && a1 == a2
+            }
+            (Value::Closure { module: m1, function: f1, arity: a1, captured: c1 },
+             Value::Closure { module: m2, function: f2, arity: a2, captured: c2 }) => {
+                m1 == m2 && f1 == f2 && a1 == a2 && c1 == c2
+            }
+            (Value::None, Value::None) => true,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Value {}

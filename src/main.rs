@@ -120,6 +120,7 @@ fn main() -> ExitCode {
 fn format_value(value: &Value) -> String {
     match value {
         Value::Int(n) => n.to_string(),
+        Value::Float(f) => format!("{}", f),
         Value::Atom(a) => format!(":{}", a),
         Value::String(s) => format!("\"{}\"", s),
         Value::Pid(p) => format!("#PID<{}>", p.0),
