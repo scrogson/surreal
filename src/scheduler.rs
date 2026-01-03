@@ -1736,6 +1736,120 @@ impl Scheduler {
                 ExecResult::Continue(1)
             }
 
+            // ========== Binaries ==========
+            Instruction::MakeBinary { bytes, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::Binary(bytes.clone());
+                ExecResult::Continue(1)
+            }
+
+            Instruction::BinarySize { bin, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Binary(bytes) = &process.registers[bin.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::Int(bytes.len() as i64);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::BinaryAt { bin, index, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Binary(bytes) = &process.registers[bin.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let Value::Int(idx) = process.registers[index.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                if idx < 0 || idx as usize >= bytes.len() {
+                    return ExecResult::Crash;
+                }
+                process.registers[dest.0 as usize] = Value::Int(bytes[idx as usize] as i64);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::BinarySlice { bin, start, len, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Binary(bytes) = &process.registers[bin.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let Value::Int(start_idx) = process.registers[start.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let Value::Int(length) = process.registers[len.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                if start_idx < 0 || length < 0 {
+                    return ExecResult::Crash;
+                }
+                let start_idx = start_idx as usize;
+                let length = length as usize;
+                if start_idx + length > bytes.len() {
+                    return ExecResult::Crash;
+                }
+                let slice = bytes[start_idx..start_idx + length].to_vec();
+                process.registers[dest.0 as usize] = Value::Binary(slice);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::BinaryConcat { a, b, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Binary(bytes_a) = &process.registers[a.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let Value::Binary(bytes_b) = &process.registers[b.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let mut result = bytes_a.clone();
+                result.extend_from_slice(bytes_b);
+                process.registers[dest.0 as usize] = Value::Binary(result);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::IsBinary { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let is_binary = matches!(process.registers[source.0 as usize], Value::Binary(_));
+                process.registers[dest.0 as usize] = Value::Int(if is_binary { 1 } else { 0 });
+                ExecResult::Continue(1)
+            }
+
+            Instruction::StringToBinary { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::String(s) = &process.registers[source.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let bytes = s.as_bytes().to_vec();
+                process.registers[dest.0 as usize] = Value::Binary(bytes);
+                ExecResult::Continue(1)
+            }
+
+            Instruction::BinaryToString { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let Value::Binary(bytes) = &process.registers[source.0 as usize] else {
+                    return ExecResult::Crash;
+                };
+                let Ok(s) = std::str::from_utf8(bytes) else {
+                    return ExecResult::Crash;
+                };
+                process.registers[dest.0 as usize] = Value::String(s.to_string());
+                ExecResult::Continue(1)
+            }
+
             // ========== References ==========
             Instruction::MakeRef { dest } => {
                 let ref_id = self.next_ref;
@@ -2218,6 +2332,8 @@ impl Scheduler {
             Pattern::Atom(name) => matches!(value, Value::Atom(a) if a == name),
 
             Pattern::String(s) => matches!(value, Value::String(v) if v == s),
+
+            Pattern::Binary(bytes) => matches!(value, Value::Binary(b) if b == bytes),
 
             Pattern::Tuple(patterns) => {
                 let Value::Tuple(elements) = value else {
@@ -8174,5 +8290,321 @@ mod tests {
 
         // Inner catch handled it
         assert_eq!(process.registers[2], Value::Atom("handled".to_string()));
+    }
+
+    // ========== Binary Tests ==========
+
+    #[test]
+    fn test_make_binary() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::MakeBinary {
+                bytes: vec![1, 2, 3, 255],
+                dest: Register(0),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(
+            process.registers[0],
+            Value::Binary(vec![1, 2, 3, 255])
+        );
+    }
+
+    #[test]
+    fn test_binary_size() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::MakeBinary {
+                bytes: vec![1, 2, 3, 4, 5],
+                dest: Register(0),
+            },
+            Instruction::BinarySize {
+                bin: Register(0),
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(5));
+    }
+
+    #[test]
+    fn test_binary_at() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::MakeBinary {
+                bytes: vec![10, 20, 30, 40],
+                dest: Register(0),
+            },
+            Instruction::LoadInt {
+                value: 2,
+                dest: Register(1),
+            },
+            Instruction::BinaryAt {
+                bin: Register(0),
+                index: Register(1),
+                dest: Register(2),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[2], Value::Int(30)); // byte at index 2
+    }
+
+    #[test]
+    fn test_binary_at_out_of_bounds() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::MakeBinary {
+                bytes: vec![1, 2, 3],
+                dest: Register(0),
+            },
+            Instruction::LoadInt {
+                value: 10, // out of bounds
+                dest: Register(1),
+            },
+            Instruction::BinaryAt {
+                bin: Register(0),
+                index: Register(1),
+                dest: Register(2),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.status, ProcessStatus::Crashed);
+    }
+
+    #[test]
+    fn test_binary_slice() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::MakeBinary {
+                bytes: vec![0, 1, 2, 3, 4, 5],
+                dest: Register(0),
+            },
+            Instruction::LoadInt {
+                value: 2, // start
+                dest: Register(1),
+            },
+            Instruction::LoadInt {
+                value: 3, // length
+                dest: Register(2),
+            },
+            Instruction::BinarySlice {
+                bin: Register(0),
+                start: Register(1),
+                len: Register(2),
+                dest: Register(3),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[3], Value::Binary(vec![2, 3, 4]));
+    }
+
+    #[test]
+    fn test_binary_concat() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::MakeBinary {
+                bytes: vec![1, 2, 3],
+                dest: Register(0),
+            },
+            Instruction::MakeBinary {
+                bytes: vec![4, 5],
+                dest: Register(1),
+            },
+            Instruction::BinaryConcat {
+                a: Register(0),
+                b: Register(1),
+                dest: Register(2),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[2], Value::Binary(vec![1, 2, 3, 4, 5]));
+    }
+
+    #[test]
+    fn test_is_binary() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::MakeBinary {
+                bytes: vec![1, 2, 3],
+                dest: Register(0),
+            },
+            Instruction::IsBinary {
+                source: Register(0),
+                dest: Register(1),
+            },
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(2),
+            },
+            Instruction::IsBinary {
+                source: Register(2),
+                dest: Register(3),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(1)); // binary is binary
+        assert_eq!(process.registers[3], Value::Int(0)); // int is not binary
+    }
+
+    #[test]
+    fn test_binary_to_string() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::MakeBinary {
+                bytes: "hello".as_bytes().to_vec(),
+                dest: Register(0),
+            },
+            Instruction::BinaryToString {
+                source: Register(0),
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::String("hello".to_string()));
+    }
+
+    #[test]
+    fn test_binary_to_string_invalid_utf8() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::MakeBinary {
+                bytes: vec![0xFF, 0xFE], // Invalid UTF-8
+                dest: Register(0),
+            },
+            Instruction::BinaryToString {
+                source: Register(0),
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.status, ProcessStatus::Crashed);
+    }
+
+    #[test]
+    fn test_binary_pattern_matching() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create binary <<1, 2, 3>>
+            Instruction::MakeBinary {
+                bytes: vec![1, 2, 3],
+                dest: Register(0),
+            },
+            // Try to match it against <<1, 2, 3>>
+            Instruction::Match {
+                source: Register(0),
+                pattern: Pattern::Binary(vec![1, 2, 3]),
+                fail_target: 4,
+            },
+            // Match succeeded - set marker
+            Instruction::LoadInt {
+                value: 100,
+                dest: Register(1),
+            },
+            Instruction::End,
+            // Match failed
+            Instruction::LoadInt {
+                value: 0,
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(100)); // Match succeeded
+    }
+
+    #[test]
+    fn test_binary_pattern_mismatch() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create binary <<1, 2, 3>>
+            Instruction::MakeBinary {
+                bytes: vec![1, 2, 3],
+                dest: Register(0),
+            },
+            // Try to match it against <<4, 5, 6>> (should fail)
+            Instruction::Match {
+                source: Register(0),
+                pattern: Pattern::Binary(vec![4, 5, 6]),
+                fail_target: 4,
+            },
+            // Match succeeded (shouldn't happen)
+            Instruction::LoadInt {
+                value: 100,
+                dest: Register(1),
+            },
+            Instruction::End,
+            // Match failed - set marker
+            Instruction::LoadInt {
+                value: 0,
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(0)); // Match failed
     }
 }

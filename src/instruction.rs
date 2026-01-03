@@ -361,6 +361,41 @@ pub enum Instruction {
     /// Get all values from map as a list
     MapValues { map: Register, dest: Register },
 
+    // ========== Binaries ==========
+    /// Create a binary from literal bytes
+    MakeBinary { bytes: Vec<u8>, dest: Register },
+
+    /// Get the size (byte length) of a binary
+    BinarySize { bin: Register, dest: Register },
+
+    /// Get a byte at index (0-based)
+    /// Crashes if not a binary or index out of bounds
+    BinaryAt { bin: Register, index: Register, dest: Register },
+
+    /// Extract a slice from a binary
+    /// Crashes if not a binary or range out of bounds
+    BinarySlice {
+        bin: Register,
+        start: Register,
+        len: Register,
+        dest: Register,
+    },
+
+    /// Concatenate two binaries
+    /// Crashes if either is not a binary
+    BinaryConcat { a: Register, b: Register, dest: Register },
+
+    /// Check if value is a binary
+    /// Stores 1 (true) or 0 (false)
+    IsBinary { source: Register, dest: Register },
+
+    /// Convert a string to a binary (UTF-8 encoded)
+    StringToBinary { source: Register, dest: Register },
+
+    /// Convert a binary to a string (assumes UTF-8)
+    /// Crashes if binary is not valid UTF-8
+    BinaryToString { source: Register, dest: Register },
+
     // ========== References ==========
     /// Create a new unique reference
     MakeRef { dest: Register },
@@ -499,6 +534,9 @@ pub enum Pattern {
 
     /// Match a specific string
     String(String),
+
+    /// Match a specific binary
+    Binary(Vec<u8>),
 
     /// Match a tuple with specific arity and element patterns
     Tuple(Vec<Pattern>),

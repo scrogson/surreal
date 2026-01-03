@@ -16,8 +16,10 @@ pub enum Value {
     Pid(Pid),
     /// Unique reference (for request/response correlation)
     Ref(u64),
-    /// String (binary in Erlang terms)
+    /// String (text data)
     String(String),
+    /// Binary (raw byte array)
+    Binary(Vec<u8>),
     /// Atom - an interned symbol
     Atom(String),
     /// Tuple - fixed-size container of values
@@ -51,6 +53,14 @@ impl Value {
             _ => None,
         }
     }
+
+    /// Try to extract a binary from this value
+    pub fn as_binary(&self) -> Option<&[u8]> {
+        match self {
+            Value::Binary(bytes) => Some(bytes),
+            _ => None,
+        }
+    }
 }
 
 impl std::fmt::Debug for Value {
@@ -61,6 +71,16 @@ impl std::fmt::Debug for Value {
             Value::Pid(p) => write!(f, "Pid({})", p.0),
             Value::Ref(r) => write!(f, "#Ref<{}>", r),
             Value::String(s) => write!(f, "{:?}", s),
+            Value::Binary(bytes) => {
+                write!(f, "<<")?;
+                for (i, byte) in bytes.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", byte)?;
+                }
+                write!(f, ">>")
+            }
             Value::Atom(a) => write!(f, ":{}", a),
             Value::Tuple(elements) => {
                 write!(f, "{{")?;
@@ -121,6 +141,7 @@ impl Hash for Value {
             Value::Pid(p) => p.0.hash(state),
             Value::Ref(r) => r.hash(state),
             Value::String(s) => s.hash(state),
+            Value::Binary(bytes) => bytes.hash(state),
             Value::Atom(a) => a.hash(state),
             Value::Tuple(elems) => {
                 elems.len().hash(state);
@@ -199,6 +220,7 @@ impl PartialEq for Value {
             (Value::Pid(a), Value::Pid(b)) => a == b,
             (Value::Ref(a), Value::Ref(b)) => a == b,
             (Value::String(a), Value::String(b)) => a == b,
+            (Value::Binary(a), Value::Binary(b)) => a == b,
             (Value::Atom(a), Value::Atom(b)) => a == b,
             (Value::Tuple(a), Value::Tuple(b)) => a == b,
             (Value::List(a), Value::List(b)) => a == b,

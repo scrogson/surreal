@@ -123,6 +123,10 @@ fn format_value(value: &Value) -> String {
         Value::Float(f) => format!("{}", f),
         Value::Atom(a) => format!(":{}", a),
         Value::String(s) => format!("\"{}\"", s),
+        Value::Binary(bytes) => {
+            let inner: Vec<String> = bytes.iter().map(|b| b.to_string()).collect();
+            format!("<<{}>>", inner.join(", "))
+        }
         Value::Pid(p) => format!("#PID<{}>", p.0),
         Value::Ref(r) => format!("#Ref<{}>", r),
         Value::Tuple(elems) => {
