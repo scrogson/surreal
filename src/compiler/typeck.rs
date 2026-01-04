@@ -94,11 +94,18 @@ impl Ty {
             Ty::Var(name) => subst.get(name).cloned().unwrap_or_else(|| self.clone()),
             Ty::Tuple(tys) => Ty::Tuple(tys.iter().map(|t| t.substitute(subst)).collect()),
             Ty::List(t) => Ty::List(Box::new(t.substitute(subst))),
-            Ty::Named { name, module, args } => Ty::Named {
-                name: name.clone(),
-                module: module.clone(),
-                args: args.iter().map(|t| t.substitute(subst)).collect(),
-            },
+            Ty::Named { name, module, args } => {
+                // Check if this is a type parameter (Named with no args, matching a subst key)
+                if args.is_empty() && module.is_none() && subst.contains_key(name) {
+                    subst.get(name).cloned().unwrap()
+                } else {
+                    Ty::Named {
+                        name: name.clone(),
+                        module: module.clone(),
+                        args: args.iter().map(|t| t.substitute(subst)).collect(),
+                    }
+                }
+            }
             Ty::Fn { params, ret } => Ty::Fn {
                 params: params.iter().map(|t| t.substitute(subst)).collect(),
                 ret: Box::new(ret.substitute(subst)),
