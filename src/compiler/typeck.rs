@@ -74,6 +74,20 @@ impl Ty {
         }
     }
 
+    /// Check if this type contains a specific inference variable (occurs check).
+    pub fn has_infer_id(&self, target_id: u32) -> bool {
+        match self {
+            Ty::Infer(id) => *id == target_id,
+            Ty::Tuple(tys) => tys.iter().any(|t| t.has_infer_id(target_id)),
+            Ty::List(t) => t.has_infer_id(target_id),
+            Ty::Named { args, .. } => args.iter().any(|t| t.has_infer_id(target_id)),
+            Ty::Fn { params, ret } => {
+                params.iter().any(|t| t.has_infer_id(target_id)) || ret.has_infer_id(target_id)
+            }
+            _ => false,
+        }
+    }
+
     /// Substitute type variables according to a mapping.
     pub fn substitute(&self, subst: &HashMap<String, Ty>) -> Ty {
         match self {
@@ -290,6 +304,171 @@ impl TypeChecker {
         let mut err = TypeError::with_span(message, span);
         err.help = Some(help.into());
         self.errors.push(err);
+    }
+
+    /// Unify two types, recording substitutions for inference variables.
+    /// Returns Ok(()) if types can be unified, Err otherwise.
+    fn unify(&mut self, ty1: &Ty, ty2: &Ty) -> TypeResult<()> {
+        // Apply existing substitutions first
+        let ty1 = self.apply_substitutions(ty1);
+        let ty2 = self.apply_substitutions(ty2);
+
+        match (&ty1, &ty2) {
+            // Same types unify trivially
+            _ if ty1 == ty2 => Ok(()),
+
+            // Any/Error unify with anything
+            (Ty::Any, _) | (_, Ty::Any) => Ok(()),
+            (Ty::Error, _) | (_, Ty::Error) => Ok(()),
+
+            // Inference variable unifies with anything, record substitution
+            (Ty::Infer(id), other) | (other, Ty::Infer(id)) => {
+                // Occurs check: don't allow Infer(id) = ... Infer(id) ...
+                if !other.has_infer_id(*id) {
+                    self.substitutions.insert(*id, other.clone());
+                }
+                Ok(())
+            }
+
+            // Type variables unify with anything (for now)
+            (Ty::Var(_), _) | (_, Ty::Var(_)) => Ok(()),
+
+            // Named types must have same name and unify args
+            (
+                Ty::Named { name: n1, args: a1, .. },
+                Ty::Named { name: n2, args: a2, .. },
+            ) => {
+                if n1 != n2 {
+                    return Err(TypeError::new(format!(
+                        "type mismatch: {} vs {}",
+                        ty1, ty2
+                    )));
+                }
+                // Unify type arguments pairwise
+                for (t1, t2) in a1.iter().zip(a2.iter()) {
+                    self.unify(t1, t2)?;
+                }
+                Ok(())
+            }
+
+            // Tuples must have same length and unify elements
+            (Ty::Tuple(tys1), Ty::Tuple(tys2)) => {
+                if tys1.len() != tys2.len() {
+                    return Err(TypeError::new(format!(
+                        "tuple length mismatch: {} vs {}",
+                        tys1.len(),
+                        tys2.len()
+                    )));
+                }
+                for (t1, t2) in tys1.iter().zip(tys2.iter()) {
+                    self.unify(t1, t2)?;
+                }
+                Ok(())
+            }
+
+            // Lists unify element types
+            (Ty::List(t1), Ty::List(t2)) => self.unify(t1, t2),
+
+            // Function types
+            (Ty::Fn { params: p1, ret: r1 }, Ty::Fn { params: p2, ret: r2 }) => {
+                if p1.len() != p2.len() {
+                    return Err(TypeError::new("function arity mismatch"));
+                }
+                for (t1, t2) in p1.iter().zip(p2.iter()) {
+                    self.unify(t1, t2)?;
+                }
+                self.unify(r1, r2)
+            }
+
+            // Primitives must match exactly (handled by ty1 == ty2 above)
+            _ => Err(TypeError::new(format!(
+                "cannot unify {} with {}",
+                ty1, ty2
+            ))),
+        }
+    }
+
+    /// Apply all recorded substitutions to a type.
+    fn apply_substitutions(&self, ty: &Ty) -> Ty {
+        match ty {
+            Ty::Infer(id) => {
+                if let Some(resolved) = self.substitutions.get(id) {
+                    // Recursively apply substitutions
+                    self.apply_substitutions(resolved)
+                } else {
+                    ty.clone()
+                }
+            }
+            Ty::Tuple(tys) => {
+                Ty::Tuple(tys.iter().map(|t| self.apply_substitutions(t)).collect())
+            }
+            Ty::List(t) => Ty::List(Box::new(self.apply_substitutions(t))),
+            Ty::Named { name, module, args } => Ty::Named {
+                name: name.clone(),
+                module: module.clone(),
+                args: args.iter().map(|t| self.apply_substitutions(t)).collect(),
+            },
+            Ty::Fn { params, ret } => Ty::Fn {
+                params: params.iter().map(|t| self.apply_substitutions(t)).collect(),
+                ret: Box::new(self.apply_substitutions(ret)),
+            },
+            // Primitives and type variables don't need substitution
+            _ => ty.clone(),
+        }
+    }
+
+    /// Instantiate a generic function with fresh inference variables.
+    fn instantiate_function(&mut self, info: &FnInfo) -> FnInfo {
+        if info.type_params.is_empty() {
+            return info.clone();
+        }
+
+        // Create a substitution mapping each type param to a fresh inference var
+        let mut subst = HashMap::new();
+        for param in &info.type_params {
+            subst.insert(param.clone(), self.fresh_infer());
+        }
+
+        FnInfo {
+            name: info.name.clone(),
+            type_params: vec![], // Instantiated function has no type params
+            params: info
+                .params
+                .iter()
+                .map(|(name, ty)| (name.clone(), ty.substitute(&subst)))
+                .collect(),
+            ret: info.ret.substitute(&subst),
+        }
+    }
+
+    /// Instantiate a generic enum with fresh inference variables.
+    fn instantiate_enum(&mut self, info: &EnumInfo) -> (EnumInfo, HashMap<String, Ty>) {
+        if info.type_params.is_empty() {
+            return (info.clone(), HashMap::new());
+        }
+
+        // Create a substitution mapping each type param to a fresh inference var
+        let mut subst = HashMap::new();
+        for param in &info.type_params {
+            subst.insert(param.clone(), self.fresh_infer());
+        }
+
+        let instantiated = EnumInfo {
+            name: info.name.clone(),
+            type_params: vec![],
+            variants: info
+                .variants
+                .iter()
+                .map(|(name, fields)| {
+                    (
+                        name.clone(),
+                        fields.iter().map(|t| t.substitute(&subst)).collect(),
+                    )
+                })
+                .collect(),
+        };
+
+        (instantiated, subst)
     }
 
     /// Convert AST type to internal type representation.
@@ -736,7 +915,10 @@ impl TypeChecker {
                 let variant_as_enum = variant.clone();
                 let enum_name = type_name.as_ref().unwrap_or(&variant_as_enum);
                 if let Some(info) = self.env.get_enum(enum_name).cloned() {
-                    if let Some((_, expected_tys)) = info.variants.iter().find(|(v, _)| v == variant) {
+                    // Instantiate the generic enum with fresh inference vars
+                    let (instantiated, subst) = self.instantiate_enum(&info);
+
+                    if let Some((_, expected_tys)) = instantiated.variants.iter().find(|(v, _)| v == variant) {
                         if args.len() != expected_tys.len() {
                             self.error(TypeError::new(format!(
                                 "variant '{}' expects {} arguments, got {}",
@@ -745,9 +927,12 @@ impl TypeChecker {
                                 args.len()
                             )));
                         }
+                        // Check and unify argument types
                         for (arg, expected_ty) in args.iter().zip(expected_tys.iter()) {
                             let arg_ty = self.infer_expr(arg)?;
-                            if !self.types_compatible(&arg_ty, expected_ty) {
+                            if self.unify(&arg_ty, expected_ty).is_err()
+                                && !self.types_compatible(&arg_ty, expected_ty)
+                            {
                                 self.error(TypeError::with_help(
                                     format!("type mismatch in variant '{}'", variant),
                                     format!("expected {}, found {}", expected_ty, arg_ty),
@@ -760,20 +945,62 @@ impl TypeChecker {
                             enum_name, variant
                         )));
                     }
+
+                    // Build the type arguments from substitutions
+                    let type_args: Vec<Ty> = info
+                        .type_params
+                        .iter()
+                        .map(|p| {
+                            subst
+                                .get(p)
+                                .map(|t| self.apply_substitutions(t))
+                                .unwrap_or(Ty::Any)
+                        })
+                        .collect();
+
                     Ok(Ty::Named {
                         name: enum_name.clone(),
                         module: None,
-                        args: vec![],
+                        args: type_args,
                     })
                 } else {
                     // Could be a variant without a type name (e.g., Some(x))
                     // Search all enums for this variant
                     for (name, info) in &self.env.enums.clone() {
-                        if info.variants.iter().any(|(v, _)| v == variant) {
+                        if let Some((_, _expected_tys)) =
+                            info.variants.iter().find(|(v, _)| v == variant)
+                        {
+                            // Found the enum - instantiate it
+                            let (instantiated, subst) = self.instantiate_enum(&info);
+                            let inst_expected: Vec<Ty> = instantiated
+                                .variants
+                                .iter()
+                                .find(|(v, _)| v == variant)
+                                .map(|(_, tys)| tys.clone())
+                                .unwrap_or_default();
+
+                            // Unify arguments
+                            for (arg, expected_ty) in args.iter().zip(inst_expected.iter()) {
+                                let arg_ty = self.infer_expr(arg)?;
+                                let _ = self.unify(&arg_ty, expected_ty);
+                            }
+
+                            // Build type arguments
+                            let type_args: Vec<Ty> = info
+                                .type_params
+                                .iter()
+                                .map(|p| {
+                                    subst
+                                        .get(p)
+                                        .map(|t| self.apply_substitutions(t))
+                                        .unwrap_or(Ty::Any)
+                                })
+                                .collect();
+
                             return Ok(Ty::Named {
                                 name: name.clone(),
                                 module: None,
-                                args: vec![],
+                                args: type_args,
                             });
                         }
                     }
@@ -952,20 +1179,26 @@ impl TypeChecker {
         match func {
             Expr::Ident(name) => {
                 if let Some(info) = self.env.get_function(name).cloned() {
+                    // Instantiate generic function with fresh inference variables
+                    let instantiated = self.instantiate_function(&info);
+
                     // Check argument count
-                    if args.len() != info.params.len() {
+                    if args.len() != instantiated.params.len() {
                         self.error(TypeError::new(format!(
                             "function '{}' expects {} arguments, got {}",
                             name,
-                            info.params.len(),
+                            instantiated.params.len(),
                             args.len()
                         )));
                     }
 
-                    // Check argument types
-                    for (arg, (_, param_ty)) in args.iter().zip(info.params.iter()) {
+                    // Check argument types and unify
+                    for (arg, (_, param_ty)) in args.iter().zip(instantiated.params.iter()) {
                         let arg_ty = self.infer_expr(arg)?;
-                        if !self.types_compatible(&arg_ty, param_ty) {
+                        // Try to unify, fall back to compatibility check
+                        if self.unify(&arg_ty, param_ty).is_err()
+                            && !self.types_compatible(&arg_ty, param_ty)
+                        {
                             self.error(TypeError::with_help(
                                 format!("type mismatch in call to '{}'", name),
                                 format!("expected {}, found {}", param_ty, arg_ty),
@@ -973,7 +1206,8 @@ impl TypeChecker {
                         }
                     }
 
-                    Ok(info.ret.clone())
+                    // Apply substitutions to return type
+                    Ok(self.apply_substitutions(&instantiated.ret))
                 } else {
                     // Unknown function - could be external
                     for arg in args {
@@ -1005,8 +1239,11 @@ impl TypeChecker {
     fn infer_method_call(&mut self, recv_ty: &Ty, method: &str, args: &[Expr]) -> TypeResult<Ty> {
         if let Ty::Named { name, .. } = recv_ty {
             if let Some(info) = self.env.get_method(name, method).cloned() {
+                // Instantiate generic method with fresh inference variables
+                let instantiated = self.instantiate_function(&info);
+
                 // Check argument count (excluding self)
-                let expected_args = info.params.len().saturating_sub(1);
+                let expected_args = instantiated.params.len().saturating_sub(1);
                 if args.len() != expected_args {
                     self.error(TypeError::new(format!(
                         "method '{}' expects {} arguments, got {}",
@@ -1014,10 +1251,12 @@ impl TypeChecker {
                     )));
                 }
 
-                // Check argument types
-                for (arg, (_, param_ty)) in args.iter().zip(info.params.iter().skip(1)) {
+                // Check argument types and unify
+                for (arg, (_, param_ty)) in args.iter().zip(instantiated.params.iter().skip(1)) {
                     let arg_ty = self.infer_expr(arg)?;
-                    if !self.types_compatible(&arg_ty, param_ty) {
+                    if self.unify(&arg_ty, param_ty).is_err()
+                        && !self.types_compatible(&arg_ty, param_ty)
+                    {
                         self.error(TypeError::with_help(
                             format!("type mismatch in method call '{}'", method),
                             format!("expected {}, found {}", param_ty, arg_ty),
@@ -1025,7 +1264,8 @@ impl TypeChecker {
                     }
                 }
 
-                return Ok(info.ret.clone());
+                // Apply substitutions to return type
+                return Ok(self.apply_substitutions(&instantiated.ret));
             }
         }
 
