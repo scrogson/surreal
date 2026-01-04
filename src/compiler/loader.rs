@@ -303,7 +303,8 @@ mod tests {
         let module = loader.load(&path).unwrap();
 
         assert_eq!(module.name, "math");
-        assert_eq!(module.items.len(), 1);
+        // 3 items: 2 prelude (Option, Result) + 1 user function
+        assert_eq!(module.items.len(), 3);
     }
 
     #[test]

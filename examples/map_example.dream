@@ -1,15 +1,5 @@
 /// Map example - testing locally defined Map
-
-// Local types
-enum Option<T> {
-    Some(T),
-    None,
-}
-
-enum Result<T, E> {
-    Ok(T),
-    Err(E),
-}
+/// Uses Option and Result from the prelude.
 
 pub enum KeyError {
     NotFound,

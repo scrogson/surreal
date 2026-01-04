@@ -3,6 +3,7 @@
 use crate::compiler::ast::*;
 use crate::compiler::error::{ParseError, ParseResult};
 use crate::compiler::lexer::{Lexer, Span, SpannedToken};
+use crate::compiler::prelude::prelude_items_for_module;
 use crate::compiler::token::Token;
 
 /// Recursive descent parser.
@@ -36,7 +37,13 @@ impl<'source> Parser<'source> {
         }
 
         self.expect(&Token::RBrace)?;
-        Ok(Module { name, items })
+
+        // Inject prelude items (Option, Result) at the beginning
+        let prelude = prelude_items_for_module(&items);
+        let mut all_items = prelude;
+        all_items.extend(items);
+
+        Ok(Module { name, items: all_items })
     }
 
     /// Parse a source file as a module.
@@ -59,9 +66,14 @@ impl<'source> Parser<'source> {
             items.push(self.parse_item()?);
         }
 
+        // Inject prelude items (Option, Result) at the beginning
+        let prelude = prelude_items_for_module(&items);
+        let mut all_items = prelude;
+        all_items.extend(items);
+
         Ok(Module {
             name: module_name.to_string(),
-            items,
+            items: all_items,
         })
     }
 
@@ -1779,6 +1791,60 @@ impl<'source> Parser<'source> {
 mod tests {
     use super::*;
 
+    /// Count the number of prelude items (Option, Result) injected into a module.
+    /// Prelude items are always at the start, in order: Option (if present), Result (if present).
+    fn prelude_count(module: &Module) -> usize {
+        let mut count = 0;
+        let mut iter = module.items.iter();
+
+        // Check for prelude Option at position 0
+        if let Some(Item::Enum(e)) = iter.next() {
+            if e.name == "Option"
+                && !e.is_pub
+                && e.variants.len() == 2
+                && e.variants[0].name == "Some"
+                && e.variants[1].name == "None"
+                && e.type_params == vec!["T".to_string()]
+            {
+                count += 1;
+                // Check for prelude Result at position 1
+                if let Some(Item::Enum(e)) = iter.next() {
+                    if e.name == "Result"
+                        && !e.is_pub
+                        && e.variants.len() == 2
+                        && e.variants[0].name == "Ok"
+                        && e.variants[1].name == "Err"
+                        && e.type_params == vec!["T".to_string(), "E".to_string()]
+                    {
+                        count += 1;
+                    }
+                }
+            } else if e.name == "Result"
+                && !e.is_pub
+                && e.variants.len() == 2
+                && e.variants[0].name == "Ok"
+                && e.variants[1].name == "Err"
+                && e.type_params == vec!["T".to_string(), "E".to_string()]
+            {
+                // Only Result was injected (module already defines Option)
+                count += 1;
+            }
+        }
+        count
+    }
+
+    /// Get the first non-prelude item from a module
+    fn first_user_item(module: &Module) -> &Item {
+        let skip = prelude_count(module);
+        &module.items[skip]
+    }
+
+    /// Get user items (non-prelude) from a module
+    fn user_items(module: &Module) -> &[Item] {
+        let skip = prelude_count(module);
+        &module.items[skip..]
+    }
+
     #[test]
     fn test_parse_simple_function() {
         let source = r#"
@@ -1792,9 +1858,9 @@ mod tests {
         let module = parser.parse_module().unwrap();
 
         assert_eq!(module.name, "test");
-        assert_eq!(module.items.len(), 1);
+        assert_eq!(user_items(&module).len(), 1);
 
-        if let Item::Function(f) = &module.items[0] {
+        if let Item::Function(f) = first_user_item(&module) {
             assert_eq!(f.name, "add");
             assert_eq!(f.params.len(), 2);
             assert!(!f.is_pub);
@@ -1816,7 +1882,7 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Struct(s) = &module.items[0] {
+        if let Item::Struct(s) = first_user_item(&module) {
             assert_eq!(s.name, "Point");
             assert_eq!(s.fields.len(), 2);
             assert!(s.is_pub);
@@ -1838,7 +1904,9 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Enum(e) = &module.items[0] {
+        // Note: prelude injects Option, so test module has a duplicate
+        // We use index 2 to skip prelude Option/Result
+        if let Item::Enum(e) = first_user_item(&module) {
             assert_eq!(e.name, "Option");
             assert_eq!(e.variants.len(), 2);
             assert_eq!(e.variants[0].name, "Some");
@@ -1867,7 +1935,7 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Function(f) = &module.items[0] {
+        if let Item::Function(f) = first_user_item(&module) {
             assert_eq!(f.body.stmts.len(), 1);
             assert!(f.body.expr.is_some());
         } else {
@@ -1890,7 +1958,7 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Function(f) = &module.items[0] {
+        if let Item::Function(f) = first_user_item(&module) {
             if let Some(Expr::Match { arms, .. }) = f.body.expr.as_deref() {
                 assert_eq!(arms.len(), 2);
             } else {
@@ -1918,7 +1986,7 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Function(f) = &module.items[0] {
+        if let Item::Function(f) = first_user_item(&module) {
             if let Some(Expr::Receive { arms, timeout }) = f.body.expr.as_deref() {
                 assert_eq!(arms.len(), 1);
                 assert!(timeout.is_some());
@@ -1944,7 +2012,7 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Function(f) = &module.items[0] {
+        if let Item::Function(f) = first_user_item(&module) {
             if let Some(Expr::SpawnClosure(_)) = f.body.expr.as_deref() {
                 // ok
             } else {
@@ -1967,7 +2035,7 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Function(f) = &module.items[0] {
+        if let Item::Function(f) = first_user_item(&module) {
             if let Stmt::Expr(Expr::Send { .. }) = &f.body.stmts[0] {
                 // ok
             } else {
@@ -1993,7 +2061,7 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Function(f) = &module.items[0] {
+        if let Item::Function(f) = first_user_item(&module) {
             if let Some(Expr::Match { arms, .. }) = f.body.expr.as_deref() {
                 if let Pattern::ListCons { .. } = &arms[0].pattern {
                     // ok
@@ -2024,7 +2092,7 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Function(f) = &module.items[1] {
+        if let Item::Function(f) = &user_items(&module)[1] {
             if let Some(Expr::Match { arms, .. }) = f.body.expr.as_deref() {
                 if let Pattern::Struct { name, fields } = &arms[0].pattern {
                     assert_eq!(name, "Point");
@@ -2067,7 +2135,7 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Function(f) = &module.items[1] {
+        if let Item::Function(f) = &user_items(&module)[1] {
             if let Some(Expr::Match { arms, .. }) = f.body.expr.as_deref() {
                 if let Pattern::Struct { name, fields } = &arms[0].pattern {
                     assert_eq!(name, "Point");
@@ -2102,7 +2170,7 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Function(f) = &module.items[0] {
+        if let Item::Function(f) = first_user_item(&module) {
             assert_eq!(f.name, "loop");
         } else {
             panic!("expected function");
@@ -2122,7 +2190,8 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Enum(e) = &module.items[0] {
+        // Use first_user_item since prelude Option won't be added (module defines Option)
+        if let Item::Enum(e) = first_user_item(&module) {
             assert_eq!(e.name, "Option");
             assert_eq!(e.type_params, vec!["T".to_string()]);
             assert_eq!(e.variants.len(), 2);
@@ -2152,7 +2221,9 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Enum(e) = &module.items[0] {
+        // Prelude adds Option at index 0, user's Result is at index 1
+        // (Can't use first_user_item because user's Result matches prelude signature)
+        if let Item::Enum(e) = &module.items[1] {
             assert_eq!(e.name, "Result");
             assert_eq!(e.type_params, vec!["T".to_string(), "E".to_string()]);
             assert_eq!(e.variants.len(), 2);
@@ -2176,7 +2247,7 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Function(f) = &module.items[0] {
+        if let Item::Function(f) = first_user_item(&module) {
             assert_eq!(f.name, "map");
             assert_eq!(f.type_params, vec!["T".to_string(), "U".to_string()]);
             assert_eq!(f.params.len(), 2);
@@ -2214,7 +2285,7 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Struct(s) = &module.items[0] {
+        if let Item::Struct(s) = first_user_item(&module) {
             assert_eq!(s.name, "Pair");
             assert_eq!(s.type_params, vec!["A".to_string(), "B".to_string()]);
             assert_eq!(s.fields.len(), 2);
@@ -2235,7 +2306,7 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Function(f) = &module.items[0] {
+        if let Item::Function(f) = first_user_item(&module) {
             // Param type should be Result<Option<int>, String>
             if let Type::Named { name, type_args } = &f.params[0].ty {
                 assert_eq!(name, "Result");
@@ -2270,7 +2341,7 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Function(f) = &module.items[0] {
+        if let Item::Function(f) = first_user_item(&module) {
             if let Stmt::Let { value, .. } = &f.body.stmts[0] {
                 if let Expr::BitString(segments) = value {
                     assert_eq!(segments.len(), 3);
@@ -2304,7 +2375,7 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Function(f) = &module.items[0] {
+        if let Item::Function(f) = first_user_item(&module) {
             if let Stmt::Let { value, .. } = &f.body.stmts[0] {
                 if let Expr::BitString(segments) = value {
                     assert_eq!(segments.len(), 1);
@@ -2342,7 +2413,7 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Function(f) = &module.items[0] {
+        if let Item::Function(f) = first_user_item(&module) {
             if let Stmt::Let { value, .. } = &f.body.stmts[0] {
                 if let Expr::BitString(segments) = value {
                     assert_eq!(segments.len(), 1);
@@ -2374,7 +2445,7 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        let Item::Function(f) = &module.items[0] else {
+        let Item::Function(f) = first_user_item(&module) else {
             panic!("expected function");
         };
         let Some(ref expr) = f.body.expr else {
@@ -2416,7 +2487,7 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().unwrap();
 
-        if let Item::Function(f) = &module.items[0] {
+        if let Item::Function(f) = first_user_item(&module) {
             if let Stmt::Let { value, .. } = &f.body.stmts[0] {
                 if let Expr::BitString(segments) = value {
                     assert_eq!(segments.len(), 0);
@@ -2437,8 +2508,8 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().expect("binary.dream should parse successfully");
 
-        // Should have 10 functions
-        assert_eq!(module.items.len(), 10);
+        // Should have 10 functions + 2 prelude items
+        assert_eq!(user_items(&module).len(), 10);
         assert_eq!(module.name, "binaries");
     }
 
@@ -2465,11 +2536,11 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().expect("impl block should parse");
 
-        // Should have struct and impl
-        assert_eq!(module.items.len(), 2);
+        // Should have struct and impl (plus prelude items)
+        assert_eq!(user_items(&module).len(), 2);
 
-        // Check the impl block
-        if let Item::Impl(impl_block) = &module.items[1] {
+        // Check the impl block (index 1 in user items)
+        if let Item::Impl(impl_block) = &user_items(&module)[1] {
             assert_eq!(impl_block.type_name, "Point");
             assert_eq!(impl_block.methods.len(), 2);
             assert_eq!(impl_block.methods[0].name, "new");
@@ -2494,9 +2565,9 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().expect("trait def should parse");
 
-        assert_eq!(module.items.len(), 1);
+        assert_eq!(user_items(&module).len(), 1);
 
-        if let Item::Trait(trait_def) = &module.items[0] {
+        if let Item::Trait(trait_def) = first_user_item(&module) {
             assert_eq!(trait_def.name, "Display");
             assert_eq!(trait_def.methods.len(), 2);
             assert_eq!(trait_def.methods[0].name, "display");
@@ -2532,9 +2603,9 @@ mod tests {
         let mut parser = Parser::new(source);
         let module = parser.parse_module().expect("trait impl should parse");
 
-        assert_eq!(module.items.len(), 3);
+        assert_eq!(user_items(&module).len(), 3);
 
-        if let Item::TraitImpl(trait_impl) = &module.items[2] {
+        if let Item::TraitImpl(trait_impl) = &user_items(&module)[2] {
             assert_eq!(trait_impl.trait_name, "Display");
             assert_eq!(trait_impl.type_name, "Point");
             assert_eq!(trait_impl.methods.len(), 1);

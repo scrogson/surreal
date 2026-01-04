@@ -1,18 +1,7 @@
 // Dream Standard Library - Map Module
 //
 // Provides a key-value map backed by Erlang maps with Option/Result-based access.
-
-// Local Option type (until prelude is implemented)
-enum Option<T> {
-    Some(T),
-    None,
-}
-
-// Local Result type (until prelude is implemented)
-enum Result<T, E> {
-    Ok(T),
-    Err(E),
-}
+// Uses Option and Result from the prelude.
 
 /// Error type for map operations
 pub enum KeyError {

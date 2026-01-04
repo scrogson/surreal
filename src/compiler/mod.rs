@@ -10,6 +10,7 @@ mod error;
 mod lexer;
 mod loader;
 mod parser;
+mod prelude;
 mod token;
 
 pub use ast::*;
