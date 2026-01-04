@@ -775,6 +775,13 @@ impl TypeChecker {
                     self.bind_pattern(p, &Ty::Any)?;
                 }
             }
+            Pattern::BitString(segments) => {
+                // Bind variables in binary pattern segments
+                for seg in segments {
+                    // Each segment value is a pattern (could be Ident, Wildcard, etc.)
+                    self.bind_pattern(&seg.value, &Ty::Int)?;
+                }
+            }
             _ => {}
         }
         Ok(())
