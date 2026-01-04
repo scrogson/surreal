@@ -213,6 +213,59 @@ impl ModuleLoader {
     pub fn loaded_module_names(&self) -> HashSet<String> {
         self.loaded.values().map(|m| m.name.clone()).collect()
     }
+
+    /// Load all .dream files in a directory (recursively).
+    /// This is used for Elixir-style project compilation where all files
+    /// in src/ are compiled automatically.
+    pub fn load_all_in_dir(&mut self, dir: &Path) -> LoadResult<Vec<Module>> {
+        let files = Self::find_dream_files(dir)?;
+
+        for file in &files {
+            // Skip if already loaded
+            if let Ok(canonical) = file.canonicalize() {
+                if self.loaded.contains_key(&canonical) {
+                    continue;
+                }
+            }
+
+            // Load the file (this will also load its mod dependencies)
+            self.load(file)?;
+        }
+
+        Ok(self.loaded.values().cloned().collect())
+    }
+
+    /// Find all .dream files in a directory recursively.
+    fn find_dream_files(dir: &Path) -> LoadResult<Vec<PathBuf>> {
+        let mut files = Vec::new();
+        Self::find_dream_files_recursive(dir, &mut files)?;
+        // Sort for deterministic ordering
+        files.sort();
+        Ok(files)
+    }
+
+    fn find_dream_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) -> LoadResult<()> {
+        if !dir.is_dir() {
+            return Ok(());
+        }
+
+        let entries = fs::read_dir(dir)
+            .map_err(|e| LoadError::with_path(format!("cannot read directory: {}", e), dir.to_path_buf()))?;
+
+        for entry in entries {
+            let entry = entry
+                .map_err(|e| LoadError::with_path(format!("cannot read entry: {}", e), dir.to_path_buf()))?;
+            let path = entry.path();
+
+            if path.is_dir() {
+                Self::find_dream_files_recursive(&path, files)?;
+            } else if path.extension().and_then(|s| s.to_str()) == Some("dream") {
+                files.push(path);
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for ModuleLoader {

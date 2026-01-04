@@ -1,0 +1,22 @@
+/// Multi-file project example
+///
+/// This demonstrates a Dream project with multiple modules.
+/// Build with: dream build
+/// Run with: dream run
+
+pub fn main() -> atom {
+    // Use the math module
+    let sum = math::add(10, 20);
+    let product = math::multiply(5, 6);
+
+    io::println("Multi-file project example");
+    io::println("==========================");
+    io::format("10 + 20 = ~p~n", [sum]);
+    io::format("5 * 6 = ~p~n", [product]);
+
+    // Use the greet module
+    greet::hello();
+    greet::welcome();
+
+    :ok
+}

@@ -1,0 +1,13 @@
+/// Greeting utilities module
+
+pub fn hello() -> atom {
+    io::println("Hello from the greet module!")
+}
+
+pub fn welcome() -> atom {
+    io::println("Welcome to Dream!")
+}
+
+pub fn farewell() -> atom {
+    io::println("Goodbye!")
+}

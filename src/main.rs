@@ -7,7 +7,7 @@ use std::process::{Command, ExitCode};
 use clap::{Parser, Subcommand};
 
 use dream::{
-    compiler::{CoreErlangEmitter, ModuleLoader},
+    compiler::{CoreErlangEmitter, Module, ModuleLoader},
     config::{generate_dream_toml, generate_main_dream, ProjectConfig},
 };
 
@@ -150,17 +150,15 @@ fn cmd_build(file: Option<&Path>, target: &str, output: Option<&Path>) -> ExitCo
 
     println!("Compiling {}...", config.package.name);
 
-    // Find entry point
-    let entry_file = find_entry_file(&src_dir);
-    let entry_file = match entry_file {
-        Some(f) => f,
-        None => {
-            eprintln!("Error: no main.dream or lib.dream found in {}", src_dir.display());
-            return ExitCode::from(1);
-        }
-    };
+    // Load all .dream files in src/ directory
+    let mut loader = ModuleLoader::new();
+    if let Err(e) = loader.load_all_in_dir(&src_dir) {
+        eprintln!("Error loading modules: {}", e);
+        return ExitCode::from(1);
+    }
 
-    compile_and_emit(&entry_file, &build_dir, target)
+    // Compile all loaded modules
+    compile_modules(loader.modules(), &build_dir, target)
 }
 
 /// Build a standalone .dream file.
@@ -195,9 +193,25 @@ fn compile_and_emit(entry_file: &Path, build_dir: &Path, target: &str) -> ExitCo
         return ExitCode::from(1);
     }
 
+    compile_modules(loader.modules(), build_dir, target)
+}
+
+/// Compile modules to Core Erlang and optionally BEAM.
+fn compile_modules<'a>(
+    modules: impl Iterator<Item = &'a Module>,
+    build_dir: &Path,
+    target: &str,
+) -> ExitCode {
+    let modules: Vec<&Module> = modules.collect();
+
+    if modules.is_empty() {
+        eprintln!("No modules to compile");
+        return ExitCode::from(1);
+    }
+
     // Compile each module to Core Erlang
     let mut core_files = Vec::new();
-    for module in loader.modules() {
+    for module in &modules {
         let mut emitter = CoreErlangEmitter::new();
         let core_erlang = match emitter.emit_module(module) {
             Ok(c) => c,
@@ -444,21 +458,6 @@ fn cmd_run(file: Option<&Path>, function: &str, args: &[String]) -> ExitCode {
             ExitCode::from(1)
         }
     }
-}
-
-/// Find the entry file (main.dream or lib.dream) in the source directory.
-fn find_entry_file(src_dir: &Path) -> Option<PathBuf> {
-    let main = src_dir.join("main.dream");
-    if main.exists() {
-        return Some(main);
-    }
-
-    let lib = src_dir.join("lib.dream");
-    if lib.exists() {
-        return Some(lib);
-    }
-
-    None
 }
 
 /// Check if a command exists in PATH.
