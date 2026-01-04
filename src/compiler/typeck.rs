@@ -1100,15 +1100,28 @@ impl TypeChecker {
             }
 
             // Receive
-            Expr::Receive { arms, timeout: _ } => {
-                // For receive, just check the arms and return Any
-                // since we don't know message types statically
+            Expr::Receive { arms, timeout } => {
+                // For receive, check each arm with pattern variables bound
                 for arm in arms {
-                    self.check_block(&Block {
-                        stmts: vec![],
-                        expr: Some(Box::new(arm.body.clone())),
-                    })?;
+                    // Create new scope for arm
+                    let mut scope = self.env.child();
+                    std::mem::swap(&mut self.env, &mut scope);
+
+                    // Bind pattern variables (message type is unknown, use Any)
+                    self.bind_pattern(&arm.pattern, &Ty::Any)?;
+
+                    // Infer body type
+                    self.infer_expr(&arm.body)?;
+
+                    std::mem::swap(&mut self.env, &mut scope);
                 }
+
+                // Check timeout block if present
+                if let Some((timeout_expr, timeout_block)) = timeout {
+                    self.infer_expr(timeout_expr)?;
+                    self.check_block(timeout_block)?;
+                }
+
                 Ok(Ty::Any)
             }
 
