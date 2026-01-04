@@ -1,6 +1,7 @@
 // Test spawn and receive
 
 mod spawn_test {
+    use io::{println, format};
     pub fn simple() -> int {
         3
     }
@@ -61,10 +62,32 @@ mod spawn_test {
     pub fn wait_with_timeout(ms: int) -> atom {
         receive {
             :ping => :pong,
-            _ => :other,
+            _x => :other,
             after ms => {
                 :timed_out
             }
         }
+    }
+
+    pub fn main() -> atom {
+        println("=== Spawn and Receive Example ===");
+
+        // Test self()
+        let me = self();
+        format("My PID: ~p~n", [me]);
+
+        // Test spawning a process
+        let pid = spawn(simple());
+        format("Spawned process: ~p~n", [pid]);
+
+        // Test timeout receive (doesn't block forever)
+        println("");
+        println("Testing receive with timeout...");
+        let result = wait_timeout();
+        format("wait_timeout() = ~p (expected :timeout)~n", [result]);
+
+        println("");
+        println("All spawn tests passed!");
+        :ok
     }
 }

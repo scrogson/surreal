@@ -1,0 +1,38 @@
+// Option type example - demonstrating Option from stdlib with method chaining
+
+mod option_example {
+    use io::{println, format};
+    use option::{unwrap_or, is_some, is_none};
+
+    // Safe division that returns Option<int>
+    pub fn safe_div(a: int, b: int) -> Option<int> {
+        if b == 0 {
+            None
+        } else {
+            Some(a / b)
+        }
+    }
+
+    pub fn main() -> atom {
+        println("=== Option Type Example ===");
+
+        // Method chaining with unwrap_or
+        format("10 / 2 = ~p~n", [safe_div(10, 2).unwrap_or(-1)]);
+        format("10 / 0 = ~p (default -1)~n", [safe_div(10, 0).unwrap_or(-1)]);
+
+        // Method chaining with is_some/is_none
+        format("20 / 4 is_some: ~p~n", [safe_div(20, 4).is_some()]);
+        format("20 / 0 is_some: ~p~n", [safe_div(20, 0).is_some()]);
+        format("20 / 0 is_none: ~p~n", [safe_div(20, 0).is_none()]);
+
+        // Direct Some/None with method chaining
+        format("Some(42).unwrap_or(0) = ~p~n", [Some(42).unwrap_or(0)]);
+
+        // For None, we need to use the function syntax since type inference
+        // can't determine the type parameter from None alone
+        let none_val: Option<int> = None;
+        format("None.unwrap_or(0) = ~p~n", [none_val.unwrap_or(0)]);
+
+        :ok
+    }
+}

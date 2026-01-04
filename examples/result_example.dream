@@ -1,0 +1,37 @@
+// Result type example - demonstrating Result from stdlib with method chaining
+
+mod result_example {
+    use io::{println, format};
+    use result::{unwrap_or, is_ok, is_err};
+
+    // Parse a "number" (simulated: positive = ok, negative = error)
+    pub fn parse(n: int) -> Result<int, string> {
+        if n >= 0 {
+            Ok(n)
+        } else {
+            Err("negative number")
+        }
+    }
+
+    pub fn main() -> atom {
+        println("=== Result Type Example ===");
+
+        // Method chaining with unwrap_or
+        format("parse(42) = ~p~n", [parse(42).unwrap_or(-999)]);
+        format("parse(-5) = ~p (default -999)~n", [parse(-5).unwrap_or(-999)]);
+
+        // Method chaining with is_ok/is_err
+        format("parse(10) is_ok: ~p~n", [parse(10).is_ok()]);
+        format("parse(10) is_err: ~p~n", [parse(10).is_err()]);
+        format("parse(-10) is_ok: ~p~n", [parse(-10).is_ok()]);
+        format("parse(-10) is_err: ~p~n", [parse(-10).is_err()]);
+
+        // Direct Ok/Err with method chaining
+        format("Ok(100).unwrap_or(0) = ~p~n", [Ok(100).unwrap_or(0)]);
+
+        let err_val: Result<int, string> = Err("oops");
+        format("Err(\"oops\").unwrap_or(0) = ~p~n", [err_val.unwrap_or(0)]);
+
+        :ok
+    }
+}

@@ -1,8 +1,29 @@
 // Simple receive test
+
 mod recv_simple {
-    pub fn wait() -> int {
+    use io::{println, format};
+
+    // Wait for a message with timeout
+    pub fn wait_with_timeout(ms: int) -> atom {
         receive {
-            x => x
+            :ping => :got_ping,
+            :pong => :got_pong,
+            after ms => {
+                :timeout
+            }
         }
+    }
+
+    pub fn main() -> atom {
+        println("=== Simple Receive Example ===");
+
+        // Test receive with timeout (no message sent, should timeout)
+        format("Waiting 100ms for message...~n", []);
+        let result = wait_with_timeout(100);
+        format("Result: ~p (expected :timeout)~n", [result]);
+
+        println("");
+        println("Receive example complete!");
+        :ok
     }
 }

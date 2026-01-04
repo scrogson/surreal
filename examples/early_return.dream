@@ -1,6 +1,7 @@
 // Test early return semantics
 
 mod early_return {
+    use io::{println, format};
     // Simple early return from if
     pub fn clamp(x: int) -> int {
         if x < 0 { return 0; }
@@ -25,5 +26,30 @@ mod early_return {
         if x < 0 { return :negative; }
         if x == 0 { return :zero; }
         :positive
+    }
+
+    pub fn main() -> atom {
+        println("=== Early Return Example ===");
+
+        // Test clamp
+        format("clamp(-10) = ~p~n", [clamp(-10)]);
+        format("clamp(50) = ~p~n", [clamp(50)]);
+        format("clamp(150) = ~p~n", [clamp(150)]);
+
+        println("");
+
+        // Test sign
+        format("sign(5) = ~p~n", [sign(5)]);
+        format("sign(-5) = ~p~n", [sign(-5)]);
+        format("sign(0) = ~p~n", [sign(0)]);
+
+        println("");
+
+        // Test validate
+        format("validate(-5) = ~p~n", [validate(-5)]);
+        format("validate(0) = ~p~n", [validate(0)]);
+        format("validate(5) = ~p~n", [validate(5)]);
+
+        :ok
     }
 }

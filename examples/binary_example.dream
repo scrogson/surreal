@@ -1,7 +1,9 @@
 // Binary/Bit String Syntax example
 // Demonstrates Erlang-style binary construction and pattern matching
 
-mod binaries {
+mod binary_example {
+    use io::{println, format};
+
     // Create a simple binary with byte values
     pub fn make_bytes() -> binary {
         <<1, 2, 3, 4>>
@@ -36,7 +38,7 @@ mod binaries {
     // Pattern match on binary data
     pub fn parse_header(data: binary) -> int {
         match data {
-            <<version:8, flags:8, rest:16>> => version,
+            <<version:8, _flags:8, _rest:16>> => version,
             _ => 0,
         }
     }
@@ -54,16 +56,26 @@ mod binaries {
         <<>>
     }
 
-    // Test: create a binary and parse it
-    pub fn test_parse_header() -> int {
-        let data = <<1, 2, 3, 4>>;
-        parse_header(data)
-    }
+    pub fn main() -> atom {
+        println("=== Binary/BitString Example ===");
 
-    // Test: check magic bytes
-    pub fn test_check_magic() -> int {
+        format("make_bytes(): ~p~n", [make_bytes()]);
+        format("make_word(): ~p~n", [make_word()]);
+        format("make_little_endian(): ~p~n", [make_little_endian()]);
+        format("make_signed(): ~p~n", [make_signed()]);
+        format("make_packet(): ~p~n", [make_packet()]);
+        format("empty_binary(): ~p~n", [empty_binary()]);
+
+        println("");
+        println("Pattern matching:");
+
+        let data = <<1, 2, 3, 4>>;
+        format("parse_header(<<1,2,3,4>>): ~p~n", [parse_header(data)]);
+
         // "BM" header (66, 77) followed by size 100 in little endian
         let bmp = <<66, 77, 100, 0, 0, 0>>;
-        check_magic(bmp)
+        format("check_magic(BMP header): ~p~n", [check_magic(bmp)]);
+
+        :ok
     }
 }
