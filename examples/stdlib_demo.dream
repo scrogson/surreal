@@ -1,0 +1,33 @@
+/// Demonstration of stdlib modules
+
+use string::{len, to_upper, to_lower, trim, split, join, reverse};
+use timer::{now, seconds, minutes};
+
+pub fn main() -> atom {
+    io::println("=== String Module Demo ===");
+
+    let s = "  Hello, World!  ";
+    io::format("Original: '~s'~n", [s]);
+    io::format("Trimmed: '~s'~n", [trim(s)]);
+    io::format("Upper: '~s'~n", [to_upper(trim(s))]);
+    io::format("Lower: '~s'~n", [to_lower(trim(s))]);
+    io::format("Length: ~p~n", [len(trim(s))]);
+    io::format("Reversed: '~s'~n", [reverse(trim(s))]);
+
+    let parts = split("a,b,c,d", ",");
+    io::format("Split 'a,b,c,d' by ',': ~p~n", [parts]);
+
+    let joined = join(["x", "y", "z"], "-");
+    io::format("Join ['x','y','z'] with '-': '~s'~n", [joined]);
+
+    io::println("");
+    io::println("=== Timer Module Demo ===");
+
+    let start = now();
+    io::format("Current monotonic time: ~p ms~n", [start]);
+
+    io::format("1 second = ~p ms~n", [seconds(1)]);
+    io::format("5 minutes = ~p ms~n", [minutes(5)]);
+
+    :ok
+}

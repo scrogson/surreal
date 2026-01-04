@@ -1,0 +1,124 @@
+// Dream Standard Library - String Module
+//
+// Provides string manipulation functions using Erlang's string/binary modules.
+
+/// Get the length of a string (in characters).
+pub fn len(s: string) -> int {
+    :string::length(s)
+}
+
+/// Concatenate two strings.
+pub fn concat(a: string, b: string) -> string {
+    :lists::append(a, b)
+}
+
+/// Check if a string contains a substring.
+pub fn contains(haystack: string, needle: string) -> bool {
+    :string::find(haystack, needle) != :nomatch
+}
+
+/// Check if a string starts with a prefix.
+pub fn starts_with(s: string, prefix: string) -> bool {
+    :string::prefix(s, prefix) != :nomatch
+}
+
+/// Check if a string ends with a suffix.
+pub fn ends_with(s: string, suffix: string) -> bool {
+    let slen = len(s);
+    let suflen = len(suffix);
+    if suflen > slen {
+        false
+    } else {
+        :string::slice(s, slen - suflen) == suffix
+    }
+}
+
+/// Convert string to uppercase.
+pub fn to_upper(s: string) -> string {
+    :string::uppercase(s)
+}
+
+/// Convert string to lowercase.
+pub fn to_lower(s: string) -> string {
+    :string::lowercase(s)
+}
+
+/// Trim whitespace from both ends.
+pub fn trim(s: string) -> string {
+    :string::trim(s)
+}
+
+/// Trim whitespace from the left.
+pub fn trim_left(s: string) -> string {
+    :string::trim(s, :leading)
+}
+
+/// Trim whitespace from the right.
+pub fn trim_right(s: string) -> string {
+    :string::trim(s, :trailing)
+}
+
+/// Split string by a delimiter.
+pub fn split(s: string, delim: string) -> [string] {
+    :string::split(s, delim, :all)
+}
+
+/// Join a list of strings with a separator.
+pub fn join(parts: [string], sep: string) -> string {
+    :lists::join(sep, parts)
+}
+
+/// Replace all occurrences of a pattern with a replacement.
+pub fn replace(s: string, pattern: string, replacement: string) -> string {
+    :string::replace(s, pattern, replacement, :all)
+}
+
+/// Get a substring (slice) from start index with given length.
+pub fn slice(s: string, start: int, length: int) -> string {
+    :string::slice(s, start, length)
+}
+
+/// Reverse a string.
+pub fn reverse(s: string) -> string {
+    :string::reverse(s)
+}
+
+/// Check if string is empty.
+pub fn is_empty(s: string) -> bool {
+    len(s) == 0
+}
+
+/// Repeat a string n times.
+pub fn repeat(s: string, n: int) -> string {
+    :lists::flatten(:lists::duplicate(n, s))
+}
+
+/// Pad string on the left to reach target length.
+pub fn pad_left(s: string, target_len: int, pad_char: string) -> string {
+    :string::pad(s, target_len, :leading, pad_char)
+}
+
+/// Pad string on the right to reach target length.
+pub fn pad_right(s: string, target_len: int, pad_char: string) -> string {
+    :string::pad(s, target_len, :trailing, pad_char)
+}
+
+/// Convert an integer to a string.
+pub fn from_int(n: int) -> string {
+    :erlang::integer_to_list(n)
+}
+
+/// Parse a string as an integer.
+pub fn to_int(s: string) -> int {
+    :erlang::list_to_integer(s)
+}
+
+/// Convert an atom to a string.
+pub fn from_atom(a: atom) -> string {
+    :erlang::atom_to_list(a)
+}
+
+/// Convert a string to an atom.
+pub fn to_atom(s: string) -> atom {
+    :erlang::list_to_atom(s)
+}

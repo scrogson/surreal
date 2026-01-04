@@ -1,0 +1,50 @@
+// Dream Standard Library - Timer Module
+//
+// Provides timing utilities using Erlang's timer module.
+
+/// Sleep for a given number of milliseconds.
+pub fn sleep(ms: int) -> atom {
+    :timer::sleep(ms)
+}
+
+/// Get the current timestamp in milliseconds (monotonic).
+pub fn now() -> int {
+    :erlang::monotonic_time(:millisecond)
+}
+
+/// Get the current system time in milliseconds (wall clock).
+pub fn system_time() -> int {
+    :erlang::system_time(:millisecond)
+}
+
+/// Get the current system time in seconds (Unix timestamp).
+pub fn unix_time() -> int {
+    :erlang::system_time(:second)
+}
+
+/// Send a message to a process after a delay.
+/// Returns a timer reference that can be used to cancel.
+pub fn send_after<T, R>(ms: int, p: pid, msg: T) -> R {
+    :erlang::send_after(ms, p, msg)
+}
+
+/// Cancel a timer created by send_after.
+/// Returns the remaining time in ms, or false if already expired.
+pub fn cancel<T, R>(timer_ref: T) -> R {
+    :erlang::cancel_timer(timer_ref)
+}
+
+/// Convert seconds to milliseconds.
+pub fn seconds(n: int) -> int {
+    n * 1000
+}
+
+/// Convert minutes to milliseconds.
+pub fn minutes(n: int) -> int {
+    n * 60 * 1000
+}
+
+/// Convert hours to milliseconds.
+pub fn hours(n: int) -> int {
+    n * 60 * 60 * 1000
+}

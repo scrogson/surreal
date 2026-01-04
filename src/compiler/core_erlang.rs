@@ -188,7 +188,6 @@ impl CoreErlangEmitter {
                 | "bit_size"
                 | "node"
                 | "nodes"
-                | "now"
                 | "time"
                 | "date"
                 | "register"
