@@ -1142,6 +1142,14 @@ impl Codegen {
                 ))
             }
 
+            Expr::Closure { params, body } => {
+                // TODO: Implement closure compilation for VM
+                let _ = (params, body);
+                Err(CodegenError::new(
+                    "closures not yet implemented for VM target - use BEAM target",
+                ))
+            }
+
             Expr::Return(value) => {
                 let result = if let Some(v) = value {
                     self.compile_expr(v)?

@@ -1,0 +1,399 @@
+// Dream Standard Library - Enum Module
+//
+// Provides functional collection operations for lists and other enumerables.
+// Inspired by Elixir's Enum module.
+
+// =============================================================================
+// Core Transformations
+// =============================================================================
+
+/// Transform each element using a function.
+pub fn map<T, U>(items: [T], f: fn(T) -> U) -> [U] {
+    :lists::map(f, items)
+}
+
+/// Keep only elements where the predicate returns true.
+pub fn filter<T>(items: [T], pred: fn(T) -> bool) -> [T] {
+    :lists::filter(pred, items)
+}
+
+/// Remove elements where the predicate returns true.
+pub fn reject<T>(items: [T], pred: fn(T) -> bool) -> [T] {
+    // Can't use nested closure with outer param, use filtermap
+    :lists::filtermap(fn(x) {
+        if pred(x) {
+            false
+        } else {
+            (true, x)
+        }
+    }, items)
+}
+
+/// Reduce a list to a single value using an accumulator.
+pub fn reduce<T, Acc>(items: [T], init: Acc, f: fn(T, Acc) -> Acc) -> Acc {
+    :lists::foldl(f, init, items)
+}
+
+/// Reduce from the right side.
+pub fn reduce_right<T, Acc>(items: [T], init: Acc, f: fn(T, Acc) -> Acc) -> Acc {
+    :lists::foldr(f, init, items)
+}
+
+/// Map then flatten one level.
+pub fn flat_map<T, U>(items: [T], f: fn(T) -> [U]) -> [U] {
+    :lists::flatmap(f, items)
+}
+
+// =============================================================================
+// Searching and Finding
+// =============================================================================
+
+/// Find the first element matching the predicate.
+pub fn find<T>(items: [T], pred: fn(T) -> bool) -> Option<T> {
+    find_loop(items, pred)
+}
+
+fn find_loop<T>(items: [T], pred: fn(T) -> bool) -> Option<T> {
+    match items {
+        [] => None,
+        [head | tail] => {
+            if pred(head) {
+                Some(head)
+            } else {
+                find_loop(tail, pred)
+            }
+        }
+    }
+}
+
+/// Check if any element matches the predicate.
+pub fn any<T>(items: [T], pred: fn(T) -> bool) -> bool {
+    :lists::any(pred, items)
+}
+
+/// Check if all elements match the predicate.
+pub fn all<T>(items: [T], pred: fn(T) -> bool) -> bool {
+    :lists::all(pred, items)
+}
+
+/// Check if no elements match the predicate.
+pub fn none<T>(items: [T], pred: fn(T) -> bool) -> bool {
+    !:lists::any(pred, items)
+}
+
+/// Count elements matching a predicate.
+pub fn count<T>(items: [T], pred: fn(T) -> bool) -> int {
+    :erlang::length(:lists::filter(pred, items))
+}
+
+/// Count all elements.
+pub fn count_all<T>(items: [T]) -> int {
+    :erlang::length(items)
+}
+
+/// Check if an element exists in the list.
+pub fn member<T>(items: [T], elem: T) -> bool {
+    :lists::member(elem, items)
+}
+
+// =============================================================================
+// Slicing and Subsetting
+// =============================================================================
+
+/// Take the first n elements.
+pub fn take<T>(items: [T], n: int) -> [T] {
+    :lists::sublist(items, n)
+}
+
+/// Drop the first n elements.
+pub fn drop<T>(items: [T], n: int) -> [T] {
+    :lists::nthtail(n, items)
+}
+
+/// Take elements while predicate is true.
+pub fn take_while<T>(items: [T], pred: fn(T) -> bool) -> [T] {
+    :lists::takewhile(pred, items)
+}
+
+/// Drop elements while predicate is true.
+pub fn drop_while<T>(items: [T], pred: fn(T) -> bool) -> [T] {
+    :lists::dropwhile(pred, items)
+}
+
+/// Get a slice from start index with given length.
+pub fn slice<T>(items: [T], start: int, len: int) -> [T] {
+    :lists::sublist(items, start + 1, len)
+}
+
+/// Split a list at position n.
+pub fn split<T>(items: [T], n: int) -> ([T], [T]) {
+    :lists::split(n, items)
+}
+
+/// Split a list based on a predicate (take_while, drop_while combined).
+pub fn split_while<T>(items: [T], pred: fn(T) -> bool) -> ([T], [T]) {
+    :lists::splitwith(pred, items)
+}
+
+// =============================================================================
+// Combining and Splitting
+// =============================================================================
+
+/// Zip two lists into a list of tuples.
+pub fn zip<A, B>(a: [A], b: [B]) -> [(A, B)] {
+    :lists::zip(a, b)
+}
+
+/// Zip with a custom combining function.
+pub fn zip_with<A, B, C>(a: [A], b: [B], f: fn(A, B) -> C) -> [C] {
+    :lists::zipwith(f, a, b)
+}
+
+/// Unzip a list of tuples into two lists.
+pub fn unzip<A, B>(items: [(A, B)]) -> ([A], [B]) {
+    :lists::unzip(items)
+}
+
+/// Concatenate a list of lists.
+pub fn concat<T>(items: [[T]]) -> [T] {
+    :lists::append(items)
+}
+
+/// Intersperse an element between all elements.
+pub fn intersperse<T>(items: [T], sep: T) -> [T] {
+    intersperse_loop(items, sep)
+}
+
+fn intersperse_loop<T>(items: [T], sep: T) -> [T] {
+    match items {
+        [] => [],
+        [x] => [x],
+        [x | rest] => :lists::append([x, sep], intersperse_loop(rest, sep)),
+    }
+}
+
+/// Chunk a list into sublists of size n.
+pub fn chunk<T>(items: [T], n: int) -> [[T]] {
+    chunk_loop(items, n, [])
+}
+
+fn chunk_loop<T>(items: [T], n: int, acc: [[T]]) -> [[T]] {
+    if :erlang::length(items) == 0 {
+        :lists::reverse(acc)
+    } else {
+        let chunk = :lists::sublist(items, n);
+        let rest = if :erlang::length(items) > n {
+            :lists::nthtail(n, items)
+        } else {
+            []
+        };
+        chunk_loop(rest, n, :lists::append([chunk], acc))
+    }
+}
+
+// =============================================================================
+// Sorting and Ordering
+// =============================================================================
+
+/// Sort a list using default comparison.
+pub fn sort<T>(items: [T]) -> [T] {
+    :lists::sort(items)
+}
+
+/// Sort a list using a custom comparison function.
+/// The function should return true if the first arg should come before the second.
+pub fn sort_by<T>(items: [T], cmp: fn(T, T) -> bool) -> [T] {
+    :lists::sort(cmp, items)
+}
+
+/// Reverse a list.
+pub fn reverse<T>(items: [T]) -> [T] {
+    :lists::reverse(items)
+}
+
+/// Shuffle a list randomly.
+pub fn shuffle<T>(items: [T]) -> [T] {
+    // Fisher-Yates shuffle using Erlang's random
+    let indexed = :lists::zip(:lists::seq(1, :erlang::length(items)), items);
+    let shuffled = :lists::sort(fn(a, b) { :rand::uniform(100) < 50 }, indexed);
+    map(shuffled, fn(pair) { :erlang::element(2, pair) })
+}
+
+// =============================================================================
+// Uniqueness and Grouping
+// =============================================================================
+
+/// Remove duplicate elements (keeps first occurrence).
+pub fn uniq<T>(items: [T]) -> [T] {
+    :lists::usort(items)
+}
+
+/// Remove consecutive duplicate elements.
+pub fn dedup<T>(items: [T]) -> [T] {
+    if :erlang::length(items) < 2 {
+        items
+    } else {
+        dedup_loop(items, :lists::hd(items), [:lists::hd(items)])
+    }
+}
+
+fn dedup_loop<T>(items: [T], prev: T, acc: [T]) -> [T] {
+    let rest = :lists::tl(items);
+    if :erlang::length(rest) == 0 {
+        :lists::reverse(acc)
+    } else {
+        let curr = :lists::hd(rest);
+        if curr == prev {
+            dedup_loop(rest, curr, acc)
+        } else {
+            dedup_loop(rest, curr, :lists::append([curr], acc))
+        }
+    }
+}
+
+/// Group elements by a key function.
+pub fn group_by<T, K>(items: [T], key_fn: fn(T) -> K) -> map {
+    reduce(items, :maps::new(), fn(item, acc) {
+        let key = key_fn(item);
+        let existing = :maps::get(key, acc, []);
+        :maps::put(key, :lists::append([item], existing), acc)
+    })
+}
+
+/// Partition elements into two lists based on a predicate.
+pub fn partition<T>(items: [T], pred: fn(T) -> bool) -> ([T], [T]) {
+    :lists::partition(pred, items)
+}
+
+// =============================================================================
+// Aggregation
+// =============================================================================
+
+/// Sum all numbers.
+pub fn sum(items: [int]) -> int {
+    :lists::sum(items)
+}
+
+/// Sum using a function to extract the value.
+pub fn sum_by<T>(items: [T], f: fn(T) -> int) -> int {
+    reduce(items, 0, fn(item, acc) { acc + f(item) })
+}
+
+/// Find the maximum value.
+pub fn max<T>(items: [T]) -> T {
+    :lists::max(items)
+}
+
+/// Find the minimum value.
+pub fn min<T>(items: [T]) -> T {
+    :lists::min(items)
+}
+
+/// Find the maximum by a custom comparison.
+pub fn max_by<T>(items: [T], f: fn(T) -> int) -> T {
+    reduce(:lists::tl(items), :lists::hd(items), fn(item, best) {
+        if f(item) > f(best) {
+            item
+        } else {
+            best
+        }
+    })
+}
+
+/// Find the minimum by a custom comparison.
+pub fn min_by<T>(items: [T], f: fn(T) -> int) -> T {
+    reduce(:lists::tl(items), :lists::hd(items), fn(item, best) {
+        if f(item) < f(best) {
+            item
+        } else {
+            best
+        }
+    })
+}
+
+// =============================================================================
+// Iteration
+// =============================================================================
+
+/// Apply a function to each element for side effects.
+pub fn each<T>(items: [T], f: fn(T) -> ()) -> atom {
+    :lists::foreach(f, items);
+    :ok
+}
+
+/// Apply a function to each element with its index.
+pub fn each_with_index<T>(items: [T], f: fn(T, int) -> ()) -> atom {
+    each_with_index_loop(items, 0, f);
+    :ok
+}
+
+fn each_with_index_loop<T>(items: [T], idx: int, f: fn(T, int) -> ()) -> atom {
+    match items {
+        [] => :ok,
+        [head | tail] => {
+            f(head, idx);
+            each_with_index_loop(tail, idx + 1, f)
+        }
+    }
+}
+
+/// Map with index.
+pub fn map_with_index<T, U>(items: [T], f: fn(T, int) -> U) -> [U] {
+    let indexed = :lists::zip(:lists::seq(0, :erlang::length(items) - 1), items);
+    map(indexed, fn(pair) { f(:erlang::element(2, pair), :erlang::element(1, pair)) })
+}
+
+// =============================================================================
+// Predicates
+// =============================================================================
+
+/// Check if the list is empty.
+pub fn is_empty<T>(items: [T]) -> bool {
+    items == []
+}
+
+/// Get the first element if it exists.
+pub fn first<T>(items: [T]) -> Option<T> {
+    match items {
+        [] => None,
+        [head | _] => Some(head),
+    }
+}
+
+/// Get the last element if it exists.
+pub fn last<T>(items: [T]) -> Option<T> {
+    match items {
+        [] => None,
+        _ => Some(:lists::last(items)),
+    }
+}
+
+/// Get element at index if it exists.
+pub fn at<T>(items: [T], index: int) -> Option<T> {
+    if index < 0 {
+        None
+    } else if index >= :erlang::length(items) {
+        None
+    } else {
+        Some(:lists::nth(index + 1, items))
+    }
+}
+
+// =============================================================================
+// Creation
+// =============================================================================
+
+/// Create a list with n copies of an element.
+pub fn replicate<T>(n: int, elem: T) -> [T] {
+    :lists::duplicate(n, elem)
+}
+
+/// Create a range of integers.
+pub fn range(start: int, stop: int) -> [int] {
+    :lists::seq(start, stop)
+}
+
+/// Create a range with a step.
+pub fn range_step(start: int, stop: int, step: int) -> [int] {
+    :lists::seq(start, stop, step)
+}

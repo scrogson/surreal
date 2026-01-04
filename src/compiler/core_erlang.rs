@@ -54,6 +54,8 @@ pub struct CoreErlangEmitter {
     trait_impls: HashMap<(String, String), Vec<String>>,
     /// Whether the current function has a `self` parameter
     has_self_param: bool,
+    /// Variables currently in scope (to distinguish from local function calls)
+    variables: HashSet<String>,
 }
 
 impl CoreErlangEmitter {
@@ -68,6 +70,7 @@ impl CoreErlangEmitter {
             traits: HashMap::new(),
             trait_impls: HashMap::new(),
             has_self_param: false,
+            variables: HashSet::new(),
         }
     }
 
@@ -106,6 +109,35 @@ impl CoreErlangEmitter {
             .filter(|(_, m)| m == method_name)
             .map(|(t, _)| t.clone())
             .collect()
+    }
+
+    /// Collect variable names from a pattern and add them to the variables set.
+    fn collect_pattern_vars(&mut self, pattern: &Pattern) {
+        match pattern {
+            Pattern::Ident(name) if name != "_" => {
+                self.variables.insert(name.clone());
+            }
+            Pattern::Tuple(patterns) | Pattern::List(patterns) => {
+                for p in patterns {
+                    self.collect_pattern_vars(p);
+                }
+            }
+            Pattern::ListCons { head, tail } => {
+                self.collect_pattern_vars(head);
+                self.collect_pattern_vars(tail);
+            }
+            Pattern::Struct { fields, .. } => {
+                for (_, field_pat) in fields {
+                    self.collect_pattern_vars(field_pat);
+                }
+            }
+            Pattern::Enum { fields, .. } => {
+                for p in fields {
+                    self.collect_pattern_vars(p);
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Check if an expression contains a return statement.
@@ -545,6 +577,14 @@ impl CoreErlangEmitter {
             matches!(&p.pattern, Pattern::Ident(name) if name == "self")
         });
 
+        // Clear variables from previous function and add this function's parameters
+        self.variables.clear();
+        for p in &func.params {
+            if let Pattern::Ident(name) = &p.pattern {
+                self.variables.insert(name.clone());
+            }
+        }
+
         self.emit("fun (");
 
         // Emit parameters
@@ -602,6 +642,9 @@ impl CoreErlangEmitter {
 
         match first {
             Stmt::Let { pattern, value, .. } => {
+                // Add bound variables to scope
+                self.collect_pattern_vars(pattern);
+
                 self.emit("let <");
                 self.emit_pattern(pattern)?;
                 self.emit("> =");
@@ -815,6 +858,11 @@ impl CoreErlangEmitter {
                             ));
                             self.emit_args(args)?;
                             self.emit(")");
+                        } else if self.variables.contains(name) {
+                            // Variable in scope - apply the variable as a function
+                            self.emit(&format!("apply {}(", Self::var_name(name)));
+                            self.emit_args(args)?;
+                            self.emit(")");
                         } else {
                             // Local function call
                             self.emit(&format!("apply '{}'/{}", name, args.len()));
@@ -966,6 +1014,28 @@ impl CoreErlangEmitter {
                 self.indent -= 1;
                 self.newline();
                 self.emit(&format!("in call 'erlang':'spawn'({})", tmp_var));
+            }
+
+            Expr::Closure { params, body } => {
+                // Generate Core Erlang anonymous function
+                // Add closure parameters to scope (closures capture outer variables)
+                for param in params {
+                    self.variables.insert(param.clone());
+                }
+
+                self.emit("fun (");
+                for (i, param) in params.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    // Convert param name to Core Erlang variable (capitalize first letter)
+                    self.emit(&Self::var_name(param));
+                }
+                self.emit(") ->");
+                self.newline();
+                self.indent += 1;
+                self.emit_block(body)?;
+                self.indent -= 1;
             }
 
             Expr::Send { to, msg } => {
@@ -1366,6 +1436,9 @@ impl CoreErlangEmitter {
 
     /// Emit a match arm.
     fn emit_match_arm(&mut self, arm: &MatchArm) -> CoreErlangResult<()> {
+        // Add pattern-bound variables to scope
+        self.collect_pattern_vars(&arm.pattern);
+
         self.emit("<");
         self.emit_pattern(&arm.pattern)?;
         self.emit("> when ");

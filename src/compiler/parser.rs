@@ -1071,6 +1071,28 @@ impl<'source> Parser<'source> {
             return self.parse_bitstring_expr();
         }
 
+        // Anonymous function / closure: fn(x, y) { body }
+        if self.check(&Token::Fn) {
+            self.advance();
+            self.expect(&Token::LParen)?;
+
+            let mut params = Vec::new();
+            if !self.check(&Token::RParen) {
+                params.push(self.expect_ident()?);
+                while self.check(&Token::Comma) {
+                    self.advance();
+                    if self.check(&Token::RParen) {
+                        break;
+                    }
+                    params.push(self.expect_ident()?);
+                }
+            }
+            self.expect(&Token::RParen)?;
+
+            let body = self.parse_block()?;
+            return Ok(Expr::Closure { params, body });
+        }
+
         let span = self.current_span();
         Err(ParseError::new("expected expression", span))
     }
@@ -1659,6 +1681,33 @@ impl<'source> Parser<'source> {
             self.advance();
             let type_args = self.parse_type_args()?;
             return Ok(Type::Named { name, type_args });
+        }
+
+        // Function type: fn(T, U) -> R
+        if self.check(&Token::Fn) {
+            self.advance();
+            self.expect(&Token::LParen)?;
+
+            let mut params = Vec::new();
+            if !self.check(&Token::RParen) {
+                params.push(self.parse_type()?);
+                while self.check(&Token::Comma) {
+                    self.advance();
+                    if self.check(&Token::RParen) {
+                        break;
+                    }
+                    params.push(self.parse_type()?);
+                }
+            }
+            self.expect(&Token::RParen)?;
+
+            self.expect(&Token::Arrow)?;
+            let ret = self.parse_type()?;
+
+            return Ok(Type::Fn {
+                params,
+                ret: Box::new(ret),
+            });
         }
 
         // Tuple type: ()

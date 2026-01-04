@@ -220,6 +220,11 @@ pub enum Expr {
     Spawn(Box<Expr>),
     /// Closure for spawn: `spawn || { ... }`.
     SpawnClosure(Block),
+    /// Anonymous function / closure: `fn(x, y) { x + y }`.
+    Closure {
+        params: Vec<String>,
+        body: Block,
+    },
     /// Message send: `pid ! message`.
     Send { to: Box<Expr>, msg: Box<Expr> },
     /// Pipe expression: `expr |> func(args)` transforms to `func(expr, args)`.
@@ -455,6 +460,11 @@ pub enum Type {
     Binary,
     /// Map type (raw Erlang map).
     Map,
+    /// Function type (e.g., `fn(T, U) -> R`).
+    Fn {
+        params: Vec<Type>,
+        ret: Box<Type>,
+    },
 }
 
 /// Struct definition.

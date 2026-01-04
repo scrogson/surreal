@@ -503,6 +503,10 @@ impl TypeChecker {
                     },
                 }
             }
+            ast::Type::Fn { params, ret } => Ty::Fn {
+                params: params.iter().map(|t| self.ast_type_to_ty(t)).collect(),
+                ret: Box::new(self.ast_type_to_ty(ret)),
+            },
         }
     }
 
@@ -1056,6 +1060,17 @@ impl TypeChecker {
 
             // Spawn
             Expr::Spawn(_) | Expr::SpawnClosure(_) => Ok(Ty::Pid),
+
+            // Closure - return function type
+            Expr::Closure { params, body } => {
+                // For now, infer the body and return a function type
+                // TODO: Track param types with inference
+                self.check_block(body)?;
+                Ok(Ty::Fn {
+                    params: params.iter().map(|_| Ty::Any).collect(),
+                    ret: Box::new(Ty::Any),
+                })
+            }
 
             // Send
             Expr::Send { to, msg: _ } => {

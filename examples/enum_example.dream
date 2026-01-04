@@ -1,0 +1,93 @@
+/// Enum module example - demonstrating collection operations
+
+use enumerable::{map, filter, reduce, find, any, all, count, take, drop};
+use enumerable::{flat_map, sort_by, uniq, chunk, zip, reverse, range};
+
+pub fn main() -> atom {
+    :io::format("=== Enum Module Example ===~n", []);
+
+    // Basic list
+    let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    :io::format("Numbers: ~p~n", [numbers]);
+
+    // Map - transform each element
+    let doubled = map(numbers, fn(x) { x * 2 });
+    :io::format("Doubled: ~p~n", [doubled]);
+
+    // Filter - keep matching elements
+    let evens = filter(numbers, fn(x) { x % 2 == 0 });
+    :io::format("Evens: ~p~n", [evens]);
+
+    // Reduce - accumulate a value
+    let sum = reduce(numbers, 0, fn(x, acc) { x + acc });
+    :io::format("Sum: ~p~n", [sum]);
+
+    :io::format("~n--- Searching ---~n", []);
+
+    // Find - first matching element
+    let first_gt_5 = find(numbers, fn(x) { x > 5 });
+    :io::format("First > 5: ~p~n", [first_gt_5]);
+
+    // Any - check if any match
+    let has_even = any(numbers, fn(x) { x % 2 == 0 });
+    :io::format("Has even? ~p~n", [has_even]);
+
+    // All - check if all match
+    let all_positive = all(numbers, fn(x) { x > 0 });
+    :io::format("All positive? ~p~n", [all_positive]);
+
+    // Count - count matching elements
+    let num_evens = count(numbers, fn(x) { x % 2 == 0 });
+    :io::format("Count of evens: ~p~n", [num_evens]);
+
+    :io::format("~n--- Slicing ---~n", []);
+
+    // Take - first n elements
+    let first_three = take(numbers, 3);
+    :io::format("First 3: ~p~n", [first_three]);
+
+    // Drop - skip first n elements
+    let after_three = drop(numbers, 3);
+    :io::format("After 3: ~p~n", [after_three]);
+
+    // Chunk - split into sublists
+    let chunks = chunk(numbers, 3);
+    :io::format("Chunks of 3: ~p~n", [chunks]);
+
+    :io::format("~n--- Combining ---~n", []);
+
+    // Zip - combine two lists
+    let letters = ["a", "b", "c"];
+    let zipped = zip([1, 2, 3], letters);
+    :io::format("Zipped: ~p~n", [zipped]);
+
+    :io::format("~n--- Transformations ---~n", []);
+
+    // Flat map - map and flatten
+    let expanded = flat_map([1, 2, 3], fn(x) { [x, x * 10] });
+    :io::format("Flat mapped: ~p~n", [expanded]);
+
+    // Sort by - custom sort
+    let words = ["banana", "apple", "cherry"];
+    let by_length = sort_by(words, fn(a, b) {
+        :erlang::length(a) < :erlang::length(b)
+    });
+    :io::format("Sorted by length: ~p~n", [by_length]);
+
+    // Uniq - remove duplicates
+    let with_dupes = [1, 2, 2, 3, 3, 3, 4];
+    let unique = uniq(with_dupes);
+    :io::format("Unique: ~p~n", [unique]);
+
+    // Reverse
+    let reversed = reverse(numbers);
+    :io::format("Reversed: ~p~n", [reversed]);
+
+    :io::format("~n--- Ranges ---~n", []);
+
+    let r = range(1, 5);
+    :io::format("Range 1..5: ~p~n", [r]);
+
+    :io::format("~nDone!~n", []);
+    :ok
+}
