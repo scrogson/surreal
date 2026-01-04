@@ -12,6 +12,7 @@ mod loader;
 mod parser;
 mod prelude;
 mod token;
+pub mod typeck;
 
 pub use ast::*;
 pub use codegen::{compile, compile_file, Codegen, CodegenError, CodegenResult};
@@ -21,3 +22,4 @@ pub use lexer::Lexer;
 pub use loader::{LoadError, LoadResult, ModuleLoader};
 pub use parser::Parser;
 pub use token::Token;
+pub use typeck::{check_module, TypeError, TypeResult};

@@ -7,7 +7,7 @@ use std::process::{Command, ExitCode};
 use clap::{Parser, Subcommand};
 
 use dream::{
-    compiler::{CoreErlangEmitter, Module, ModuleLoader},
+    compiler::{check_module, CoreErlangEmitter, Module, ModuleLoader},
     config::{generate_dream_toml, generate_main_dream, ProjectConfig},
 };
 
@@ -207,6 +207,13 @@ fn compile_modules<'a>(
     if modules.is_empty() {
         eprintln!("No modules to compile");
         return ExitCode::from(1);
+    }
+
+    // Type check each module (warnings only for now)
+    for module in &modules {
+        if let Err(e) = check_module(module) {
+            eprintln!("  Type warning in {}: {}", module.name, e);
+        }
     }
 
     // Compile each module to Core Erlang
