@@ -1,0 +1,128 @@
+// Process Demo - spawning processes and sending messages
+
+mod process_demo {
+    use io::{println, format};
+    use process::send;
+
+    // A simple echo server that waits for one message and sends it back
+    pub fn echo_server(reply_to: pid) -> atom {
+        let msg = receive {
+            m => m
+        };
+        send(reply_to, msg);
+        :done
+    }
+
+    // A ping-pong server that responds to :ping with :pong
+    pub fn ping_server(reply_to: pid) -> atom {
+        receive {
+            :ping => {
+                send(reply_to, :pong);
+                :done
+            },
+            _ => :unknown
+        }
+    }
+
+    // Counter process that maintains state via recursion
+    pub fn counter(count: int, owner: pid) -> atom {
+        receive {
+            :get => {
+                send(owner, count);
+                counter(count, owner)
+            },
+            :inc => {
+                counter(count + 1, owner)
+            },
+            :stop => {
+                send(owner, count);
+                :stopped
+            },
+            after 5000 => {
+                :timeout
+            }
+        }
+    }
+
+    // Receive with timeout - returns :timeout if no message within ms
+    pub fn wait_with_timeout(ms: int) -> atom {
+        receive {
+            :ping => :got_ping,
+            :pong => :got_pong,
+            after ms => {
+                :timeout
+            }
+        }
+    }
+
+    pub fn main() -> atom {
+        println("=== Process Demo ===");
+        println("");
+
+        // Get our own PID
+        let me = self();
+        format("My PID: ~p~n", [me]);
+
+        // Test 1: Echo server
+        println("");
+        println("--- Test 1: Echo Server ---");
+        let echo_pid = spawn(echo_server(me));
+        format("Spawned echo server: ~p~n", [echo_pid]);
+
+        send(echo_pid, :hello);
+        println("Sent :hello to echo server");
+
+        let echo_reply = receive {
+            msg => msg
+        };
+        format("Got reply: ~p~n", [echo_reply]);
+
+        // Test 2: Ping-Pong
+        println("");
+        println("--- Test 2: Ping-Pong ---");
+        let ping_pid = spawn(ping_server(me));
+        format("Spawned ping server: ~p~n", [ping_pid]);
+
+        send(ping_pid, :ping);
+        println("Sent :ping");
+
+        let pong_reply = receive {
+            r => r
+        };
+        format("Got reply: ~p (expected :pong)~n", [pong_reply]);
+
+        // Test 3: Counter process
+        println("");
+        println("--- Test 3: Counter Process ---");
+        let counter_pid = spawn(counter(0, me));
+        format("Spawned counter: ~p~n", [counter_pid]);
+
+        send(counter_pid, :inc);
+        send(counter_pid, :inc);
+        send(counter_pid, :inc);
+        println("Sent :inc three times");
+
+        send(counter_pid, :get);
+        let count = receive {
+            n => n
+        };
+        format("Counter value: ~p (expected 3)~n", [count]);
+
+        send(counter_pid, :stop);
+        let final_count = receive {
+            n => n
+        };
+        format("Final count: ~p~n", [final_count]);
+
+        // Test 4: Timeout
+        println("");
+        println("--- Test 4: Receive Timeout ---");
+        println("Waiting 100ms for message (none sent)...");
+        let timeout_result = wait_with_timeout(100);
+        format("Result: ~p (expected :timeout)~n", [timeout_result]);
+
+        println("");
+        println("All process tests passed!");
+        :ok
+    }
+}

@@ -40,4 +40,14 @@ mod math {
             b
         }
     }
+
+    pub fn main() -> atom {
+        io::println("=== Math Functions Example ===");
+        io::format("factorial(5) = ~p~n", [factorial(5)]);
+        io::format("fib(10) = ~p~n", [fib(10)]);
+        io::format("abs(-42) = ~p~n", [abs(-42)]);
+        io::format("max(10, 20) = ~p~n", [max(10, 20)]);
+        io::format("min(10, 20) = ~p~n", [min(10, 20)]);
+        :ok
+    }
 }
