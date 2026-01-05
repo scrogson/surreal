@@ -217,6 +217,10 @@ impl Codegen {
                     // Trait definitions don't generate code directly
                     // They define the interface that implementations must provide
                 }
+                Item::TraitDecl(_) => {
+                    // Module-level trait declarations don't generate code
+                    // They're compile-time contracts verified by the type checker
+                }
                 Item::Struct(_) | Item::Enum(_) => {
                     // Structs and enums don't generate code directly
                     // They're used for pattern matching at runtime
@@ -858,7 +862,7 @@ impl Codegen {
                 Ok(dest)
             }
 
-            Expr::Call { func, args } => {
+            Expr::Call { func, args, .. } => {
                 // Save current registers before call
                 let saved_next = self.regs.next_reg;
 
@@ -1080,7 +1084,7 @@ impl Codegen {
             Expr::Spawn(expr) => {
                 // Spawn a function call
                 match expr.as_ref() {
-                    Expr::Call { func, args } => {
+                    Expr::Call { func, args, .. } => {
                         // Compile arguments
                         for (i, arg) in args.iter().enumerate() {
                             let arg_reg = self.compile_expr(arg)?;
@@ -1246,12 +1250,17 @@ impl Codegen {
                 // `a |> f(b, c)` becomes `f(a, b, c)`
                 // `a |> f` becomes `f(a)`
                 match right.as_ref() {
-                    Expr::Call { func, args } => {
+                    Expr::Call {
+                        func,
+                        type_args,
+                        args,
+                    } => {
                         // Prepend left as first argument
                         let mut new_args = vec![left.as_ref().clone()];
                         new_args.extend(args.iter().cloned());
                         let new_call = Expr::Call {
                             func: func.clone(),
+                            type_args: type_args.clone(),
                             args: new_args,
                         };
                         self.compile_expr(&new_call)
@@ -1260,6 +1269,7 @@ impl Codegen {
                         // Bare function: `a |> f` becomes `f(a)`
                         let new_call = Expr::Call {
                             func: Box::new(Expr::Ident(name.clone())),
+                            type_args: vec![],
                             args: vec![left.as_ref().clone()],
                         };
                         self.compile_expr(&new_call)
@@ -1270,6 +1280,7 @@ impl Codegen {
                             func: Box::new(Expr::Path {
                                 segments: segments.clone(),
                             }),
+                            type_args: vec![],
                             args: vec![left.as_ref().clone()],
                         };
                         self.compile_expr(&new_call)

@@ -68,8 +68,10 @@ pub type LoadResult<T> = Result<T, LoadError>;
 
 /// Loads and resolves modules from the filesystem.
 pub struct ModuleLoader {
-    /// Cache of loaded modules by canonical path.
+    /// Cache of loaded modules by synthetic key (path#name for multi-module files).
     loaded: HashMap<PathBuf, Module>,
+    /// Files that have been fully processed.
+    processed_files: HashSet<PathBuf>,
     /// Paths currently being loaded (for cycle detection).
     loading: Vec<PathBuf>,
 }
@@ -79,6 +81,7 @@ impl ModuleLoader {
     pub fn new() -> Self {
         Self {
             loaded: HashMap::new(),
+            processed_files: HashSet::new(),
             loading: Vec::new(),
         }
     }
@@ -119,13 +122,27 @@ impl ModuleLoader {
     /// Load a module with an explicit name.
     /// Used when loading via `mod foo;` where the name should be `foo`.
     fn load_with_name(&mut self, path: &Path, module_name: &str) -> LoadResult<Module> {
+        // Load all modules from this file
+        let modules = self.load_file_modules(path, module_name)?;
+
+        // Return the first module (or find the one matching the name)
+        modules
+            .into_iter()
+            .find(|m| m.name == module_name)
+            .or_else(|| self.loaded.values().find(|m| m.name == module_name).cloned())
+            .ok_or_else(|| LoadError::new(format!("module '{}' not found in file", module_name)))
+    }
+
+    /// Load all modules from a file.
+    /// Handles files with multiple `mod name { }` blocks.
+    fn load_file_modules(&mut self, path: &Path, fallback_name: &str) -> LoadResult<Vec<Module>> {
         let canonical = path
             .canonicalize()
             .map_err(|e| LoadError::with_path(format!("cannot access file: {}", e), path.to_path_buf()))?;
 
-        // Check cache
-        if let Some(module) = self.loaded.get(&canonical) {
-            return Ok(module.clone());
+        // Check if file was already processed
+        if self.processed_files.contains(&canonical) {
+            return Ok(vec![]);
         }
 
         // Check for cycles
@@ -149,30 +166,41 @@ impl ModuleLoader {
             .map_err(|e| LoadError::with_path(format!("cannot read file: {}", e), canonical.clone()))?;
 
         let mut parser = Parser::new(&source);
-        let module = parser
-            .parse_file(module_name)
+        let modules = parser
+            .parse_file_modules(fallback_name)
             .map_err(|e| LoadError::with_path(e.to_string(), canonical.clone()))?;
 
-        // Load dependencies (recursive)
-        let mod_decls: Vec<ModDecl> = module
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                Item::ModDecl(decl) => Some(decl.clone()),
-                _ => None,
-            })
-            .collect();
+        // Load dependencies for each module (recursive)
+        for module in &modules {
+            let mod_decls: Vec<ModDecl> = module
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::ModDecl(decl) => Some(decl.clone()),
+                    _ => None,
+                })
+                .collect();
 
-        for decl in mod_decls {
-            let dep_path = self.resolve_module_path(&decl.name, &canonical)?;
-            // Use the declared name, not the filename
-            self.load_with_name(&dep_path, &decl.name)?;
+            for decl in mod_decls {
+                let dep_path = self.resolve_module_path(&decl.name, &canonical)?;
+                // Use the declared name, not the filename
+                self.load_file_modules(&dep_path, &decl.name)?;
+            }
         }
 
         self.loading.pop();
-        self.loaded.insert(canonical, module.clone());
 
-        Ok(module)
+        // Mark file as processed
+        self.processed_files.insert(canonical.clone());
+
+        // Store all modules with a synthetic key (canonical path + module name)
+        // Use unique keys to avoid duplicate entries in into_modules()
+        for module in &modules {
+            let key = canonical.join(format!("#{}", module.name));
+            self.loaded.insert(key, module.clone());
+        }
+
+        Ok(modules)
     }
 
     /// Load a project from an entry point.

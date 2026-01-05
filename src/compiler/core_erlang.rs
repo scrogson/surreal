@@ -56,6 +56,8 @@ pub struct CoreErlangEmitter {
     has_self_param: bool,
     /// Variables currently in scope (to distinguish from local function calls)
     variables: HashSet<String>,
+    /// Local functions defined in the current module (name, arity)
+    local_functions: HashSet<(String, usize)>,
 }
 
 impl CoreErlangEmitter {
@@ -71,6 +73,7 @@ impl CoreErlangEmitter {
             trait_impls: HashMap::new(),
             has_self_param: false,
             variables: HashSet::new(),
+            local_functions: HashSet::new(),
         }
     }
 
@@ -430,11 +433,16 @@ impl CoreErlangEmitter {
         // Prefix module name with "dream::" for BEAM namespace
         self.module_name = format!("{}{}", Self::MODULE_PREFIX, module.name);
 
-        // First pass: collect imports, traits, and register impl methods
+        // First pass: collect imports, traits, local functions, and register impl methods
         for item in &module.items {
             match item {
                 Item::Use(use_decl) => {
                     self.collect_imports(use_decl);
+                }
+                Item::Function(func) => {
+                    // Register local function for BIF shadowing
+                    self.local_functions
+                        .insert((func.name.clone(), func.params.len()));
                 }
                 Item::Impl(impl_block) => {
                     // Register impl methods for Type::method() resolution
@@ -780,16 +788,36 @@ impl CoreErlangEmitter {
                 // Add bound variables to scope
                 self.collect_pattern_vars(pattern);
 
-                self.emit("let <");
-                self.emit_pattern(pattern)?;
-                self.emit("> =");
-                self.newline();
-                self.indent += 1;
-                self.emit_expr(value)?;
-                self.indent -= 1;
-                self.newline();
-                self.emit("in ");
-                self.emit_block_inner(rest, final_expr)?;
+                // Simple identifier patterns use let, complex patterns use case
+                if matches!(pattern, Pattern::Ident(_) | Pattern::Wildcard) {
+                    self.emit("let <");
+                    self.emit_pattern(pattern)?;
+                    self.emit("> =");
+                    self.newline();
+                    self.indent += 1;
+                    self.emit_expr(value)?;
+                    self.indent -= 1;
+                    self.newline();
+                    self.emit("in ");
+                    self.emit_block_inner(rest, final_expr)?;
+                } else {
+                    // Use case for complex patterns (tuple, list, struct, enum)
+                    self.emit("case ");
+                    self.emit_expr(value)?;
+                    self.emit(" of");
+                    self.newline();
+                    self.indent += 1;
+                    self.emit("<");
+                    self.emit_pattern(pattern)?;
+                    self.emit("> when 'true' ->");
+                    self.newline();
+                    self.indent += 1;
+                    self.emit_block_inner(rest, final_expr)?;
+                    self.indent -= 1;
+                    self.newline();
+                    self.indent -= 1;
+                    self.emit("end");
+                }
             }
             Stmt::Expr(expr) => {
                 // Check for early return patterns
@@ -975,13 +1003,23 @@ impl CoreErlangEmitter {
                 }
             }
 
-            Expr::Call { func, args } => {
+            Expr::Call {
+                func,
+                type_args,
+                args,
+            } => {
+                // type_args contains turbofish arguments like ::<Counter>
+                // For BEAM codegen, these are used for trait method dispatch
+                let _ = type_args; // Reserved for future monomorphization
+
                 // Check if it's a local function call or external
                 match func.as_ref() {
                     Expr::Ident(name) => {
-                        // Check if it's a BIF (built-in function)
-                        if Self::is_bif(name) {
-                            self.emit(&format!("call 'erlang':'{}'(", name));
+                        // Check if it's a local function (takes priority over BIFs)
+                        if self.local_functions.contains(&(name.clone(), args.len())) {
+                            // Local function call
+                            self.emit(&format!("apply '{}'/{}", name, args.len()));
+                            self.emit("(");
                             self.emit_args(args)?;
                             self.emit(")");
                         } else if let Some((module, original_name)) = self.imports.get(name) {
@@ -998,8 +1036,13 @@ impl CoreErlangEmitter {
                             self.emit(&format!("apply {}(", Self::var_name(name)));
                             self.emit_args(args)?;
                             self.emit(")");
+                        } else if Self::is_bif(name) {
+                            // Check if it's a BIF (built-in function)
+                            self.emit(&format!("call 'erlang':'{}'(", name));
+                            self.emit_args(args)?;
+                            self.emit(")");
                         } else {
-                            // Local function call
+                            // Unknown function - assume local
                             self.emit(&format!("apply '{}'/{}", name, args.len()));
                             self.emit("(");
                             self.emit_args(args)?;
@@ -1322,12 +1365,17 @@ impl CoreErlangEmitter {
                 // `a |> f(b, c)` becomes `f(a, b, c)`
                 // `a |> f` becomes `f(a)`
                 match right.as_ref() {
-                    Expr::Call { func, args } => {
+                    Expr::Call {
+                        func,
+                        type_args,
+                        args,
+                    } => {
                         // Prepend left as first argument
                         let mut new_args = vec![left.as_ref().clone()];
                         new_args.extend(args.iter().cloned());
                         let new_call = Expr::Call {
                             func: func.clone(),
+                            type_args: type_args.clone(),
                             args: new_args,
                         };
                         self.emit_expr(&new_call)?;
@@ -1336,6 +1384,7 @@ impl CoreErlangEmitter {
                         // Bare function: `a |> f` becomes `f(a)`
                         let new_call = Expr::Call {
                             func: Box::new(Expr::Ident(name.clone())),
+                            type_args: vec![],
                             args: vec![left.as_ref().clone()],
                         };
                         self.emit_expr(&new_call)?;
@@ -1346,6 +1395,7 @@ impl CoreErlangEmitter {
                             func: Box::new(Expr::Path {
                                 segments: segments.clone(),
                             }),
+                            type_args: vec![],
                             args: vec![left.as_ref().clone()],
                         };
                         self.emit_expr(&new_call)?;

@@ -1,0 +1,217 @@
+// Dream Standard Library - GenServer Module
+//
+// A behaviour module for implementing the server of a client-server relation.
+// Based on Erlang/OTP's gen_server and Elixir's GenServer.
+
+// ============== Result Enums ==============
+
+/// Result of the init/1 callback.
+pub enum InitResult<S> {
+    /// Server starts successfully with initial state
+    Ok(S),
+    /// Server starts with state and timeout
+    OkTimeout(S, int),
+    /// Server should not start, ignore
+    Ignore,
+    /// Server should not start, stop with reason
+    Stop(atom),
+}
+
+/// Result of handle_call/3 callback.
+pub enum CallResult<S> {
+    /// Reply to caller and continue with new state
+    Reply(any, S),
+    /// Reply with timeout
+    ReplyTimeout(any, S, int),
+    /// Don't reply yet, continue with new state
+    Noreply(S),
+    /// Don't reply yet, continue with timeout
+    NoreplyTimeout(S, int),
+    /// Stop with reason, reply first
+    Stop(atom, any, S),
+    /// Stop with reason, no reply
+    StopNoreply(atom, S),
+}
+
+/// Result of handle_cast/2 and handle_info/2 callbacks.
+pub enum CastResult<S> {
+    /// Continue with new state
+    Noreply(S),
+    /// Continue with timeout
+    NoreplyTimeout(S, int),
+    /// Stop with reason
+    Stop(atom, S),
+}
+
+// Note: The "from" value in handle_call is a tuple (pid, ref) following OTP convention.
+// Use genserver::reply(from, msg) to send a reply.
+
+// ============== GenServer Trait ==============
+
+/// The GenServer trait.
+/// Implement this trait to create a stateful server process.
+pub trait GenServer {
+    /// The server's state type
+    type State;
+    /// Message type for synchronous calls
+    type CallMsg;
+    /// Message type for asynchronous casts
+    type CastMsg;
+    /// Message type for other messages (info)
+    type Info;
+
+    /// Initialize the server state.
+    /// Called when the server starts.
+    fn init(args: any) -> InitResult<Self::State>;
+
+    /// Handle a synchronous call.
+    /// `from` is a (pid, ref) tuple - use genserver::reply(from, msg) to reply.
+    /// Return a CallResult to reply and/or update state.
+    fn handle_call(msg: Self::CallMsg, from: (pid, any), state: Self::State) -> CallResult<Self::State>;
+
+    /// Handle an asynchronous cast.
+    /// Return a CastResult to update state.
+    fn handle_cast(msg: Self::CastMsg, state: Self::State) -> CastResult<Self::State>;
+
+    /// Handle any other message.
+    /// Default implementation ignores the message.
+    fn handle_info(msg: Self::Info, state: Self::State) -> CastResult<Self::State>;
+
+    /// Called when the server is about to terminate.
+    /// Default implementation returns :ok.
+    fn terminate(reason: atom, state: Self::State) -> atom;
+}
+
+// ============== Client API ==============
+
+/// Make a synchronous call to a GenServer.
+/// Waits for a reply from the server.
+pub fn call(server: pid, msg: any) -> any {
+    let ref = :erlang::make_ref();
+    let from = (self(), ref);
+    process::send(server, (:gen_call, from, msg));
+    receive {
+        (r, response) if r == ref => response
+    }
+}
+
+/// Make a synchronous call with timeout (in milliseconds).
+/// Returns (:ok, reply) on success, (:error, :timeout) on timeout.
+pub fn call_timeout(server: pid, msg: any, timeout: int) -> (atom, any) {
+    let ref = :erlang::make_ref();
+    let from = (self(), ref);
+    process::send(server, (:gen_call, from, msg));
+    receive {
+        (r, response) if r == ref => (:ok, response),
+        after timeout => {
+            (:error, :timeout)
+        }
+    }
+}
+
+/// Send an asynchronous cast to a GenServer.
+/// Returns immediately without waiting for a reply.
+pub fn cast(server: pid, msg: any) -> atom {
+    process::send(server, (:gen_cast, msg));
+    :ok
+}
+
+/// Reply to a call from within a handler.
+/// Useful for async replies when you don't reply in handle_call.
+/// The `from` is the {pid, ref} tuple from handle_call.
+pub fn reply(from: (pid, any), msg: any) -> atom {
+    let (from_pid, from_ref) = from;
+    process::send(from_pid, (from_ref, msg));
+    :ok
+}
+
+/// Stop a GenServer gracefully.
+pub fn stop(server: pid) -> atom {
+    // Send a cast with :stop message
+    cast(server, :stop);
+    :ok
+}
+
+/// Stop a GenServer with a specific reason.
+pub fn stop_reason(server: pid, reason: atom) -> atom {
+    cast(server, (:stop, reason));
+    :ok
+}
+
+// ============== Server API ==============
+
+/// Start a GenServer.
+/// The module must implement the GenServer trait (have init, handle_call, handle_cast functions).
+pub fn start(module: atom, args: any) -> pid {
+    spawn || {
+        let init_result = :erlang::apply(module, :init, [args]);
+        match init_result {
+            (:ok, state) => server_loop(module, state),
+            :ignore => :ignore,
+            (:stop, reason) => :erlang::exit(reason),
+            _ => :erlang::exit(:bad_init_result)
+        }
+    }
+}
+
+/// The main server loop.
+fn server_loop(module: atom, state: any) -> atom {
+    receive {
+        // Call protocol: {:gen_call, {pid, ref}, request}
+        (:gen_call, from, msg) => {
+            let result = :erlang::apply(module, :handle_call, [msg, from, state]);
+            match result {
+                (:reply, response, new_state) => {
+                    reply(from, response);
+                    server_loop(module, new_state)
+                },
+                (:noreply, new_state) => {
+                    server_loop(module, new_state)
+                },
+                (:stop, reason, response, new_state) => {
+                    reply(from, response);
+                    :erlang::apply(module, :terminate, [reason, new_state]);
+                    :ok
+                },
+                _ => server_loop(module, state)
+            }
+        },
+        // Cast protocol: {:gen_cast, request}
+        (:gen_cast, msg) => {
+            // Handle special :stop message
+            match msg {
+                :stop => {
+                    :erlang::apply(module, :terminate, [:normal, state]);
+                    :ok
+                },
+                (:stop, reason) => {
+                    :erlang::apply(module, :terminate, [reason, state]);
+                    :ok
+                },
+                _ => {
+                    let result = :erlang::apply(module, :handle_cast, [msg, state]);
+                    match result {
+                        (:noreply, new_state) => server_loop(module, new_state),
+                        (:stop, reason, new_state) => {
+                            :erlang::apply(module, :terminate, [reason, new_state]);
+                            :ok
+                        },
+                        _ => server_loop(module, state)
+                    }
+                }
+            }
+        },
+        // Any other message goes to handle_info
+        other => {
+            let result = :erlang::apply(module, :handle_info, [other, state]);
+            match result {
+                (:noreply, new_state) => server_loop(module, new_state),
+                (:stop, reason, new_state) => {
+                    :erlang::apply(module, :terminate, [reason, new_state]);
+                    :ok
+                },
+                _ => server_loop(module, state)
+            }
+        }
+    }
+}

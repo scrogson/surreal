@@ -3,7 +3,7 @@
 //! The prelude contains fundamental types like Option and Result that are
 //! injected into every module at parse time.
 
-use crate::compiler::ast::{EnumDef, EnumVariant, Item, Type};
+use crate::compiler::ast::{EnumDef, EnumVariant, Item, Type, TypeParam};
 
 /// Generate the prelude items to be injected into every module.
 /// Returns Option<T> and Result<T, E> enum definitions.
@@ -12,7 +12,7 @@ pub fn prelude_items() -> Vec<Item> {
         // enum Option<T> { Some(T), None }
         Item::Enum(EnumDef {
             name: "Option".to_string(),
-            type_params: vec!["T".to_string()],
+            type_params: vec![TypeParam { name: "T".to_string(), bounds: vec![] }],
             variants: vec![
                 EnumVariant {
                     name: "Some".to_string(),
@@ -28,7 +28,10 @@ pub fn prelude_items() -> Vec<Item> {
         // enum Result<T, E> { Ok(T), Err(E) }
         Item::Enum(EnumDef {
             name: "Result".to_string(),
-            type_params: vec!["T".to_string(), "E".to_string()],
+            type_params: vec![
+                TypeParam { name: "T".to_string(), bounds: vec![] },
+                TypeParam { name: "E".to_string(), bounds: vec![] },
+            ],
             variants: vec![
                 EnumVariant {
                     name: "Ok".to_string(),
@@ -80,7 +83,8 @@ mod tests {
         // Check Option
         if let Item::Enum(opt) = &items[0] {
             assert_eq!(opt.name, "Option");
-            assert_eq!(opt.type_params, vec!["T"]);
+            assert_eq!(opt.type_params.len(), 1);
+            assert_eq!(opt.type_params[0].name, "T");
             assert_eq!(opt.variants.len(), 2);
             assert_eq!(opt.variants[0].name, "Some");
             assert_eq!(opt.variants[1].name, "None");
@@ -91,7 +95,9 @@ mod tests {
         // Check Result
         if let Item::Enum(res) = &items[1] {
             assert_eq!(res.name, "Result");
-            assert_eq!(res.type_params, vec!["T", "E"]);
+            assert_eq!(res.type_params.len(), 2);
+            assert_eq!(res.type_params[0].name, "T");
+            assert_eq!(res.type_params[1].name, "E");
             assert_eq!(res.variants.len(), 2);
             assert_eq!(res.variants[0].name, "Ok");
             assert_eq!(res.variants[1].name, "Err");
@@ -104,7 +110,7 @@ mod tests {
     fn test_excludes_already_defined() {
         let existing = vec![Item::Enum(EnumDef {
             name: "Option".to_string(),
-            type_params: vec!["T".to_string()],
+            type_params: vec![TypeParam { name: "T".to_string(), bounds: vec![] }],
             variants: vec![],
             is_pub: false,
         })];

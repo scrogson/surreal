@@ -6,7 +6,8 @@
 use std::collections::HashMap;
 
 use crate::compiler::ast::{
-    self, BinOp, Block, Expr, Function, ImplBlock, Item, MatchArm, Module, Pattern, Stmt, UnaryOp,
+    self, BinOp, Block, Expr, Function, ImplBlock, Item, MatchArm, Module, Pattern, Stmt,
+    TypeParam, UnaryOp,
 };
 use crate::compiler::error::{TypeError, TypeResult};
 
@@ -182,7 +183,7 @@ impl std::fmt::Display for Ty {
 #[derive(Debug, Clone)]
 pub struct StructInfo {
     pub name: String,
-    pub type_params: Vec<String>,
+    pub type_params: Vec<TypeParam>,
     pub fields: Vec<(String, Ty)>,
 }
 
@@ -190,7 +191,7 @@ pub struct StructInfo {
 #[derive(Debug, Clone)]
 pub struct EnumInfo {
     pub name: String,
-    pub type_params: Vec<String>,
+    pub type_params: Vec<TypeParam>,
     pub variants: Vec<(String, Vec<Ty>)>,
 }
 
@@ -198,9 +199,41 @@ pub struct EnumInfo {
 #[derive(Debug, Clone)]
 pub struct FnInfo {
     pub name: String,
-    pub type_params: Vec<String>,
+    pub type_params: Vec<TypeParam>,
     pub params: Vec<(String, Ty)>,
     pub ret: Ty,
+}
+
+/// Information about a trait definition.
+#[derive(Debug, Clone)]
+pub struct TraitInfo {
+    pub name: String,
+    /// Associated types declared in the trait (e.g., `type State;`)
+    pub associated_types: Vec<String>,
+    /// Method signatures (name, params, return type)
+    pub methods: Vec<TraitMethodInfo>,
+}
+
+/// Information about a trait method signature.
+#[derive(Debug, Clone)]
+pub struct TraitMethodInfo {
+    pub name: String,
+    pub type_params: Vec<TypeParam>,
+    pub params: Vec<(String, Ty)>,
+    pub ret: Ty,
+}
+
+/// Information about a trait implementation.
+#[derive(Debug, Clone)]
+pub struct TraitImplInfo {
+    /// The trait being implemented
+    pub trait_name: String,
+    /// The type implementing the trait
+    pub type_name: String,
+    /// Associated type bindings: type_name -> concrete type
+    pub type_bindings: HashMap<String, Ty>,
+    /// Implemented methods
+    pub methods: Vec<String>,
 }
 
 /// Type environment for a scope.
@@ -218,6 +251,12 @@ pub struct TypeEnv {
     methods: HashMap<(String, String), FnInfo>,
     /// Type aliases (for future use)
     type_aliases: HashMap<String, Ty>,
+    /// Trait definitions: trait_name -> TraitInfo
+    traits: HashMap<String, TraitInfo>,
+    /// Trait implementations: (trait_name, type_name) -> TraitImplInfo
+    trait_impls: HashMap<(String, String), TraitImplInfo>,
+    /// Module-level trait declarations: trait names this module implements
+    module_traits: Vec<String>,
 }
 
 impl TypeEnv {
@@ -234,6 +273,9 @@ impl TypeEnv {
             functions: self.functions.clone(),
             methods: self.methods.clone(),
             type_aliases: self.type_aliases.clone(),
+            traits: self.traits.clone(),
+            trait_impls: self.trait_impls.clone(),
+            module_traits: self.module_traits.clone(),
         }
     }
 
@@ -253,8 +295,19 @@ impl TypeEnv {
     }
 
     /// Get enum info.
+    /// Handles both simple names (e.g., "Call") and module-qualified names (e.g., "counter::Call").
     pub fn get_enum(&self, name: &str) -> Option<&EnumInfo> {
-        self.enums.get(name)
+        // Try exact match first
+        if let Some(info) = self.enums.get(name) {
+            return Some(info);
+        }
+        // Try looking up just the last segment for module-qualified names
+        if let Some(simple_name) = name.rsplit("::").next() {
+            if let Some(info) = self.enums.get(simple_name) {
+                return Some(info);
+            }
+        }
+        None
     }
 
     /// Get function info.
@@ -265,6 +318,23 @@ impl TypeEnv {
     /// Get method info.
     pub fn get_method(&self, type_name: &str, method_name: &str) -> Option<&FnInfo> {
         self.methods.get(&(type_name.to_string(), method_name.to_string()))
+    }
+
+    /// Get trait info.
+    pub fn get_trait(&self, name: &str) -> Option<&TraitInfo> {
+        self.traits.get(name)
+    }
+
+    /// Get trait implementation info.
+    pub fn get_trait_impl(&self, trait_name: &str, type_name: &str) -> Option<&TraitImplInfo> {
+        self.trait_impls
+            .get(&(trait_name.to_string(), type_name.to_string()))
+    }
+
+    /// Check if a type implements a trait.
+    pub fn type_implements_trait(&self, type_name: &str, trait_name: &str) -> bool {
+        self.trait_impls
+            .contains_key(&(trait_name.to_string(), type_name.to_string()))
     }
 }
 
@@ -432,17 +502,69 @@ impl TypeChecker {
         }
     }
 
+    /// Get the type name from a Ty for trait checking.
+    fn type_name_for_trait_check(&self, ty: &Ty) -> Option<String> {
+        match ty {
+            Ty::Named { name, .. } => Some(name.clone()),
+            Ty::Int => Some("int".to_string()),
+            Ty::Float => Some("float".to_string()),
+            Ty::String => Some("string".to_string()),
+            Ty::Bool => Some("bool".to_string()),
+            Ty::Atom => Some("atom".to_string()),
+            Ty::Pid => Some("pid".to_string()),
+            Ty::Binary => Some("binary".to_string()),
+            Ty::Unit => Some("unit".to_string()),
+            Ty::Infer(id) => {
+                // Look up in substitutions if available
+                // For now, return None (unresolved)
+                let _ = id;
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// Check if a type satisfies all trait bounds.
+    /// Returns Ok if satisfied, Err with missing trait name if not.
+    fn check_type_satisfies_bounds(&self, ty: &Ty, bounds: &[String]) -> Result<(), String> {
+        if bounds.is_empty() {
+            return Ok(());
+        }
+
+        let type_name = match self.type_name_for_trait_check(ty) {
+            Some(name) => name,
+            None => {
+                // Type not resolved yet (inference var) - defer check
+                // In a full implementation, we'd need to collect constraints
+                // and check them after unification
+                return Ok(());
+            }
+        };
+
+        for bound in bounds {
+            if !self.env.type_implements_trait(&type_name, bound) {
+                return Err(bound.clone());
+            }
+        }
+        Ok(())
+    }
+
     /// Instantiate a generic function with fresh inference variables.
+    /// Stores the original type params for later bound checking.
     fn instantiate_function(&mut self, info: &FnInfo) -> FnInfo {
         if info.type_params.is_empty() {
             return info.clone();
         }
 
-        // Create a substitution mapping each type param to a fresh inference var
+        // Create a substitution mapping each type param name to a fresh inference var
         let mut subst = HashMap::new();
         for param in &info.type_params {
-            subst.insert(param.clone(), self.fresh_infer());
+            subst.insert(param.name.clone(), self.fresh_infer());
         }
+
+        // Note: In a full implementation, we'd need to track the mapping
+        // from inference vars to their bounds for later validation.
+        // For now, bounds checking happens at call sites with concrete types.
 
         FnInfo {
             name: info.name.clone(),
@@ -462,10 +584,10 @@ impl TypeChecker {
             return (info.clone(), HashMap::new());
         }
 
-        // Create a substitution mapping each type param to a fresh inference var
+        // Create a substitution mapping each type param name to a fresh inference var
         let mut subst = HashMap::new();
         for param in &info.type_params {
-            subst.insert(param.clone(), self.fresh_infer());
+            subst.insert(param.name.clone(), self.fresh_infer());
         }
 
         let instantiated = EnumInfo {
@@ -526,6 +648,7 @@ impl TypeChecker {
                 base: base.clone(),
                 name: name.clone(),
             },
+            ast::Type::Any => Ty::Any,
         }
     }
 
@@ -591,6 +714,65 @@ impl TypeChecker {
                             variants,
                         },
                     );
+                }
+                Item::Trait(trait_def) => {
+                    let methods = trait_def
+                        .methods
+                        .iter()
+                        .map(|m| {
+                            let params = m
+                                .params
+                                .iter()
+                                .map(|p| {
+                                    let name = match &p.pattern {
+                                        Pattern::Ident(n) => n.clone(),
+                                        _ => "_".to_string(),
+                                    };
+                                    (name, self.ast_type_to_ty(&p.ty))
+                                })
+                                .collect();
+                            let ret = m
+                                .return_type
+                                .as_ref()
+                                .map(|t| self.ast_type_to_ty(t))
+                                .unwrap_or(Ty::Unit);
+                            TraitMethodInfo {
+                                name: m.name.clone(),
+                                type_params: m.type_params.clone(),
+                                params,
+                                ret,
+                            }
+                        })
+                        .collect();
+                    self.env.traits.insert(
+                        trait_def.name.clone(),
+                        TraitInfo {
+                            name: trait_def.name.clone(),
+                            associated_types: trait_def.associated_types.clone(),
+                            methods,
+                        },
+                    );
+                }
+                Item::TraitImpl(impl_def) => {
+                    let type_bindings = impl_def
+                        .type_bindings
+                        .iter()
+                        .map(|(name, ty)| (name.clone(), self.ast_type_to_ty(ty)))
+                        .collect();
+                    let methods = impl_def.methods.iter().map(|m| m.name.clone()).collect();
+                    self.env.trait_impls.insert(
+                        (impl_def.trait_name.clone(), impl_def.type_name.clone()),
+                        TraitImplInfo {
+                            trait_name: impl_def.trait_name.clone(),
+                            type_name: impl_def.type_name.clone(),
+                            type_bindings,
+                            methods,
+                        },
+                    );
+                }
+                Item::TraitDecl(decl) => {
+                    // Record that this module implements the trait
+                    self.env.module_traits.push(decl.trait_name.clone());
                 }
                 _ => {}
             }
@@ -775,6 +957,11 @@ impl TypeChecker {
                             self.bind_pattern(p, t)?;
                         }
                     }
+                } else {
+                    // When type is Any or unknown, bind all sub-patterns as Any
+                    for p in pats {
+                        self.bind_pattern(p, &Ty::Any)?;
+                    }
                 }
             }
             Pattern::List(pats) => {
@@ -782,12 +969,21 @@ impl TypeChecker {
                     for p in pats {
                         self.bind_pattern(p, elem_ty)?;
                     }
+                } else {
+                    // When type is Any or unknown, bind all sub-patterns as Any
+                    for p in pats {
+                        self.bind_pattern(p, &Ty::Any)?;
+                    }
                 }
             }
             Pattern::ListCons { head, tail } => {
                 if let Ty::List(elem_ty) = ty {
                     self.bind_pattern(head, elem_ty)?;
                     self.bind_pattern(tail, ty)?;
+                } else {
+                    // When type is Any or unknown, bind as Any
+                    self.bind_pattern(head, &Ty::Any)?;
+                    self.bind_pattern(tail, &Ty::Any)?;
                 }
             }
             Pattern::Struct { name: _, fields } => {
@@ -852,7 +1048,7 @@ impl TypeChecker {
             }
 
             // Function calls
-            Expr::Call { func, args } => {
+            Expr::Call { func, args, .. } => {
                 self.infer_call(func, args)
             }
 
@@ -998,7 +1194,7 @@ impl TypeChecker {
                         .iter()
                         .map(|p| {
                             subst
-                                .get(p)
+                                .get(&p.name)
                                 .map(|t| self.apply_substitutions(t))
                                 .unwrap_or(Ty::Any)
                         })
@@ -1037,7 +1233,7 @@ impl TypeChecker {
                                 .iter()
                                 .map(|p| {
                                     subst
-                                        .get(p)
+                                        .get(&p.name)
                                         .map(|t| self.apply_substitutions(t))
                                         .unwrap_or(Ty::Any)
                                 })
@@ -1144,6 +1340,17 @@ impl TypeChecker {
 
                     // Bind pattern variables (message type is unknown, use Any)
                     self.bind_pattern(&arm.pattern, &Ty::Any)?;
+
+                    // Check guard if present
+                    if let Some(guard) = &arm.guard {
+                        let guard_ty = self.infer_expr(guard)?;
+                        if !self.types_compatible(&guard_ty, &Ty::Bool) {
+                            self.error(TypeError::with_help(
+                                "receive guard must be bool",
+                                format!("found {}", guard_ty),
+                            ));
+                        }
+                    }
 
                     // Infer body type
                     self.infer_expr(&arm.body)?;
@@ -1477,6 +1684,48 @@ pub fn check_module(module: &Module) -> TypeResult<()> {
     checker.check_module(module)
 }
 
+/// Type check multiple modules with shared type information.
+/// This allows cross-module type references (e.g., using enums from another module).
+pub fn check_modules(modules: &[Module]) -> Vec<(String, TypeResult<()>)> {
+    let mut checker = TypeChecker::new();
+
+    // First pass: collect all type definitions from ALL modules
+    for module in modules {
+        let _ = checker.collect_types(module);
+    }
+
+    // Second pass: collect all function signatures from ALL modules
+    for module in modules {
+        let _ = checker.collect_functions(module);
+    }
+
+    // Third pass: type check each module's function bodies
+    let mut results = Vec::new();
+    for module in modules {
+        // Clear errors before checking each module
+        checker.errors.clear();
+
+        for item in &module.items {
+            if let Item::Function(func) = item {
+                let _ = checker.check_function(func);
+            }
+            if let Item::Impl(impl_block) = item {
+                let _ = checker.check_impl_block(impl_block);
+            }
+        }
+
+        // Collect result for this module
+        let result = if let Some(err) = checker.errors.first() {
+            Err(err.clone())
+        } else {
+            Ok(())
+        };
+        results.push((module.name.clone(), result));
+    }
+
+    results
+}
+
 // =============================================================================
 // UFCS Method Resolution
 // =============================================================================
@@ -1651,7 +1900,7 @@ impl MethodResolver {
             Expr::Unary { expr, .. } => {
                 self.resolve_expr(expr);
             }
-            Expr::Call { func, args } => {
+            Expr::Call { func, args, .. } => {
                 self.resolve_expr(func);
                 for arg in args {
                     self.resolve_expr(arg);
@@ -1844,6 +2093,7 @@ impl MethodResolver {
                 base: base.clone(),
                 name: name.clone(),
             },
+            ast::Type::Any => Ty::Any,
         }
     }
 }

@@ -54,6 +54,7 @@ impl<'source> Parser<'source> {
     /// Handles both wrapped modules (`mod name { ... }`) and file-based modules (items directly).
     /// For wrapped modules, the module name comes from the source.
     /// For file-based modules, the name is derived from the filename.
+    /// Note: For files with multiple wrapped modules, use parse_file_modules instead.
     pub fn parse_file(&mut self, module_name: &str) -> ParseResult<Module> {
         // Check if this is a wrapped module: `mod name { ... }`
         if self.check(&Token::Mod) {
@@ -82,6 +83,36 @@ impl<'source> Parser<'source> {
         })
     }
 
+    /// Parse a source file that may contain multiple wrapped modules.
+    /// Returns all modules found in the file.
+    /// If the file contains file-based items (not wrapped in mod {}), returns a single module.
+    pub fn parse_file_modules(&mut self, fallback_name: &str) -> ParseResult<Vec<Module>> {
+        let mut modules = Vec::new();
+
+        // Check if this file has wrapped modules
+        if self.check(&Token::Mod) && self.peek_is_wrapped_module() {
+            // Parse all wrapped modules in the file
+            while !self.is_at_end() {
+                if self.check(&Token::Mod) && self.peek_is_wrapped_module() {
+                    modules.push(self.parse_module()?);
+                } else {
+                    // Non-module item at top level - this is an error in a multi-module file
+                    let span = self.current_span();
+                    return Err(ParseError::new(
+                        "expected `mod` block in multi-module file",
+                        span,
+                    ));
+                }
+            }
+        } else {
+            // File-based module: parse items directly
+            let module = self.parse_file(fallback_name)?;
+            modules.push(module);
+        }
+
+        Ok(modules)
+    }
+
     /// Check if the next tokens are `mod <ident> {` (wrapped module).
     fn peek_is_wrapped_module(&self) -> bool {
         // Check: mod <ident> {
@@ -106,7 +137,7 @@ impl<'source> Parser<'source> {
             return self.parse_impl_or_trait_impl();
         }
 
-        // Trait definitions don't have pub modifier
+        // Trait definitions (with optional pub modifier)
         if self.check(&Token::Trait) {
             return self.parse_trait_def();
         }
@@ -114,6 +145,13 @@ impl<'source> Parser<'source> {
         let is_pub = self.check(&Token::Pub);
         if is_pub {
             self.advance();
+        }
+
+        // Check for trait after pub
+        if self.check(&Token::Trait) {
+            // pub trait - parse trait definition
+            // Note: Currently traits don't track pub visibility, but we accept the syntax
+            return self.parse_trait_def();
         }
 
         if self.check(&Token::Fn) {
@@ -141,13 +179,21 @@ impl<'source> Parser<'source> {
         Ok(Item::ModDecl(ModDecl { name, is_pub }))
     }
 
-    /// Parse an impl block or trait implementation.
-    /// `impl Point { ... }` or `impl Display for Point { ... }`
+    /// Parse an impl block, trait implementation, or module-level trait declaration.
+    /// `impl Point { ... }` or `impl Display for Point { ... }` or `impl mod::Trait;`
     fn parse_impl_or_trait_impl(&mut self) -> ParseResult<Item> {
         self.expect(&Token::Impl)?;
 
-        // Parse the first type name
-        let first_name = self.expect_type_ident()?;
+        // Parse the first type name (could be module-qualified like genserver::GenServer)
+        let first_name = self.parse_possibly_qualified_type_name()?;
+
+        // Check for module-level trait declaration: `impl Trait;`
+        if self.check(&Token::Semi) {
+            self.advance();
+            return Ok(Item::TraitDecl(TraitDecl {
+                trait_name: first_name,
+            }));
+        }
 
         // Check if this is a trait impl: `impl Trait for Type { ... }`
         if self.check(&Token::For) {
@@ -217,6 +263,21 @@ impl<'source> Parser<'source> {
         }
     }
 
+    /// Parse a type name that may be module-qualified: `Point` or `genserver::GenServer`
+    fn parse_possibly_qualified_type_name(&mut self) -> ParseResult<String> {
+        // Check for module-qualified name: module::Type
+        if let Some(Token::Ident(module_name)) = self.peek().cloned() {
+            if self.peek_next() == Some(&Token::ColonColon) {
+                self.advance(); // consume module name
+                self.advance(); // consume ::
+                let type_name = self.expect_type_ident()?;
+                return Ok(format!("{}::{}", module_name, type_name));
+            }
+        }
+        // Otherwise, just a simple type identifier
+        self.expect_type_ident()
+    }
+
     /// Parse a trait definition: `trait Display { fn display(self) -> String; }`
     fn parse_trait_def(&mut self) -> ParseResult<Item> {
         self.expect(&Token::Trait)?;
@@ -257,10 +318,11 @@ impl<'source> Parser<'source> {
         Ok((name, ty))
     }
 
-    /// Parse a trait method signature: `fn method(self, arg: Type) -> ReturnType;`
+    /// Parse a trait method signature: `fn method<T: Bound>(self, arg: Type) -> ReturnType;`
     fn parse_trait_method(&mut self) -> ParseResult<TraitMethod> {
         self.expect(&Token::Fn)?;
         let name = self.expect_ident()?;
+        let type_params = self.parse_type_params()?;
 
         self.expect(&Token::LParen)?;
 
@@ -287,6 +349,7 @@ impl<'source> Parser<'source> {
 
         Ok(TraitMethod {
             name,
+            type_params,
             params,
             return_type,
         })
@@ -788,6 +851,14 @@ impl<'source> Parser<'source> {
         let mut expr = self.parse_primary()?;
 
         loop {
+            // Check for turbofish type args before function call: func::<T>(args)
+            let type_args = if self.check(&Token::ColonColon) && self.peek_is_lt() {
+                self.advance(); // consume '::'
+                self.parse_type_args()?
+            } else {
+                vec![]
+            };
+
             if self.check(&Token::LParen) {
                 // Function call
                 self.advance();
@@ -804,8 +875,13 @@ impl<'source> Parser<'source> {
                 self.expect(&Token::RParen)?;
                 expr = Expr::Call {
                     func: Box::new(expr),
+                    type_args,
                     args,
                 };
+            } else if !type_args.is_empty() {
+                // Had turbofish but no function call - error
+                let span = self.current_span();
+                return Err(ParseError::new("expected function call after type arguments", span));
             } else if self.check(&Token::Dot) {
                 // Field access or method call
                 self.advance();
@@ -841,13 +917,14 @@ impl<'source> Parser<'source> {
                 // Path access - only valid if expr is Ident or Path
                 self.advance();
                 let segment = self.expect_ident_or_type_ident()?;
+                let is_type_segment = segment.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
 
                 expr = match expr {
                     Expr::Ident(first) => Expr::Path {
-                        segments: vec![first, segment],
+                        segments: vec![first, segment.clone()],
                     },
                     Expr::Path { mut segments } => {
-                        segments.push(segment);
+                        segments.push(segment.clone());
                         Expr::Path { segments }
                     }
                     _ => {
@@ -855,6 +932,74 @@ impl<'source> Parser<'source> {
                         return Err(ParseError::new("invalid path expression", span));
                     }
                 };
+
+                // Check for struct init after module-qualified path: mod::Type { ... }
+                if is_type_segment && self.check(&Token::LBrace) {
+                    // This is a struct init with qualified path
+                    if let Expr::Path { segments } = expr {
+                        let name = segments.join("::");
+                        self.advance(); // consume '{'
+                        let mut fields = Vec::new();
+                        while !self.check(&Token::RBrace) && !self.is_at_end() {
+                            let field_name = self.expect_ident()?;
+                            self.expect(&Token::Colon)?;
+                            let field_value = self.parse_expr()?;
+                            fields.push((field_name, field_value));
+
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                        self.expect(&Token::RBrace)?;
+                        expr = Expr::StructInit { name, fields };
+                    }
+                }
+
+                // Check for enum variant after module-qualified path: mod::Type::Variant or mod::Type::Variant(args)
+                // The path looks like ["mod", "Type", "Variant"] where Type and Variant are both uppercase
+                if is_type_segment {
+                    if let Expr::Path { ref segments } = expr {
+                        // Check if this looks like mod::Type::Variant (at least 3 segments, last two uppercase)
+                        if segments.len() >= 3 {
+                            let type_idx = segments.len() - 2;
+                            let variant_idx = segments.len() - 1;
+                            let type_is_upper = segments[type_idx].chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+                            let variant_is_upper = segments[variant_idx].chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+                            if type_is_upper && variant_is_upper {
+                                // This is mod::Type::Variant - treat as enum variant
+                                let variant = segments[variant_idx].clone();
+                                let type_path = segments[..variant_idx].join("::");
+
+                                // Check for args
+                                let args = if self.check(&Token::LParen) {
+                                    self.advance();
+                                    let mut args = Vec::new();
+                                    if !self.check(&Token::RParen) {
+                                        loop {
+                                            args.push(self.parse_expr()?);
+                                            if !self.check(&Token::Comma) {
+                                                break;
+                                            }
+                                            self.advance();
+                                        }
+                                    }
+                                    self.expect(&Token::RParen)?;
+                                    args
+                                } else {
+                                    vec![]
+                                };
+
+                                expr = Expr::EnumVariant {
+                                    type_name: Some(type_path),
+                                    variant,
+                                    args,
+                                };
+                            }
+                        }
+                    }
+                }
             } else {
                 break;
             }
@@ -1415,9 +1560,78 @@ impl<'source> Parser<'source> {
             return Ok(Pattern::Bool(false));
         }
 
-        // Identifier pattern
+        // Identifier pattern or module-qualified enum pattern
         if let Some(Token::Ident(name)) = self.peek().cloned() {
             self.advance();
+
+            // Check for module-qualified path: mod::Type::Variant
+            if self.check(&Token::ColonColon) {
+                self.advance();
+                let type_name = self.expect_type_ident()?;
+
+                // Now we have mod::Type, expect ::Variant
+                if self.check(&Token::ColonColon) {
+                    self.advance();
+                    let variant = self.expect_type_ident()?;
+
+                    let fields = if self.check(&Token::LParen) {
+                        self.advance();
+                        let mut fs = Vec::new();
+                        if !self.check(&Token::RParen) {
+                            loop {
+                                fs.push(self.parse_pattern()?);
+                                if !self.check(&Token::Comma) {
+                                    break;
+                                }
+                                self.advance();
+                            }
+                        }
+                        self.expect(&Token::RParen)?;
+                        fs
+                    } else {
+                        Vec::new()
+                    };
+
+                    return Ok(Pattern::Enum {
+                        name: format!("{}::{}", name, type_name),
+                        variant,
+                        fields,
+                    });
+                } else {
+                    // Just mod::Type without variant - could be struct pattern
+                    let full_name = format!("{}::{}", name, type_name);
+                    if self.check(&Token::LBrace) {
+                        // Module-qualified struct pattern
+                        self.advance();
+                        let mut fields = Vec::new();
+                        while !self.check(&Token::RBrace) && !self.is_at_end() {
+                            if self.check(&Token::DotDot) {
+                                self.advance();
+                                break;
+                            }
+                            let field_name = self.expect_ident()?;
+                            let field_pattern = if self.check(&Token::Colon) {
+                                self.advance();
+                                self.parse_pattern()?
+                            } else {
+                                Pattern::Ident(field_name.clone())
+                            };
+                            fields.push((field_name, field_pattern));
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                        self.expect(&Token::RBrace)?;
+                        return Ok(Pattern::Struct { name: full_name, fields });
+                    }
+                    // Just a type path without variant - treat as unit enum variant
+                    let span = self.current_span();
+                    return Err(ParseError::new("expected `::` or `{` after module-qualified type", span));
+                }
+            }
+
             return Ok(Pattern::Ident(name));
         }
 
@@ -1659,9 +1873,9 @@ impl<'source> Parser<'source> {
         Ok(segment)
     }
 
-    /// Parse optional type parameters: `<T, U>`.
+    /// Parse optional type parameters with bounds: `<T, U: Display, V: Clone + Debug>`.
     /// Returns empty Vec if no type parameters present.
-    fn parse_type_params(&mut self) -> ParseResult<Vec<String>> {
+    fn parse_type_params(&mut self) -> ParseResult<Vec<TypeParam>> {
         if !self.check(&Token::Lt) {
             return Ok(Vec::new());
         }
@@ -1670,7 +1884,13 @@ impl<'source> Parser<'source> {
         let mut params = Vec::new();
         loop {
             let name = self.expect_type_ident()?;
-            params.push(name);
+            let bounds = if self.check(&Token::Colon) {
+                self.advance(); // consume ':'
+                self.parse_trait_bounds()?
+            } else {
+                Vec::new()
+            };
+            params.push(TypeParam { name, bounds });
 
             if !self.check(&Token::Comma) {
                 break;
@@ -1680,6 +1900,16 @@ impl<'source> Parser<'source> {
 
         self.expect(&Token::Gt)?;
         Ok(params)
+    }
+
+    /// Parse trait bounds: `Trait1 + Trait2 + Trait3`
+    fn parse_trait_bounds(&mut self) -> ParseResult<Vec<String>> {
+        let mut bounds = vec![self.expect_type_ident()?];
+        while self.check(&Token::Plus) {
+            self.advance(); // consume '+'
+            bounds.push(self.expect_type_ident()?);
+        }
+        Ok(bounds)
     }
 
     /// Parse optional type arguments: `<int, String>`.
@@ -1733,7 +1963,23 @@ impl<'source> Parser<'source> {
                     self.advance();
                     return Ok(Type::Map);
                 }
-                _ => {}
+                "any" => {
+                    self.advance();
+                    return Ok(Type::Any);
+                }
+                _ => {
+                    // Check for module-qualified types: module::Type or module::Type<Args>
+                    if self.peek_next() == Some(&Token::ColonColon) {
+                        self.advance(); // consume module name
+                        self.advance(); // consume ::
+                        let type_name = self.expect_type_ident()?;
+                        let type_args = self.parse_type_args()?;
+                        return Ok(Type::Named {
+                            name: format!("{}::{}", name, type_name),
+                            type_args,
+                        });
+                    }
+                }
             }
         }
 
@@ -1830,6 +2076,16 @@ impl<'source> Parser<'source> {
 
     fn peek(&self) -> Option<&Token> {
         self.tokens.get(self.pos).map(|t| &t.token)
+    }
+
+    /// Peek at the next token (after current).
+    fn peek_next(&self) -> Option<&Token> {
+        self.tokens.get(self.pos + 1).map(|t| &t.token)
+    }
+
+    /// Check if the next token is `<` (for turbofish disambiguation).
+    fn peek_is_lt(&self) -> bool {
+        self.peek_next() == Some(&Token::Lt)
     }
 
     fn advance(&mut self) -> Option<&Token> {
@@ -1950,6 +2206,11 @@ mod tests {
         let mut count = 0;
         let mut iter = module.items.iter();
 
+        // Helper to check type param names
+        fn type_param_names(params: &[TypeParam]) -> Vec<&str> {
+            params.iter().map(|p| p.name.as_str()).collect()
+        }
+
         // Check for prelude Option at position 0
         if let Some(Item::Enum(e)) = iter.next() {
             if e.name == "Option"
@@ -1957,7 +2218,7 @@ mod tests {
                 && e.variants.len() == 2
                 && e.variants[0].name == "Some"
                 && e.variants[1].name == "None"
-                && e.type_params == vec!["T".to_string()]
+                && type_param_names(&e.type_params) == vec!["T"]
             {
                 count += 1;
                 // Check for prelude Result at position 1
@@ -1967,7 +2228,7 @@ mod tests {
                         && e.variants.len() == 2
                         && e.variants[0].name == "Ok"
                         && e.variants[1].name == "Err"
-                        && e.type_params == vec!["T".to_string(), "E".to_string()]
+                        && type_param_names(&e.type_params) == vec!["T", "E"]
                     {
                         count += 1;
                     }
@@ -1977,7 +2238,7 @@ mod tests {
                 && e.variants.len() == 2
                 && e.variants[0].name == "Ok"
                 && e.variants[1].name == "Err"
-                && e.type_params == vec!["T".to_string(), "E".to_string()]
+                && type_param_names(&e.type_params) == vec!["T", "E"]
             {
                 // Only Result was injected (module already defines Option)
                 count += 1;
@@ -2323,7 +2584,9 @@ mod tests {
         // Use first_user_item since prelude Option won't be added (module defines Option)
         if let Item::Enum(e) = first_user_item(&module) {
             assert_eq!(e.name, "Option");
-            assert_eq!(e.type_params, vec!["T".to_string()]);
+            assert_eq!(e.type_params.len(), 1);
+            assert_eq!(e.type_params[0].name, "T");
+            assert!(e.type_params[0].bounds.is_empty());
             assert_eq!(e.variants.len(), 2);
             assert_eq!(e.variants[0].name, "Some");
             // The field type should be a TypeVar "T"
@@ -2355,7 +2618,9 @@ mod tests {
         // (Can't use first_user_item because user's Result matches prelude signature)
         if let Item::Enum(e) = &module.items[1] {
             assert_eq!(e.name, "Result");
-            assert_eq!(e.type_params, vec!["T".to_string(), "E".to_string()]);
+            assert_eq!(e.type_params.len(), 2);
+            assert_eq!(e.type_params[0].name, "T");
+            assert_eq!(e.type_params[1].name, "E");
             assert_eq!(e.variants.len(), 2);
         } else {
             panic!("expected enum");
@@ -2379,7 +2644,9 @@ mod tests {
 
         if let Item::Function(f) = first_user_item(&module) {
             assert_eq!(f.name, "map");
-            assert_eq!(f.type_params, vec!["T".to_string(), "U".to_string()]);
+            assert_eq!(f.type_params.len(), 2);
+            assert_eq!(f.type_params[0].name, "T");
+            assert_eq!(f.type_params[1].name, "U");
             assert_eq!(f.params.len(), 2);
 
             // First param should have type Option<T>
@@ -2403,6 +2670,93 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_trait_bounds() {
+        let source = r#"
+            mod test {
+                fn bounded<T: Display>(x: T) -> T {
+                    x
+                }
+
+                fn multi_bound<T: Clone + Debug, U: Display>(a: T, b: U) -> T {
+                    a
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        // First function: single bound
+        if let Item::Function(f) = first_user_item(&module) {
+            assert_eq!(f.name, "bounded");
+            assert_eq!(f.type_params.len(), 1);
+            assert_eq!(f.type_params[0].name, "T");
+            assert_eq!(f.type_params[0].bounds, vec!["Display"]);
+        } else {
+            panic!("expected function");
+        }
+
+        // Second function: multiple bounds
+        if let Item::Function(f) = &module.items[prelude_count(&module) + 1] {
+            assert_eq!(f.name, "multi_bound");
+            assert_eq!(f.type_params.len(), 2);
+            assert_eq!(f.type_params[0].name, "T");
+            assert_eq!(f.type_params[0].bounds, vec!["Clone", "Debug"]);
+            assert_eq!(f.type_params[1].name, "U");
+            assert_eq!(f.type_params[1].bounds, vec!["Display"]);
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_turbofish() {
+        let source = r#"
+            mod test {
+                fn main() -> int {
+                    let x = start::<Counter>();
+                    let y = call::<int, String>(x);
+                    0
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = first_user_item(&module) {
+            assert_eq!(f.name, "main");
+
+            // Check first statement: let x = start::<Counter>();
+            if let Stmt::Let { value, .. } = &f.body.stmts[0] {
+                if let Expr::Call {
+                    func, type_args, ..
+                } = value
+                {
+                    if let Expr::Ident(name) = func.as_ref() {
+                        assert_eq!(name, "start");
+                    } else {
+                        panic!("expected ident");
+                    }
+                    assert_eq!(type_args.len(), 1);
+                    if let Type::Named { name, .. } = &type_args[0] {
+                        assert_eq!(name, "Counter");
+                    }
+                } else {
+                    panic!("expected call");
+                }
+            }
+
+            // Check second statement: let y = call::<int, String>(x);
+            if let Stmt::Let { value, .. } = &f.body.stmts[1] {
+                if let Expr::Call { type_args, .. } = value {
+                    assert_eq!(type_args.len(), 2);
+                }
+            }
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
     fn test_parse_generic_struct() {
         let source = r#"
             mod test {
@@ -2417,7 +2771,9 @@ mod tests {
 
         if let Item::Struct(s) = first_user_item(&module) {
             assert_eq!(s.name, "Pair");
-            assert_eq!(s.type_params, vec!["A".to_string(), "B".to_string()]);
+            assert_eq!(s.type_params.len(), 2);
+            assert_eq!(s.type_params[0].name, "A");
+            assert_eq!(s.type_params[1].name, "B");
             assert_eq!(s.fields.len(), 2);
         } else {
             panic!("expected struct");

@@ -40,6 +40,9 @@ pub enum Item {
     Trait(TraitDef),
     /// Trait implementation: `impl Display for Point { ... }`
     TraitImpl(TraitImpl),
+    /// Module-level trait declaration: `impl GenServer;`
+    /// Declares that this module implements a trait (functions are in the module itself)
+    TraitDecl(TraitDecl),
 }
 
 /// Impl block for associated functions and methods.
@@ -62,8 +65,19 @@ pub struct TraitDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraitMethod {
     pub name: String,
+    /// Generic type parameters with optional bounds
+    pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
+}
+
+/// A type parameter with optional trait bounds.
+/// E.g., `T` or `T: Display` or `T: Display + Debug`
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeParam {
+    pub name: String,
+    /// Trait bounds (e.g., ["Display", "Debug"] for `T: Display + Debug`)
+    pub bounds: Vec<String>,
 }
 
 /// Trait implementation for a type.
@@ -74,6 +88,16 @@ pub struct TraitImpl {
     /// Associated type bindings (e.g., `type State = int;`)
     pub type_bindings: Vec<(String, Type)>,
     pub methods: Vec<Function>,
+}
+
+/// Module-level trait declaration.
+/// Declares that this module implements a trait.
+/// The module's functions serve as the trait method implementations.
+/// E.g., `impl genserver::GenServer;`
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraitDecl {
+    /// The trait being implemented (possibly module-qualified)
+    pub trait_name: String,
 }
 
 /// External module declaration.
@@ -119,8 +143,8 @@ pub struct UseTreeItem {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub name: String,
-    /// Generic type parameters (e.g., `<T, U>`)
-    pub type_params: Vec<String>,
+    /// Generic type parameters with optional bounds (e.g., `<T, U: Display>`)
+    pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     /// Guard clause: `when <expr>`
     pub guard: Option<Box<Expr>>,
@@ -179,8 +203,13 @@ pub enum Expr {
     },
     /// Unary operation.
     Unary { op: UnaryOp, expr: Box<Expr> },
-    /// Function call.
-    Call { func: Box<Expr>, args: Vec<Expr> },
+    /// Function call with optional turbofish type arguments: `func::<T>(args)`.
+    Call {
+        func: Box<Expr>,
+        /// Explicit type arguments from turbofish syntax (e.g., `::<Counter>`)
+        type_args: Vec<Type>,
+        args: Vec<Expr>,
+    },
     /// Method call: `expr.method(args)`.
     MethodCall {
         receiver: Box<Expr>,
@@ -470,6 +499,8 @@ pub enum Type {
     Binary,
     /// Map type (raw Erlang map).
     Map,
+    /// Any type (dynamic/untyped).
+    Any,
     /// Function type (e.g., `fn(T, U) -> R`).
     Fn {
         params: Vec<Type>,
@@ -488,8 +519,8 @@ pub enum Type {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructDef {
     pub name: String,
-    /// Generic type parameters (e.g., `<T>`)
-    pub type_params: Vec<String>,
+    /// Generic type parameters with optional bounds (e.g., `<T: Display>`)
+    pub type_params: Vec<TypeParam>,
     pub fields: Vec<(String, Type)>,
     pub is_pub: bool,
 }
@@ -498,8 +529,8 @@ pub struct StructDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumDef {
     pub name: String,
-    /// Generic type parameters (e.g., `<T, E>`)
-    pub type_params: Vec<String>,
+    /// Generic type parameters with optional bounds (e.g., `<T: Display, E>`)
+    pub type_params: Vec<TypeParam>,
     pub variants: Vec<EnumVariant>,
     pub is_pub: bool,
 }

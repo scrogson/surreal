@@ -1,0 +1,136 @@
+// GenServer Example - Counter Server
+//
+// Demonstrates how to build a stateful server using the GenServer module.
+// The counter module implements the GenServer trait by having the required callback functions.
+
+mod counter {
+    // Declare that this module implements the GenServer trait
+    impl genserver::GenServer;
+
+    // Message types for calls (synchronous)
+    pub enum Call {
+        Get,
+        GetAndIncrement,
+    }
+
+    // Message types for casts (asynchronous)
+    pub enum Cast {
+        Increment,
+        IncrementBy(int),
+        Reset,
+    }
+
+    // GenServer callbacks - these are required by the GenServer trait
+
+    /// Initialize the counter state
+    pub fn init(args: any) -> (atom, int) {
+        // Return {:ok, initial_state}
+        (:ok, 0)
+    }
+
+    /// Handle synchronous calls
+    /// `from` is a (pid, ref) tuple following OTP convention
+    pub fn handle_call(msg: Call, from: (pid, any), state: int) -> (atom, any, int) {
+        match msg {
+            Call::Get => (:reply, state, state),
+            Call::GetAndIncrement => (:reply, state, state + 1),
+        }
+    }
+
+    /// Handle asynchronous casts
+    pub fn handle_cast(msg: Cast, state: int) -> (atom, int) {
+        match msg {
+            Cast::Increment => (:noreply, state + 1),
+            Cast::IncrementBy(n) => (:noreply, state + n),
+            Cast::Reset => (:noreply, 0),
+        }
+    }
+
+    /// Handle other messages
+    pub fn handle_info(msg: any, state: int) -> (atom, int) {
+        // Ignore other messages
+        (:noreply, state)
+    }
+
+    /// Called when the server terminates
+    pub fn terminate(reason: atom, state: int) -> atom {
+        :ok
+    }
+}
+
+mod genserver_example {
+    use io::{println, format};
+    use genserver::{call, cast, stop, start};
+
+    // Convenience functions for the Counter API
+    pub fn get(server: pid) -> int {
+        call(server, counter::Call::Get)
+    }
+
+    pub fn get_and_increment(server: pid) -> int {
+        call(server, counter::Call::GetAndIncrement)
+    }
+
+    pub fn increment(server: pid) -> atom {
+        cast(server, counter::Cast::Increment)
+    }
+
+    pub fn increment_by(server: pid, n: int) -> atom {
+        cast(server, counter::Cast::IncrementBy(n))
+    }
+
+    pub fn reset(server: pid) -> atom {
+        cast(server, counter::Cast::Reset)
+    }
+
+    pub fn main() -> atom {
+        println("=== GenServer Counter Example ===");
+        println("");
+
+        // Start the counter server using genserver::start
+        // Pass the module atom :counter (will be 'dream::counter' at runtime)
+        let counter_pid = start(:'dream::counter', ());
+        format("Started counter server: ~p~n", [counter_pid]);
+
+        // Get initial value
+        let val0 = get(counter_pid);
+        format("Initial value: ~p~n", [val0]);
+
+        // Increment a few times
+        increment(counter_pid);
+        increment(counter_pid);
+        increment(counter_pid);
+
+        // Small delay to ensure casts are processed
+        :timer::sleep(10);
+
+        let val1 = get(counter_pid);
+        format("After 3 increments: ~p~n", [val1]);
+
+        // Increment by 10
+        increment_by(counter_pid, 10);
+        :timer::sleep(10);
+
+        let val2 = get(counter_pid);
+        format("After increment_by(10): ~p~n", [val2]);
+
+        // Get and increment atomically
+        let val3 = get_and_increment(counter_pid);
+        let val4 = get(counter_pid);
+        format("get_and_increment returned: ~p, next get: ~p~n", [val3, val4]);
+
+        // Reset
+        reset(counter_pid);
+        :timer::sleep(10);
+
+        let val5 = get(counter_pid);
+        format("After reset: ~p~n", [val5]);
+
+        // Stop the server
+        stop(counter_pid);
+        println("");
+        println("Counter server stopped.");
+
+        :ok
+    }
+}
