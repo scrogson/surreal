@@ -95,11 +95,13 @@ pub struct TraitImpl {
 /// Module-level trait declaration.
 /// Declares that this module implements a trait.
 /// The module's functions serve as the trait method implementations.
-/// E.g., `impl genserver::GenServer;`
+/// E.g., `impl genserver::GenServer;` or `impl genserver::GenServer { type State = int; }`
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraitDecl {
     /// The trait being implemented (possibly module-qualified)
     pub trait_name: String,
+    /// Associated type bindings (e.g., `type State = int;`)
+    pub type_bindings: Vec<(String, Type)>,
 }
 
 /// External module declaration.

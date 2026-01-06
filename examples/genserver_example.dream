@@ -5,7 +5,12 @@
 
 mod counter {
     // Declare that this module implements the GenServer trait
-    impl genserver::GenServer;
+    // with associated type bindings for State and message types
+    impl genserver::GenServer {
+        type State = int;
+        type CallMsg = Call;
+        type CastMsg = Cast;
+    }
 
     // Message types for calls (synchronous)
     pub enum Call {
@@ -26,40 +31,38 @@ mod counter {
     //
     // Dream supports multi-clause functions with enum pattern matching,
     // similar to Erlang/Elixir. Each variant gets its own function clause.
-
-    // TODO: Once TraitDecl supports associated type bindings, we can use:
-    //   impl genserver::GenServer { type State = int; }
-    // and then use Self::State in signatures below.
+    //
+    // With associated type bindings, we can use Self::State in signatures.
 
     /// Initialize the counter state
-    pub fn init(args: any) -> (atom, int) {
+    pub fn init(args: any) -> (atom, Self::State) {
         (:ok, 0)
     }
 
     /// Handle synchronous calls - using multi-clause functions
     /// `from` is a From struct containing the caller's pid and reference
-    pub fn handle_call(Call::Get, from: genserver::From, state: int) -> (atom, int, int) {
+    pub fn handle_call(Call::Get, from: genserver::From, state: Self::State) -> (atom, Self::State, Self::State) {
         io::println("Received Get call");
         (:reply, state, state)
     }
 
-    pub fn handle_call(Call::GetAndIncrement, from: genserver::From, state: int) -> (atom, int, int) {
+    pub fn handle_call(Call::GetAndIncrement, from: genserver::From, state: Self::State) -> (atom, Self::State, Self::State) {
         io::println("Received GetAndIncrement call");
         (:reply, state, state + 1)
     }
 
     /// Handle asynchronous casts - using multi-clause functions
-    pub fn handle_cast(Cast::Increment, state: int) -> (atom, int) {
+    pub fn handle_cast(Cast::Increment, state: Self::State) -> (atom, Self::State) {
         io::println("Received Increment cast");
         (:noreply, state + 1)
     }
 
-    pub fn handle_cast(Cast::IncrementBy(n), state: int) -> (atom, int) {
+    pub fn handle_cast(Cast::IncrementBy(n), state: Self::State) -> (atom, Self::State) {
         io::println(io::format("Received IncrementBy(~p) cast", [n]));
         (:noreply, state + n)
     }
 
-    pub fn handle_cast(Cast::Reset, state: int) -> (atom, int) {
+    pub fn handle_cast(Cast::Reset, state: Self::State) -> (atom, Self::State) {
         io::println("Received Reset cast");
         (:noreply, 0)
     }

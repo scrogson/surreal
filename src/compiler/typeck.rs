@@ -261,6 +261,8 @@ pub struct TypeEnv {
     trait_impls: HashMap<(String, String), TraitImplInfo>,
     /// Module-level trait declarations: trait names this module implements
     module_traits: Vec<String>,
+    /// Associated type bindings from module-level trait declarations: "State" -> Ty::Int
+    associated_types: HashMap<String, Ty>,
 }
 
 impl TypeEnv {
@@ -280,6 +282,7 @@ impl TypeEnv {
             traits: self.traits.clone(),
             trait_impls: self.trait_impls.clone(),
             module_traits: self.module_traits.clone(),
+            associated_types: self.associated_types.clone(),
         }
     }
 
@@ -651,10 +654,19 @@ impl TypeChecker {
                 params: params.iter().map(|t| self.ast_type_to_ty(t)).collect(),
                 ret: Box::new(self.ast_type_to_ty(ret)),
             },
-            ast::Type::AssociatedType { base, name } => Ty::AssociatedType {
-                base: base.clone(),
-                name: name.clone(),
-            },
+            ast::Type::AssociatedType { base, name } => {
+                // Try to resolve Self::X using associated type bindings
+                if base == "Self" {
+                    if let Some(resolved) = self.env.associated_types.get(name) {
+                        return resolved.clone();
+                    }
+                }
+                // If not resolvable, keep as unresolved associated type
+                Ty::AssociatedType {
+                    base: base.clone(),
+                    name: name.clone(),
+                }
+            }
             ast::Type::Any => Ty::Any,
         }
     }
@@ -781,6 +793,11 @@ impl TypeChecker {
                 Item::TraitDecl(decl) => {
                     // Record that this module implements the trait
                     self.env.module_traits.push(decl.trait_name.clone());
+                    // Store associated type bindings for Self::X resolution
+                    for (name, ty) in &decl.type_bindings {
+                        let resolved_ty = self.ast_type_to_ty(ty);
+                        self.env.associated_types.insert(name.clone(), resolved_ty);
+                    }
                 }
                 _ => {}
             }
@@ -2106,10 +2123,13 @@ impl MethodResolver {
                 params: params.iter().map(|t| self.ast_type_to_ty(t)).collect(),
                 ret: Box::new(self.ast_type_to_ty(ret)),
             },
-            ast::Type::AssociatedType { base, name } => Ty::AssociatedType {
-                base: base.clone(),
-                name: name.clone(),
-            },
+            ast::Type::AssociatedType { base, name } => {
+                // MethodResolver doesn't resolve Self::X - just keep as-is
+                Ty::AssociatedType {
+                    base: base.clone(),
+                    name: name.clone(),
+                }
+            }
             ast::Type::Any => Ty::Any,
         }
     }

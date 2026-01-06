@@ -187,11 +187,12 @@ impl<'source> Parser<'source> {
         // Parse the first type name (could be module-qualified like genserver::GenServer)
         let first_name = self.parse_possibly_qualified_type_name()?;
 
-        // Check for module-level trait declaration: `impl Trait;`
+        // Check for module-level trait declaration: `impl Trait;` or `impl Trait { type X = T; }`
         if self.check(&Token::Semi) {
             self.advance();
             return Ok(Item::TraitDecl(TraitDecl {
                 trait_name: first_name,
+                type_bindings: vec![],
             }));
         }
 
@@ -234,32 +235,59 @@ impl<'source> Parser<'source> {
                 methods,
             }))
         } else {
-            // Regular impl block: `impl Type { ... }`
+            // Could be:
+            // - Regular impl block: `impl Type { pub fn ... }`
+            // - Module-level trait declaration: `impl Trait { type X = T; }`
             self.expect(&Token::LBrace)?;
 
-            // Parse methods inside the impl block
-            let mut methods = Vec::new();
-            while !self.check(&Token::RBrace) && !self.is_at_end() {
-                // Methods can have pub modifier
-                let is_pub = self.check(&Token::Pub);
-                if is_pub {
-                    self.advance();
+            // Peek to see if first item is a type binding (module-level trait declaration)
+            // or a function (regular impl block)
+            if self.check_ident("type") {
+                // Module-level trait declaration with type bindings
+                let mut type_bindings = Vec::new();
+                while !self.check(&Token::RBrace) && !self.is_at_end() {
+                    if self.check_ident("type") {
+                        type_bindings.push(self.parse_type_binding()?);
+                    } else {
+                        let span = self.current_span();
+                        return Err(ParseError::new(
+                            "expected `type` binding in module-level trait declaration",
+                            span,
+                        ));
+                    }
                 }
 
-                if self.check(&Token::Fn) {
-                    methods.push(self.parse_function(is_pub)?);
-                } else {
-                    let span = self.current_span();
-                    return Err(ParseError::new("expected `fn` in impl block", span));
+                self.expect(&Token::RBrace)?;
+
+                Ok(Item::TraitDecl(TraitDecl {
+                    trait_name: first_name,
+                    type_bindings,
+                }))
+            } else {
+                // Regular impl block
+                let mut methods = Vec::new();
+                while !self.check(&Token::RBrace) && !self.is_at_end() {
+                    // Methods can have pub modifier
+                    let is_pub = self.check(&Token::Pub);
+                    if is_pub {
+                        self.advance();
+                    }
+
+                    if self.check(&Token::Fn) {
+                        methods.push(self.parse_function(is_pub)?);
+                    } else {
+                        let span = self.current_span();
+                        return Err(ParseError::new("expected `fn` in impl block", span));
+                    }
                 }
+
+                self.expect(&Token::RBrace)?;
+
+                Ok(Item::Impl(ImplBlock {
+                    type_name: first_name,
+                    methods,
+                }))
             }
-
-            self.expect(&Token::RBrace)?;
-
-            Ok(Item::Impl(ImplBlock {
-                type_name: first_name,
-                methods,
-            }))
         }
     }
 
