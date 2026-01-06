@@ -1,0 +1,245 @@
+// Dream Standard Library - File Module
+//
+// File system operations with Elixir-style ergonomics.
+// All functions take path as first argument for pipe compatibility.
+// Returns (:ok, result) or (:error, reason) tuples.
+
+// ============== Read Operations ==============
+
+/// Read entire file contents as binary.
+/// Returns (:ok, binary) or (:error, reason).
+pub fn read(path: any) -> (atom, any) {
+    :file::read_file(path)
+}
+
+/// Read file and split into lines.
+/// Returns (:ok, [lines]) or (:error, reason).
+pub fn read_lines(path: any) -> (atom, any) {
+    match :file::read_file(path) {
+        (:ok, content) => {
+            let lines = :binary::split(content, <<"\n">>, [:global]);
+            (:ok, lines)
+        },
+        error => error
+    }
+}
+
+// ============== Write Operations ==============
+
+/// Write content to file, creating if it doesn't exist.
+/// Returns :ok or (:error, reason).
+pub fn write(path: any, content: any) -> any {
+    :file::write_file(path, content)
+}
+
+/// Write content with specific modes.
+/// Modes: [:append, :binary, :raw, etc.]
+pub fn write_with_modes(path: any, content: any, modes: [any]) -> any {
+    :file::write_file(path, content, modes)
+}
+
+/// Append content to file.
+/// Returns :ok or (:error, reason).
+pub fn append(path: any, content: any) -> any {
+    :file::write_file(path, content, [:append])
+}
+
+// ============== File Information ==============
+
+/// Check if path exists.
+pub fn exists(path: any) -> atom {
+    match :filelib::is_file(path) {
+        :true => :true,
+        :false => :filelib::is_dir(path)
+    }
+}
+
+/// Check if path is a regular file.
+pub fn regular(path: any) -> atom {
+    :filelib::is_regular(path)
+}
+
+/// Check if path is a directory.
+pub fn dir(path: any) -> atom {
+    :filelib::is_dir(path)
+}
+
+/// Get file statistics.
+/// Returns (:ok, stat_info) or (:error, reason).
+pub fn stat(path: any) -> (atom, any) {
+    :file::read_file_info(path)
+}
+
+/// Get file size in bytes.
+/// Returns (:ok, size) or (:error, reason).
+pub fn size(path: any) -> (atom, any) {
+    match :file::read_file_info(path) {
+        (:ok, info) => {
+            let file_size = :erlang::element(2, info);
+            (:ok, file_size)
+        },
+        error => error
+    }
+}
+
+// ============== Directory Operations ==============
+
+/// Create a directory.
+/// Returns :ok or (:error, reason).
+pub fn mkdir(path: any) -> any {
+    :file::make_dir(path)
+}
+
+/// Create a directory and all parent directories.
+/// Returns :ok or (:error, reason).
+pub fn mkdir_p(path: any) -> any {
+    :filelib::ensure_dir(:filename::join(path, "dummy"))
+}
+
+/// Remove an empty directory.
+/// Returns :ok or (:error, reason).
+pub fn rmdir(path: any) -> any {
+    :file::del_dir(path)
+}
+
+/// List directory contents.
+/// Returns (:ok, [filenames]) or (:error, reason).
+pub fn ls(path: any) -> (atom, any) {
+    match :file::list_dir(path) {
+        (:ok, files) => {
+            // Convert charlists to binaries
+            let binaries = :lists::map(|f| { :erlang::list_to_binary(f) }, files);
+            (:ok, binaries)
+        },
+        error => error
+    }
+}
+
+// ============== File Management ==============
+
+/// Copy a file.
+/// Returns (:ok, bytes_copied) or (:error, reason).
+pub fn cp(source: any, destination: any) -> (atom, any) {
+    :file::copy(source, destination)
+}
+
+/// Rename/move a file or directory.
+/// Returns :ok or (:error, reason).
+pub fn rename(source: any, destination: any) -> any {
+    :file::rename(source, destination)
+}
+
+/// Delete a file.
+/// Returns :ok or (:error, reason).
+pub fn rm(path: any) -> any {
+    :file::delete(path)
+}
+
+/// Recursively delete files and directories.
+/// Returns (:ok, deleted_paths) or (:error, reason, path).
+pub fn rm_rf(path: any) -> any {
+    // Check if it's a directory
+    match dir(path) {
+        :true => {
+            // List and delete contents first
+            match ls(path) {
+                (:ok, files) => {
+                    let results = :lists::map(|f| {
+                        let full_path = :filename::join(path, f);
+                        rm_rf(full_path)
+                    }, files);
+                    // Then delete the directory itself
+                    rmdir(path)
+                },
+                error => error
+            }
+        },
+        :false => {
+            // It's a file, just delete it
+            rm(path)
+        }
+    }
+}
+
+// ============== Working Directory ==============
+
+/// Get current working directory.
+/// Returns (:ok, path) or (:error, reason).
+pub fn cwd() -> (atom, any) {
+    match :file::get_cwd() {
+        (:ok, dir) => (:ok, :erlang::list_to_binary(dir)),
+        error => error
+    }
+}
+
+/// Change current working directory.
+/// Returns :ok or (:error, reason).
+pub fn cd(path: any) -> any {
+    :file::set_cwd(path)
+}
+
+// ============== Permissions ==============
+
+/// Change file permissions.
+/// Mode is an integer (e.g., 0o755).
+/// Returns :ok or (:error, reason).
+pub fn chmod(path: any, mode: int) -> any {
+    :file::change_mode(path, mode)
+}
+
+// ============== Links ==============
+
+/// Create a symbolic link.
+/// Returns :ok or (:error, reason).
+pub fn ln_s(existing: any, new: any) -> any {
+    :file::make_symlink(existing, new)
+}
+
+/// Create a hard link.
+/// Returns :ok or (:error, reason).
+pub fn ln(existing: any, new: any) -> any {
+    :file::make_link(existing, new)
+}
+
+/// Read the target of a symbolic link.
+/// Returns (:ok, target) or (:error, reason).
+pub fn read_link(path: any) -> (atom, any) {
+    match :file::read_link(path) {
+        (:ok, target) => (:ok, :erlang::list_to_binary(target)),
+        error => error
+    }
+}
+
+// ============== Touch ==============
+
+/// Update file access and modification times.
+/// Creates the file if it doesn't exist.
+/// Returns :ok or (:error, reason).
+pub fn touch(path: any) -> any {
+    match exists(path) {
+        :true => {
+            // Update times to now
+            let now = :erlang::localtime();
+            :file::change_time(path, now)
+        },
+        :false => {
+            // Create empty file
+            write(path, <<>>)
+        }
+    }
+}
+
+// ============== Open/Close (low-level) ==============
+
+/// Open a file with specified modes.
+/// Modes: [:read, :write, :append, :binary, :raw, etc.]
+/// Returns (:ok, io_device) or (:error, reason).
+pub fn open(path: any, modes: [any]) -> (atom, any) {
+    :file::open(path, modes)
+}
+
+/// Close an open file.
+/// Returns :ok or (:error, reason).
+pub fn close(io_device: any) -> any {
+    :file::close(io_device)
+}

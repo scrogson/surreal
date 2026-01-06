@@ -1,0 +1,154 @@
+// File I/O Example - Demonstrates the file module
+
+mod file_example {
+    use io::{println, format};
+
+    pub fn main() -> atom {
+        println("=== File I/O Example ===");
+        println("");
+
+        // Get current working directory
+        let (:ok, current_dir) = file::cwd();
+        format("Current directory: ~s~n", [current_dir]);
+        println("");
+
+        // Create a test directory
+        let test_dir = "/tmp/dream_file_test";
+        println("Creating test directory...");
+
+        // Clean up if exists from previous run
+        rm_rf_safe(test_dir);
+
+        match file::mkdir(test_dir) {
+            :ok => format("Created: ~s~n", [test_dir]),
+            (:error, reason) => format("Error creating dir: ~p~n", [reason])
+        };
+
+        // Check if it exists and is a directory
+        format("exists: ~p~n", [file::exists(test_dir)]);
+        format("dir: ~p~n", [file::dir(test_dir)]);
+        println("");
+
+        // Write a file
+        let test_file = "/tmp/dream_file_test/hello.txt";
+        println("Writing file...");
+        match file::write(test_file, "Hello, Dream!\nThis is a test file.\n") {
+            :ok => format("Wrote: ~s~n", [test_file]),
+            (:error, reason) => format("Error writing: ~p~n", [reason])
+        };
+
+        // Check file info
+        format("exists: ~p~n", [file::exists(test_file)]);
+        format("regular: ~p~n", [file::regular(test_file)]);
+
+        // Get file size
+        match file::size(test_file) {
+            (:ok, s) => format("size: ~p bytes~n", [s]),
+            (:error, reason) => format("Error getting size: ~p~n", [reason])
+        };
+        println("");
+
+        // Read the file back
+        println("Reading file...");
+        match file::read(test_file) {
+            (:ok, content) => format("Content: ~s~n", [content]),
+            (:error, reason) => format("Error reading: ~p~n", [reason])
+        };
+        println("");
+
+        // Append to file
+        println("Appending to file...");
+        match file::append(test_file, "Appended line!\n") {
+            :ok => println("Appended successfully"),
+            (:error, reason) => format("Error appending: ~p~n", [reason])
+        };
+
+        // Read again
+        match file::read(test_file) {
+            (:ok, content) => format("Content after append: ~s~n", [content]),
+            (:error, reason) => format("Error reading: ~p~n", [reason])
+        };
+        println("");
+
+        // Copy file
+        let copy_file = "/tmp/dream_file_test/hello_copy.txt";
+        println("Copying file...");
+        match file::cp(test_file, copy_file) {
+            (:ok, num_bytes) => format("Copied ~p bytes~n", [num_bytes]),
+            (:error, reason) => format("Error copying: ~p~n", [reason])
+        };
+
+        // Rename file
+        let renamed_file = "/tmp/dream_file_test/renamed.txt";
+        println("Renaming file...");
+        match file::rename(copy_file, renamed_file) {
+            :ok => format("Renamed to ~s~n", [renamed_file]),
+            (:error, reason) => format("Error renaming: ~p~n", [reason])
+        };
+        println("");
+
+        // List directory contents
+        println("Listing directory:");
+        match file::ls(test_dir) {
+            (:ok, files) => {
+                :lists::foreach(|f| {
+                    format("  - ~s~n", [f])
+                }, files)
+            },
+            (:error, reason) => format("Error listing: ~p~n", [reason])
+        };
+        println("");
+
+        // Touch a new file
+        let touch_file = "/tmp/dream_file_test/touched.txt";
+        println("Touching new file...");
+        match file::touch(touch_file) {
+            :ok => format("Touched: ~s~n", [touch_file]),
+            (:error, reason) => format("Error: ~p~n", [reason])
+        };
+        println("");
+
+        // Final listing
+        println("Final directory listing:");
+        match file::ls(test_dir) {
+            (:ok, files) => {
+                :lists::foreach(|f| {
+                    format("  - ~s~n", [f])
+                }, files)
+            },
+            (:error, reason) => format("Error: ~p~n", [reason])
+        };
+        println("");
+
+        // Clean up
+        println("Cleaning up...");
+        rm_rf_safe(test_dir);
+        println("Done!");
+        :ok
+    }
+
+    // Helper to remove directory tree
+    fn rm_rf_safe(path: any) -> atom {
+        match file::dir(path) {
+            :true => {
+                match file::ls(path) {
+                    (:ok, files) => {
+                        :lists::foreach(|f| {
+                            let full_path = :filename::join(path, f);
+                            rm_rf_safe(full_path)
+                        }, files);
+                        file::rmdir(path)
+                    },
+                    _ => :ok
+                }
+            },
+            :false => {
+                match file::regular(path) {
+                    :true => file::rm(path),
+                    :false => :ok
+                }
+            }
+        };
+        :ok
+    }
+}
