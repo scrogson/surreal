@@ -1,0 +1,479 @@
+// Dream Standard Library - Supervisor Module
+//
+// A behaviour module for implementing supervisors.
+// Based on Erlang/OTP's supervisor and Elixir's Supervisor.
+//
+// Supervisors are processes that monitor child processes and restart them
+// when they fail, providing fault tolerance.
+
+// ============== Types ==============
+
+/// Restart strategy for a child.
+/// - :permanent - always restart (default)
+/// - :temporary - never restart
+/// - :transient - restart only if terminated abnormally
+pub enum Restart {
+    Permanent,
+    Temporary,
+    Transient,
+}
+
+/// Child type.
+/// - :worker - a worker process (e.g., GenServer)
+/// - :supervisor - a supervisor process
+pub enum ChildType {
+    Worker,
+    Supervisor,
+}
+
+/// Supervision strategy.
+/// - :one_for_one - only restart the failed child
+/// - :one_for_all - restart all children when one fails
+/// - :rest_for_one - restart failed child and all started after it
+pub enum Strategy {
+    OneForOne,
+    OneForAll,
+    RestForOne,
+}
+
+// ============== Supervisor Trait ==============
+
+/// The Supervisor trait.
+/// Implement this trait to create a supervisor.
+pub trait Supervisor {
+    /// Initialize the supervisor.
+    /// Return supervisor flags and child specifications.
+    /// Format: (:ok, (strategy_atom, child_specs_list))
+    fn init(args: any) -> any;
+}
+
+// ============== Client API ==============
+
+/// Start a supervisor linked to the calling process.
+/// The module must implement the Supervisor trait (have init function).
+pub fn start_link(module: atom, args: any) -> pid {
+    let parent = self();
+    let sup_pid = spawn || {
+        // Link to parent process
+        :erlang::link(parent);
+        let init_result = :erlang::apply(module, :init, [args]);
+        match init_result {
+            (:ok, (strategy, child_specs)) => {
+                // Start all children
+                let children = start_children(child_specs, []);
+                // Notify parent we're ready
+                process::send(parent, (:supervisor_started, self()));
+                // Enter supervisor loop
+                supervisor_loop(strategy, child_specs, children)
+            },
+            (:stop, reason) => {
+                process::send(parent, (:supervisor_failed, self(), reason));
+                :erlang::exit(reason)
+            },
+            _ => {
+                process::send(parent, (:supervisor_failed, self(), :bad_init));
+                :erlang::exit(:bad_init_result)
+            }
+        }
+    };
+    // Wait for supervisor to start
+    receive {
+        (:supervisor_started, p) if p == sup_pid => sup_pid,
+        (:supervisor_failed, p, reason) if p == sup_pid => {
+            :erlang::exit(reason)
+        }
+    }
+}
+
+/// Start a supervisor without linking.
+pub fn start(module: atom, args: any) -> pid {
+    let parent = self();
+    let sup_pid = spawn || {
+        let init_result = :erlang::apply(module, :init, [args]);
+        match init_result {
+            (:ok, (strategy, child_specs)) => {
+                let children = start_children(child_specs, []);
+                process::send(parent, (:supervisor_started, self()));
+                supervisor_loop(strategy, child_specs, children)
+            },
+            (:stop, reason) => {
+                process::send(parent, (:supervisor_failed, self(), reason));
+                :erlang::exit(reason)
+            },
+            _ => {
+                process::send(parent, (:supervisor_failed, self(), :bad_init));
+                :erlang::exit(:bad_init_result)
+            }
+        }
+    };
+    receive {
+        (:supervisor_started, p) if p == sup_pid => sup_pid,
+        (:supervisor_failed, p, reason) if p == sup_pid => {
+            :erlang::exit(reason)
+        }
+    }
+}
+
+/// Get list of children.
+/// Returns list of (id, pid, type, modules) tuples.
+pub fn which_children(sup: pid) -> [any] {
+    let ref = :erlang::make_ref();
+    process::send(sup, (:sup_call, (self(), ref), :which_children));
+    receive {
+        (r, response) if r == ref => response
+    }
+}
+
+/// Count children by category.
+/// Returns (specs, active, supervisors, workers) tuple.
+pub fn count_children(sup: pid) -> (int, int, int, int) {
+    let ref = :erlang::make_ref();
+    process::send(sup, (:sup_call, (self(), ref), :count_children));
+    receive {
+        (r, response) if r == ref => response
+    }
+}
+
+/// Dynamically start a new child.
+pub fn start_child(sup: pid, child_spec: any) -> (atom, pid) {
+    let ref = :erlang::make_ref();
+    process::send(sup, (:sup_call, (self(), ref), (:start_child, child_spec)));
+    receive {
+        (r, response) if r == ref => response
+    }
+}
+
+/// Terminate a child by id.
+pub fn terminate_child(sup: pid, child_id: atom) -> atom {
+    let ref = :erlang::make_ref();
+    process::send(sup, (:sup_call, (self(), ref), (:terminate_child, child_id)));
+    receive {
+        (r, response) if r == ref => response
+    }
+}
+
+/// Stop the supervisor and all children.
+pub fn stop(sup: pid) -> atom {
+    process::send(sup, :sup_stop);
+    :ok
+}
+
+// ============== Internal Functions ==============
+
+/// Prepend an element to a list (equivalent to [head | tail]).
+fn cons(head: any, tail: [any]) -> [any] {
+    :lists::append([head], tail)
+}
+
+/// Start all children from specs.
+fn start_children(specs: [any], acc: [any]) -> [any] {
+    match specs {
+        [] => :lists::reverse(acc),
+        [spec | rest] => {
+            let child = start_one_child(spec);
+            start_children(rest, cons(child, acc))
+        }
+    }
+}
+
+/// Start a single child from spec.
+/// Spec format: (id, module, args, restart, type)
+/// Returns: (id, pid, module, restart, type)
+fn start_one_child(spec: any) -> (atom, pid, atom, atom, atom) {
+    let (id, module, args, restart, child_type) = spec;
+    // For workers, we assume they have a start function that takes args
+    // and returns a pid (like genserver::start)
+    let child_pid = :erlang::apply(module, :start, [args]);
+    // Link to the child so we get EXIT signals
+    :erlang::link(child_pid);
+    (id, child_pid, module, restart, child_type)
+}
+
+/// Restart a child.
+fn restart_child(child: (atom, pid, atom, atom, atom)) -> (atom, pid, atom, atom, atom) {
+    let (id, _old_pid, module, restart, child_type) = child;
+    let new_pid = :erlang::apply(module, :start, [()]);
+    :erlang::link(new_pid);
+    (id, new_pid, module, restart, child_type)
+}
+
+/// The main supervisor loop.
+fn supervisor_loop(strategy: atom, specs: [any], children: [any]) -> atom {
+    // Set trap_exit to receive EXIT signals from children
+    :erlang::process_flag(:trap_exit, :true);
+    supervisor_loop_inner(strategy, specs, children)
+}
+
+fn supervisor_loop_inner(strategy: atom, specs: [any], children: [any]) -> atom {
+    receive {
+        // Handle EXIT from a child
+        (:'EXIT', child_pid, reason) => {
+            let result = handle_child_exit(strategy, specs, children, child_pid, reason);
+            match result {
+                (:continue, new_children) => {
+                    supervisor_loop_inner(strategy, specs, new_children)
+                },
+                :shutdown => {
+                    // Max restarts exceeded, shut down
+                    stop_all_children(children);
+                    :erlang::exit(:shutdown)
+                }
+            }
+        },
+        // Handle supervisor calls
+        (:sup_call, from, request) => {
+            let response = handle_sup_call(request, specs, children);
+            let (from_pid, from_ref) = from;
+            process::send(from_pid, (from_ref, response));
+            match request {
+                (:start_child, new_spec) => {
+                    match response {
+                        (:ok, _new_pid) => {
+                            // Child was started, add to children list
+                            let new_child = start_one_child(new_spec);
+                            supervisor_loop_inner(strategy, cons(new_spec, specs), cons(new_child, children))
+                        },
+                        _ => supervisor_loop_inner(strategy, specs, children)
+                    }
+                },
+                (:terminate_child, child_id) => {
+                    // Remove terminated child from list
+                    let new_children = remove_child_by_id(children, child_id);
+                    supervisor_loop_inner(strategy, specs, new_children)
+                },
+                _ => supervisor_loop_inner(strategy, specs, children)
+            }
+        },
+        // Stop supervisor
+        :sup_stop => {
+            stop_all_children(children);
+            :ok
+        },
+        // Ignore other messages
+        _ => supervisor_loop_inner(strategy, specs, children)
+    }
+}
+
+/// Handle a child exit based on strategy.
+fn handle_child_exit(strategy: atom, specs: [any], children: [any], child_pid: pid, reason: atom) -> (atom, [any]) {
+    // Find the child that exited
+    let maybe_child = find_child_by_pid(children, child_pid);
+    match maybe_child {
+        :not_found => {
+            // Unknown child, ignore
+            (:continue, children)
+        },
+        child => {
+            let (id, _pid, module, restart, child_type) = child;
+            // Check if we should restart based on restart type and reason
+            let should_restart = match restart {
+                :permanent => :true,
+                :temporary => :false,
+                :transient => {
+                    match reason {
+                        :normal => :false,
+                        :shutdown => :false,
+                        _ => :true
+                    }
+                },
+                _ => :true
+            };
+            match should_restart {
+                :true => {
+                    // Apply supervision strategy
+                    match strategy {
+                        :one_for_one => {
+                            // Only restart the failed child
+                            let new_child = restart_child(child);
+                            let new_children = replace_child(children, child_pid, new_child);
+                            (:continue, new_children)
+                        },
+                        :one_for_all => {
+                            // Stop all children, then restart all
+                            stop_all_children(children);
+                            let new_children = start_children(specs, []);
+                            (:continue, new_children)
+                        },
+                        :rest_for_one => {
+                            // Stop children started after the failed one, then restart them
+                            let (before, remaining) = split_at_child(children, child_pid);
+                            stop_children(remaining);
+                            let specs_to_restart = get_specs_for_children(remaining, specs);
+                            let restarted = start_children(specs_to_restart, []);
+                            let new_child = restart_child(child);
+                            let new_children = :lists::append(before, cons(new_child, restarted));
+                            (:continue, new_children)
+                        },
+                        _ => {
+                            // Default to one_for_one
+                            let new_child = restart_child(child);
+                            let new_children = replace_child(children, child_pid, new_child);
+                            (:continue, new_children)
+                        }
+                    }
+                },
+                :false => {
+                    // Don't restart, just remove from children
+                    let new_children = remove_child_by_pid(children, child_pid);
+                    (:continue, new_children)
+                }
+            }
+        }
+    }
+}
+
+/// Handle supervisor API calls.
+fn handle_sup_call(request: any, specs: [any], children: [any]) -> any {
+    match request {
+        :which_children => {
+            // Return list of (id, pid, type, [module]) for each child
+            :lists::map(|child| {
+                let (id, child_pid, module, _restart, child_type) = child;
+                (id, child_pid, child_type, [module])
+            }, children)
+        },
+        :count_children => {
+            let num_specs = :erlang::length(specs);
+            let num_active = :erlang::length(children);
+            let num_supervisors = count_by_type(children, :supervisor);
+            let num_workers = count_by_type(children, :worker);
+            (num_specs, num_active, num_supervisors, num_workers)
+        },
+        (:start_child, _spec) => {
+            // For now, return ok - actual start happens in loop
+            (:ok, :pending)
+        },
+        (:terminate_child, child_id) => {
+            let maybe_child = find_child_by_id(children, child_id);
+            match maybe_child {
+                :not_found => :error,
+                child => {
+                    let (_id, child_pid, _module, _restart, _type) = child;
+                    :erlang::unlink(child_pid);
+                    :erlang::exit(child_pid, :shutdown);
+                    :ok
+                }
+            }
+        },
+        _ => :error
+    }
+}
+
+/// Stop all children.
+fn stop_all_children(children: [any]) -> atom {
+    stop_children(children)
+}
+
+fn stop_children(children: [any]) -> atom {
+    match children {
+        [] => :ok,
+        [child | rest] => {
+            let (_id, child_pid, _module, _restart, _type) = child;
+            :erlang::unlink(child_pid);
+            :erlang::exit(child_pid, :shutdown);
+            stop_children(rest)
+        }
+    }
+}
+
+/// Find a child by pid.
+fn find_child_by_pid(children: [any], target_pid: pid) -> any {
+    match children {
+        [] => :not_found,
+        [child | rest] => {
+            let (_id, child_pid, _module, _restart, _type) = child;
+            match child_pid == target_pid {
+                :true => child,
+                :false => find_child_by_pid(rest, target_pid)
+            }
+        }
+    }
+}
+
+/// Find a child by id.
+fn find_child_by_id(children: [any], target_id: atom) -> any {
+    match children {
+        [] => :not_found,
+        [child | rest] => {
+            let (id, _child_pid, _module, _restart, _type) = child;
+            match id == target_id {
+                :true => child,
+                :false => find_child_by_id(rest, target_id)
+            }
+        }
+    }
+}
+
+/// Remove a child by pid.
+fn remove_child_by_pid(children: [any], target_pid: pid) -> [any] {
+    :lists::filter(|child| {
+        let (_id, child_pid, _module, _restart, _type) = child;
+        child_pid != target_pid
+    }, children)
+}
+
+/// Remove a child by id.
+fn remove_child_by_id(children: [any], target_id: atom) -> [any] {
+    :lists::filter(|child| {
+        let (id, _child_pid, _module, _restart, _type) = child;
+        id != target_id
+    }, children)
+}
+
+/// Replace a child by pid.
+fn replace_child(children: [any], target_pid: pid, new_child: any) -> [any] {
+    :lists::map(|child| {
+        let (_id, child_pid, _module, _restart, _type) = child;
+        match child_pid == target_pid {
+            :true => new_child,
+            :false => child
+        }
+    }, children)
+}
+
+/// Split children list at the child with given pid.
+fn split_at_child(children: [any], target_pid: pid) -> ([any], [any]) {
+    split_at_child_acc(children, target_pid, [])
+}
+
+fn split_at_child_acc(children: [any], target_pid: pid, acc: [any]) -> ([any], [any]) {
+    match children {
+        [] => (:lists::reverse(acc), []),
+        [child | rest] => {
+            let (_id, child_pid, _module, _restart, _type) = child;
+            match child_pid == target_pid {
+                :true => (:lists::reverse(acc), rest),
+                :false => split_at_child_acc(rest, target_pid, cons(child, acc))
+            }
+        }
+    }
+}
+
+/// Get specs for a list of children.
+fn get_specs_for_children(children: [any], specs: [any]) -> [any] {
+    :lists::map(|child| {
+        let (id, _pid, _module, _restart, _type) = child;
+        find_spec_by_id(specs, id)
+    }, children)
+}
+
+fn find_spec_by_id(specs: [any], target_id: atom) -> any {
+    match specs {
+        [] => (),
+        [spec | rest] => {
+            let (id, _module, _args, _restart, _type) = spec;
+            match id == target_id {
+                :true => spec,
+                :false => find_spec_by_id(rest, target_id)
+            }
+        }
+    }
+}
+
+/// Count children by type.
+fn count_by_type(children: [any], target_type: atom) -> int {
+    :erlang::length(:lists::filter(|child| {
+        let (_id, _pid, _module, _restart, child_type) = child;
+        child_type == target_type
+    }, children))
+}

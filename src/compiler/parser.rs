@@ -1550,6 +1550,11 @@ impl<'source> Parser<'source> {
             return Ok(Pattern::Atom(a));
         }
 
+        if let Some(Token::QuotedAtom(a)) = self.peek().cloned() {
+            self.advance();
+            return Ok(Pattern::Atom(a));
+        }
+
         if self.check(&Token::True) {
             self.advance();
             return Ok(Pattern::Bool(true));

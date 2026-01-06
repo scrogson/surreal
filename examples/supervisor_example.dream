@@ -1,0 +1,191 @@
+// Supervisor Example - Demonstrates OTP-style supervision
+//
+// This example shows how to create a supervisor that manages worker processes,
+// automatically restarting them when they crash.
+
+// ============== Worker Module ==============
+// A simple counter worker that can be supervised
+
+mod counter_worker {
+    use io::{println, format};
+
+    // Worker state
+    pub fn start(args: any) -> pid {
+        let parent = self();
+        spawn || {
+            :erlang::link(parent);
+            format("Counter worker ~p started~n", [self()]);
+            worker_loop(0)
+        }
+    }
+
+    fn worker_loop(count: int) -> atom {
+        receive {
+            (:increment, from) => {
+                let new_count = count + 1;
+                process::send(from, (:ok, new_count));
+                worker_loop(new_count)
+            },
+            (:get, from) => {
+                process::send(from, (:ok, count));
+                worker_loop(count)
+            },
+            :crash => {
+                println("Counter worker crashing!");
+                :erlang::exit(:crash)
+            },
+            _ => worker_loop(count)
+        }
+    }
+}
+
+// ============== Logger Worker ==============
+// Another worker to demonstrate multiple children
+
+mod logger_worker {
+    use io::{println, format};
+
+    pub fn start(args: any) -> pid {
+        let parent = self();
+        spawn || {
+            :erlang::link(parent);
+            format("Logger worker ~p started~n", [self()]);
+            logger_loop()
+        }
+    }
+
+    fn logger_loop() -> atom {
+        receive {
+            (:log, msg) => {
+                format("[LOG] ~p~n", [msg]);
+                logger_loop()
+            },
+            :crash => {
+                println("Logger worker crashing!");
+                :erlang::exit(:crash)
+            },
+            _ => logger_loop()
+        }
+    }
+}
+
+// ============== Supervisor Module ==============
+
+mod my_supervisor {
+    impl supervisor::Supervisor;
+
+    pub fn init(args: any) -> (atom, (atom, [any])) {
+        // Define child specifications:
+        // (id, module, args, restart, type)
+        let child_specs = [
+            (:counter, :'dream::counter_worker', (), :permanent, :worker),
+            (:logger, :'dream::logger_worker', (), :permanent, :worker)
+        ];
+
+        // Return supervisor flags and child specs
+        // Strategy: :one_for_one means only restart the failed child
+        (:ok, (:one_for_one, child_specs))
+    }
+}
+
+// ============== Main Module ==============
+
+mod supervisor_example {
+    use io::{println, format};
+    use supervisor::{start_link, which_children, count_children, stop};
+
+    // Helper to send message to a worker and get response
+    fn call_worker(worker_pid: pid, msg: any) -> any {
+        process::send(worker_pid, (msg, self()));
+        receive {
+            (:ok, response) => response,
+            after 1000 => { :timeout }
+        }
+    }
+
+    pub fn main() -> atom {
+        println("=== Supervisor Example ===");
+        println("");
+
+        // Start the supervisor
+        println("Starting supervisor...");
+        let sup = start_link(:'dream::my_supervisor', ());
+        format("Supervisor started: ~p~n", [sup]);
+        println("");
+
+        // Give children time to start
+        :timer::sleep(100);
+
+        // List children
+        println("Children:");
+        let children = which_children(sup);
+        format("~p~n", [children]);
+        println("");
+
+        // Count children
+        let (specs, active, supervisors, workers) = count_children(sup);
+        format("Specs: ~p, Active: ~p, Supervisors: ~p, Workers: ~p~n",
+               [specs, active, supervisors, workers]);
+        println("");
+
+        // Find counter worker pid
+        let counter_pid = find_child_pid(children, :counter);
+        format("Counter worker pid: ~p~n", [counter_pid]);
+
+        // Use the counter
+        println("Incrementing counter...");
+        let count1 = call_worker(counter_pid, :increment);
+        format("Count after increment: ~p~n", [count1]);
+
+        let count2 = call_worker(counter_pid, :increment);
+        format("Count after increment: ~p~n", [count2]);
+
+        let count3 = call_worker(counter_pid, :get);
+        format("Current count: ~p~n", [count3]);
+        println("");
+
+        // Now crash the counter worker
+        println("Crashing the counter worker...");
+        process::send(counter_pid, :crash);
+
+        // Wait for supervisor to restart it
+        :timer::sleep(200);
+
+        // List children again - should have new pid
+        println("");
+        println("Children after restart:");
+        let children2 = which_children(sup);
+        format("~p~n", [children2]);
+
+        // Find new counter pid
+        let new_counter_pid = find_child_pid(children2, :counter);
+        format("New counter worker pid: ~p~n", [new_counter_pid]);
+
+        // Counter should be reset to 0
+        let count4 = call_worker(new_counter_pid, :get);
+        format("Count after restart: ~p (reset to 0)~n", [count4]);
+        println("");
+
+        // Stop the supervisor
+        println("Stopping supervisor...");
+        stop(sup);
+        :timer::sleep(100);
+
+        println("Done!");
+        :ok
+    }
+
+    // Find a child pid by id from which_children result
+    fn find_child_pid(children: [any], target_id: atom) -> pid {
+        match children {
+            [] => :erlang::exit(:child_not_found),
+            [child | rest] => {
+                let (id, child_pid, _type, _modules) = child;
+                match id == target_id {
+                    :true => child_pid,
+                    :false => find_child_pid(rest, target_id)
+                }
+            }
+        }
+    }
+}
