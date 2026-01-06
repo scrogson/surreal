@@ -61,7 +61,7 @@ pub struct TraitDef {
     pub methods: Vec<TraitMethod>,
 }
 
-/// Trait method signature (no body).
+/// Trait method signature with optional default implementation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraitMethod {
     pub name: String,
@@ -69,6 +69,8 @@ pub struct TraitMethod {
     pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
+    /// Optional default implementation body
+    pub body: Option<Block>,
 }
 
 /// A type parameter with optional trait bounds.

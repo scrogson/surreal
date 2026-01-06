@@ -318,7 +318,8 @@ impl<'source> Parser<'source> {
         Ok((name, ty))
     }
 
-    /// Parse a trait method signature: `fn method<T: Bound>(self, arg: Type) -> ReturnType;`
+    /// Parse a trait method: `fn method<T: Bound>(self, arg: Type) -> ReturnType;`
+    /// or with default body: `fn method(self) -> Type { ... }`
     fn parse_trait_method(&mut self) -> ParseResult<TraitMethod> {
         self.expect(&Token::Fn)?;
         let name = self.expect_ident()?;
@@ -345,13 +346,20 @@ impl<'source> Parser<'source> {
             None
         };
 
-        self.expect(&Token::Semi)?;
+        // Check for default implementation body or semicolon
+        let body = if self.check(&Token::LBrace) {
+            Some(self.parse_block()?)
+        } else {
+            self.expect(&Token::Semi)?;
+            None
+        };
 
         Ok(TraitMethod {
             name,
             type_params,
             params,
             return_type,
+            body,
         })
     }
 

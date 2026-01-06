@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::compiler::ast::{
     BinOp, BitEndianness, BitSegmentType, BitSignedness, BitStringSegment, Block, Expr, Function,
-    Item, MatchArm, Module, Pattern, Stmt, TraitDef, UnaryOp, UseDecl, UseTree,
+    Item, MatchArm, Module, Pattern, Stmt, TraitDef, TraitImpl, UnaryOp, UseDecl, UseTree,
 };
 
 /// Core Erlang emitter error.
@@ -420,6 +420,61 @@ impl CoreErlangEmitter {
         Ok(())
     }
 
+    /// Emit all methods for a trait implementation, including default methods.
+    fn emit_trait_impl_methods(&mut self, trait_impl: &TraitImpl) -> CoreErlangResult<()> {
+        // Collect method names explicitly implemented
+        let impl_method_names: HashSet<String> =
+            trait_impl.methods.iter().map(|m| m.name.clone()).collect();
+
+        // Emit explicitly implemented methods
+        for method in &trait_impl.methods {
+            let mangled_name = format!(
+                "{}_{}_{}",
+                trait_impl.trait_name, trait_impl.type_name, method.name
+            );
+            let mangled_method = Function {
+                name: mangled_name,
+                type_params: method.type_params.clone(),
+                params: method.params.clone(),
+                guard: method.guard.clone(),
+                return_type: method.return_type.clone(),
+                body: method.body.clone(),
+                is_pub: method.is_pub,
+                span: method.span.clone(),
+            };
+            self.newline();
+            self.emit_function(&mangled_method)?;
+        }
+
+        // Emit default methods not overridden in this impl
+        if let Some(trait_def) = self.traits.get(&trait_impl.trait_name).cloned() {
+            for trait_method in &trait_def.methods {
+                if let Some(ref body) = trait_method.body {
+                    if !impl_method_names.contains(&trait_method.name) {
+                        let mangled_name = format!(
+                            "{}_{}_{}",
+                            trait_impl.trait_name, trait_impl.type_name, trait_method.name
+                        );
+                        let default_method = Function {
+                            name: mangled_name,
+                            type_params: trait_method.type_params.clone(),
+                            params: trait_method.params.clone(),
+                            guard: None,
+                            return_type: trait_method.return_type.clone(),
+                            body: body.clone(),
+                            is_pub: true, // Default methods are public
+                            span: 0..0,   // Synthetic span
+                        };
+                        self.newline();
+                        self.emit_function(&default_method)?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Prefix for Dream modules in the BEAM (like Elixir's "Elixir." prefix).
     pub const MODULE_PREFIX: &'static str = "dream::";
 
@@ -457,6 +512,10 @@ impl CoreErlangEmitter {
                         .insert(trait_def.name.clone(), trait_def.clone());
                 }
                 Item::TraitImpl(trait_impl) => {
+                    // Collect method names implemented in this impl
+                    let impl_method_names: HashSet<String> =
+                        trait_impl.methods.iter().map(|m| m.name.clone()).collect();
+
                     // Register trait impl methods for dispatch
                     for method in &trait_impl.methods {
                         // Use full path: Trait_Type_method
@@ -471,6 +530,31 @@ impl CoreErlangEmitter {
                             .entry(key)
                             .or_insert_with(Vec::new)
                             .push(trait_impl.type_name.clone());
+                    }
+
+                    // Also register default methods not overridden in this impl
+                    if let Some(trait_def) = self.traits.get(&trait_impl.trait_name).cloned() {
+                        for trait_method in &trait_def.methods {
+                            if trait_method.body.is_some()
+                                && !impl_method_names.contains(&trait_method.name)
+                            {
+                                // Register default method for dispatch
+                                self.impl_methods.insert((
+                                    format!(
+                                        "{}_{}",
+                                        trait_impl.trait_name, trait_impl.type_name
+                                    ),
+                                    trait_method.name.clone(),
+                                ));
+
+                                let key =
+                                    (trait_impl.trait_name.clone(), trait_method.name.clone());
+                                self.trait_impls
+                                    .entry(key)
+                                    .or_insert_with(Vec::new)
+                                    .push(trait_impl.type_name.clone());
+                            }
+                        }
                     }
                 }
                 _ => {}
@@ -517,6 +601,11 @@ impl CoreErlangEmitter {
                     }
                 }
                 Item::TraitImpl(trait_impl) => {
+                    // Collect method names explicitly implemented
+                    let impl_method_names: HashSet<String> =
+                        trait_impl.methods.iter().map(|m| m.name.clone()).collect();
+
+                    // Export explicitly implemented methods
                     for method in &trait_impl.methods {
                         if method.is_pub {
                             let mangled_name = format!(
@@ -524,6 +613,25 @@ impl CoreErlangEmitter {
                                 trait_impl.trait_name, trait_impl.type_name, method.name
                             );
                             exports.push(format!("'{}'/{}", mangled_name, method.params.len()));
+                        }
+                    }
+
+                    // Export default methods not overridden
+                    if let Some(trait_def) = self.traits.get(&trait_impl.trait_name).cloned() {
+                        for trait_method in &trait_def.methods {
+                            if trait_method.body.is_some()
+                                && !impl_method_names.contains(&trait_method.name)
+                            {
+                                let mangled_name = format!(
+                                    "{}_{}_{}",
+                                    trait_impl.trait_name,
+                                    trait_impl.type_name,
+                                    trait_method.name
+                                );
+                                exports.push(format!(
+                                    "'{}'/{}", mangled_name, trait_method.params.len()
+                                ));
+                            }
                         }
                     }
                 }
@@ -576,27 +684,10 @@ impl CoreErlangEmitter {
             }
         }
 
-        // Emit trait impl methods
+        // Emit trait impl methods (including default methods)
         for item in &module.items {
             if let Item::TraitImpl(trait_impl) = item {
-                for method in &trait_impl.methods {
-                    let mangled_name = format!(
-                        "{}_{}_{}",
-                        trait_impl.trait_name, trait_impl.type_name, method.name
-                    );
-                    let mangled_method = Function {
-                        name: mangled_name,
-                        type_params: method.type_params.clone(),
-                        params: method.params.clone(),
-                        guard: method.guard.clone(),
-                        return_type: method.return_type.clone(),
-                        body: method.body.clone(),
-                        is_pub: method.is_pub,
-                        span: method.span.clone(),
-                    };
-                    self.newline();
-                    self.emit_function(&mangled_method)?;
-                }
+                self.emit_trait_impl_methods(trait_impl)?;
             }
         }
 

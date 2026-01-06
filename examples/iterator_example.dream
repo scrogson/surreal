@@ -1,0 +1,131 @@
+// Iterator Example - Demonstrates Rust-style lazy iterators
+
+mod iterator_example {
+    use io::{println, format};
+
+    pub fn main() -> atom {
+        println("=== Iterator Example ===");
+        println("");
+
+        // Range iterator
+        println("1. Range:");
+        let result = iterator::range(1, 6) |> iterator::collect();
+        format("   range(1, 6) = ~p~n", [result]);
+        println("");
+
+        // Infinite iterator with take
+        println("2. Infinite sequence with take:");
+        let nums = iterator::from(1) |> iterator::take(5) |> iterator::collect();
+        format("   from(1) |> take(5) = ~p~n", [nums]);
+        println("");
+
+        // Map
+        println("3. Map (squares):");
+        let squares = iterator::range(1, 6)
+            |> iterator::map(|x| { x * x })
+            |> iterator::collect();
+        format("   [1..5] |> map(square) = ~p~n", [squares]);
+        println("");
+
+        // Filter
+        println("4. Filter (evens):");
+        let evens = iterator::range(1, 11)
+            |> iterator::filter(|x| { x % 2 == 0 })
+            |> iterator::collect();
+        format("   [1..10] |> filter(even) = ~p~n", [evens]);
+        println("");
+
+        // Chained operations
+        println("5. Chained (even squares):");
+        let even_squares = iterator::range(1, 11)
+            |> iterator::filter(|x| { x % 2 == 0 })
+            |> iterator::map(|x| { x * x })
+            |> iterator::collect();
+        format("   [1..10] |> filter(even) |> map(square) = ~p~n", [even_squares]);
+        println("");
+
+        // Iterate (powers of 2)
+        println("6. Iterate (powers of 2):");
+        let powers = iterator::iterate(1, |x| { x * 2 })
+            |> iterator::take(8)
+            |> iterator::collect();
+        format("   iterate(1, *2) |> take(8) = ~p~n", [powers]);
+        println("");
+
+        // Fold/sum
+        println("7. Fold (sum 1-10):");
+        let total = iterator::range(1, 11) |> iterator::sum();
+        format("   sum(1..10) = ~p~n", [total]);
+        println("");
+
+        // Zip
+        println("8. Zip:");
+        let zipped = iterator::zip(
+            iterator::from_list([:a, :b, :c]),
+            iterator::range(1, 10)
+        ) |> iterator::collect();
+        format("   zip([:a,:b,:c], [1..]) = ~p~n", [zipped]);
+        println("");
+
+        // Enumerate
+        println("9. Enumerate:");
+        let enumerated = iterator::from_list([:x, :y, :z])
+            |> iterator::enumerate()
+            |> iterator::collect();
+        format("   enumerate([:x,:y,:z]) = ~p~n", [enumerated]);
+        println("");
+
+        // Take while
+        println("10. Take while:");
+        let small = iterator::from(1)
+            |> iterator::take_while(|x| { x < 5 })
+            |> iterator::collect();
+        format("   from(1) |> take_while(< 5) = ~p~n", [small]);
+        println("");
+
+        // Find
+        println("11. Find:");
+        let found = iterator::range(1, 100)
+            |> iterator::find(|x| { x > 50 });
+        format("   find first > 50 = ~p~n", [found]);
+        println("");
+
+        // Any/All
+        println("12. Any/All:");
+        let has_even = iterator::range(1, 10)
+            |> iterator::any(|x| { x % 2 == 0 });
+        let all_pos = iterator::range(1, 10)
+            |> iterator::all(|x| { x > 0 });
+        format("   any even? ~p, all positive? ~p~n", [has_even, all_pos]);
+        println("");
+
+        // Cycle
+        println("13. Cycle:");
+        let cycled = iterator::cycle([:a, :b])
+            |> iterator::take(5)
+            |> iterator::collect();
+        format("   cycle([:a,:b]) |> take(5) = ~p~n", [cycled]);
+        println("");
+
+        // Chain
+        println("14. Chain:");
+        let chained = iterator::chain(
+            iterator::from_list([1, 2, 3]),
+            iterator::from_list([4, 5, 6])
+        ) |> iterator::collect();
+        format("   chain([1,2,3], [4,5,6]) = ~p~n", [chained]);
+        println("");
+
+        // Default trait methods (called via trait dispatch)
+        println("15. Default trait methods:");
+        let first_val = Iterator::first(iterator::range(100, 200));
+        format("   Iterator::first(range(100, 200)) = ~p~n", [first_val]);
+
+        let count_val = Iterator::count(iterator::range(1, 11));
+        format("   Iterator::count(range(1, 11)) = ~p~n", [count_val]);
+        println("");
+
+        println("Done!");
+        :ok
+    }
+}

@@ -221,6 +221,8 @@ pub struct TraitMethodInfo {
     pub type_params: Vec<TypeParam>,
     pub params: Vec<(String, Ty)>,
     pub ret: Ty,
+    /// Whether this method has a default implementation
+    pub has_default: bool,
 }
 
 /// Information about a trait implementation.
@@ -741,6 +743,7 @@ impl TypeChecker {
                                 type_params: m.type_params.clone(),
                                 params,
                                 ret,
+                                has_default: m.body.is_some(),
                             }
                         })
                         .collect();
