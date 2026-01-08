@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::compiler::ast::{
     BinOp, BitEndianness, BitSegmentType, BitSignedness, BitStringSegment, Block, Expr, Function,
-    Item, MatchArm, Module, Pattern, Stmt, TraitDef, TraitImpl, UnaryOp, UseDecl, UseTree,
+    Item, MatchArm, Module, Pattern, Stmt, TraitDef, TraitImpl, Type, UnaryOp, UseDecl, UseTree,
 };
 
 /// Core Erlang emitter error.
@@ -58,6 +58,18 @@ pub struct CoreErlangEmitter {
     variables: HashSet<String>,
     /// Local functions defined in the current module (name, arity)
     local_functions: HashSet<(String, usize)>,
+
+    // Monomorphization support
+    /// Generic functions: func_name → Function (for functions with type params)
+    generic_functions: HashMap<String, Function>,
+    /// Pending monomorphizations: (func_name, Vec<type_name>)
+    /// Each entry represents a call like foo::<Counter, String>()
+    pending_monomorphizations: HashSet<(String, Vec<String>)>,
+    /// Current type parameter substitutions during monomorphized function emission
+    /// Maps type param name (e.g., "T") to concrete type name (e.g., "Counter")
+    type_param_subst: HashMap<String, String>,
+    /// Trait bounds for current type params: type_param_name → Vec<trait_name>
+    type_param_bounds: HashMap<String, Vec<String>>,
 }
 
 impl CoreErlangEmitter {
@@ -74,6 +86,10 @@ impl CoreErlangEmitter {
             has_self_param: false,
             variables: HashSet::new(),
             local_functions: HashSet::new(),
+            generic_functions: HashMap::new(),
+            pending_monomorphizations: HashSet::new(),
+            type_param_subst: HashMap::new(),
+            type_param_bounds: HashMap::new(),
         }
     }
 
@@ -183,6 +199,12 @@ impl CoreErlangEmitter {
         }
     }
 
+    /// Extract the simple trait name from a potentially qualified name.
+    /// e.g., "inspect::Inspect" -> "Inspect", "Inspect" -> "Inspect"
+    fn simple_trait_name(name: &str) -> &str {
+        name.rsplit("::").next().unwrap_or(name)
+    }
+
     /// Check if a function name is a built-in function (BIF).
     fn is_bif(name: &str) -> bool {
         matches!(
@@ -252,6 +274,35 @@ impl CoreErlangEmitter {
         )
     }
 
+    /// Convert an AST Type to a simple type name string for monomorphization.
+    fn type_to_name(&self, ty: &Type) -> String {
+        match ty {
+            Type::Int => "int".to_string(),
+            Type::String => "string".to_string(),
+            Type::Atom => "atom".to_string(),
+            Type::Bool => "bool".to_string(),
+            Type::Unit => "unit".to_string(),
+            Type::Binary => "binary".to_string(),
+            Type::Pid => "pid".to_string(),
+            Type::Ref => "ref".to_string(),
+            Type::Any => "any".to_string(),
+            Type::Map => "map".to_string(),
+            Type::Named { name, .. } => name.clone(),
+            Type::TypeVar(name) => name.clone(),
+            Type::Tuple(types) => {
+                let names: Vec<String> = types.iter().map(|t| self.type_to_name(t)).collect();
+                format!("tuple_{}", names.join("_"))
+            }
+            Type::List(inner) => format!("list_{}", self.type_to_name(inner)),
+            Type::Fn { params, ret } => {
+                let param_names: Vec<String> =
+                    params.iter().map(|t| self.type_to_name(t)).collect();
+                format!("fn_{}_{}", param_names.join("_"), self.type_to_name(ret))
+            }
+            Type::AssociatedType { base, name } => format!("{}_{}", base, name),
+        }
+    }
+
     /// Emit a string to the output.
     fn emit(&mut self, s: &str) {
         self.output.push_str(s);
@@ -267,23 +318,13 @@ impl CoreErlangEmitter {
 
     /// Emit trait method dispatch.
     /// Generates a case expression that matches on __struct__ and calls the appropriate impl.
+    /// In monomorphized contexts, can emit direct calls instead of runtime dispatch.
     fn emit_trait_dispatch(
         &mut self,
         trait_name: &str,
         method_name: &str,
         args: &[Expr],
     ) -> CoreErlangResult<()> {
-        // Get the types that implement this trait method
-        let key = (trait_name.to_string(), method_name.to_string());
-        let impl_types = self.trait_impls.get(&key).cloned().unwrap_or_default();
-
-        if impl_types.is_empty() {
-            return Err(CoreErlangError::new(format!(
-                "no implementations found for {}::{}",
-                trait_name, method_name
-            )));
-        }
-
         if args.is_empty() {
             return Err(CoreErlangError::new(format!(
                 "{}::{} requires at least one argument (the receiver)",
@@ -291,8 +332,31 @@ impl CoreErlangEmitter {
             )));
         }
 
+        // Check if we're in a monomorphized context and can do static dispatch
+        // Look for a type parameter that has this trait as a bound
+        let static_type = self.find_static_dispatch_type(trait_name);
+
+        if let Some(concrete_type) = static_type {
+            // Static dispatch - call the concrete implementation directly
+            let mangled_name = format!("{}_{}_{}", trait_name, concrete_type, method_name);
+            self.emit(&format!("apply '{}'/{}", mangled_name, args.len()));
+            self.emit("(");
+            self.emit_args(args)?;
+            self.emit(")");
+            return Ok(());
+        }
+
+        // Dynamic dispatch - runtime case on __struct__
+        // Look up the struct's module and call the impl method there
+        let key = (trait_name.to_string(), method_name.to_string());
+        let impl_types = self.trait_impls.get(&key).cloned().unwrap_or_default();
+
         // Get current module name without dream:: prefix
-        let current_module = self.module_name.strip_prefix(Self::MODULE_PREFIX).unwrap_or(&self.module_name).to_string();
+        let current_module = self
+            .module_name
+            .strip_prefix(Self::MODULE_PREFIX)
+            .unwrap_or(&self.module_name)
+            .to_string();
 
         // Bind the first argument (receiver) to a variable for dispatch
         let receiver_var = self.fresh_var();
@@ -301,54 +365,167 @@ impl CoreErlangEmitter {
         self.newline();
         self.emit("in ");
 
-        // Generate case on maps:get('__struct__', Receiver)
+        // Get the struct tag
+        let tag_var = self.fresh_var();
         self.emit(&format!(
-            "case call 'maps':'get'('__struct__', {}) of",
-            receiver_var
+            "let <{}> = call 'maps':'get'('__struct__', {}) in",
+            tag_var, receiver_var
         ));
         self.newline();
-        self.indent += 1;
 
-        // Generate a clause for each implementing type
-        for (i, type_name) in impl_types.iter().enumerate() {
-            let mangled_name = format!("{}_{}_{}", trait_name, type_name, method_name);
-
-            // Match on fully qualified atom 'module::Type'
-            self.emit(&format!("<'{}::{}'>", current_module, type_name));
-            self.emit(" when 'true' ->");
+        if impl_types.is_empty() {
+            // No local implementations - emit universal dispatch via struct tag
+            // Parse the struct tag to get module and type, then call module:Trait_Type_method
+            self.emit_universal_trait_dispatch(
+                trait_name,
+                method_name,
+                &tag_var,
+                &receiver_var,
+                args,
+            )?;
+        } else {
+            // Have local implementations - use case dispatch
+            self.emit(&format!("case {} of", tag_var));
             self.newline();
             self.indent += 1;
 
-            // Call the implementation with the receiver and remaining args
-            self.emit(&format!("apply '{}'/{}", mangled_name, args.len()));
-            self.emit("(");
-            self.emit(&receiver_var);
-            for arg in args.iter().skip(1) {
-                self.emit(", ");
-                self.emit_expr(arg)?;
-            }
-            self.emit(")");
+            // Generate a clause for each implementing type
+            for (i, type_name) in impl_types.iter().enumerate() {
+                let mangled_name = format!("{}_{}_{}", trait_name, type_name, method_name);
 
-            self.indent -= 1;
-            if i < impl_types.len() - 1 {
+                // Match on fully qualified atom 'module::Type'
+                self.emit(&format!("<'{}::{}'>", current_module, type_name));
+                self.emit(" when 'true' ->");
                 self.newline();
+                self.indent += 1;
+
+                // Call the implementation with the receiver and remaining args
+                self.emit(&format!("apply '{}'/{}", mangled_name, args.len()));
+                self.emit("(");
+                self.emit(&receiver_var);
+                for arg in args.iter().skip(1) {
+                    self.emit(", ");
+                    self.emit_expr(arg)?;
+                }
+                self.emit(")");
+
+                self.indent -= 1;
+                if i < impl_types.len() - 1 {
+                    self.newline();
+                }
             }
+
+            // Add a catch-all clause for types from other modules
+            self.newline();
+            self.emit("<_OtherTag> when 'true' ->");
+            self.newline();
+            self.indent += 1;
+            self.emit_universal_trait_dispatch(
+                trait_name,
+                method_name,
+                "_OtherTag",
+                &receiver_var,
+                args,
+            )?;
+            self.indent -= 1;
+
+            self.newline();
+            self.indent -= 1;
+            self.emit("end");
         }
 
-        // Add a catch-all clause that raises an error
-        self.newline();
-        self.emit("<_Other> when 'true' ->");
-        self.newline();
-        self.indent += 1;
-        self.emit(&format!(
-            "call 'erlang':'error'({{'not_implemented', '{}', '{}', _Other}})",
-            trait_name, method_name
-        ));
-        self.indent -= 1;
+        Ok(())
+    }
 
+    /// Find a concrete type for static trait dispatch in monomorphized context.
+    /// Returns Some(type_name) if we're in a monomorphized function with a type
+    /// parameter that has the given trait as a bound.
+    fn find_static_dispatch_type(&self, trait_name: &str) -> Option<String> {
+        // Look through our type parameter bounds to find one with this trait
+        for (type_param, bounds) in &self.type_param_bounds {
+            if bounds.contains(&trait_name.to_string()) {
+                // Found a type param with this bound - get its concrete type
+                if let Some(concrete_type) = self.type_param_subst.get(type_param) {
+                    return Some(concrete_type.clone());
+                }
+            }
+        }
+        None
+    }
+
+    /// Emit universal trait dispatch that works for any struct from any module.
+    /// Parses the struct tag (e.g., 'module::Type') and calls dream::module:Trait_Type_method
+    /// using erlang:apply/3 for dynamic dispatch.
+    fn emit_universal_trait_dispatch(
+        &mut self,
+        trait_name: &str,
+        method_name: &str,
+        tag_var: &str,
+        receiver_var: &str,
+        args: &[Expr],
+    ) -> CoreErlangResult<()> {
+        // The struct tag is an atom like 'module::Type'
+        // We need to parse it at runtime to get the module and type
+        // Then call dream::module:Trait_Type_method(receiver, args...)
+
+        // Convert atom to list for parsing
+        let tag_list_var = self.fresh_var();
+        self.emit(&format!(
+            "let <{}> = call 'erlang':'atom_to_list'({}) in",
+            tag_list_var, tag_var
+        ));
         self.newline();
-        self.indent -= 1;
-        self.emit("end");
+
+        // Split on "::" to get [Module, Type]
+        let parts_var = self.fresh_var();
+        self.emit(&format!(
+            "let <{}> = call 'string':'split'({}, \"::\",'all') in",
+            parts_var, tag_list_var
+        ));
+        self.newline();
+
+        // Extract module and type name
+        let module_var = self.fresh_var();
+        let type_var = self.fresh_var();
+        self.emit(&format!(
+            "let <{}> = call 'lists':'nth'(1, {}) in",
+            module_var, parts_var
+        ));
+        self.newline();
+        self.emit(&format!(
+            "let <{}> = call 'lists':'last'({}) in",
+            type_var, parts_var
+        ));
+        self.newline();
+
+        // Build the mangled method name: Trait_Type_method
+        let method_name_var = self.fresh_var();
+        self.emit(&format!(
+            "let <{}> = call 'erlang':'list_to_atom'(call 'lists':'flatten'([[\"{}\" | \"_\"], {}, \"_{}\"])) in",
+            method_name_var, trait_name, type_var, method_name
+        ));
+        self.newline();
+
+        // Build the full module name: dream::module
+        let full_module_var = self.fresh_var();
+        self.emit(&format!(
+            "let <{}> = call 'erlang':'list_to_atom'(call 'lists':'flatten'([[\"dream::\" | {}]])) in",
+            full_module_var, module_var
+        ));
+        self.newline();
+
+        // Build the args list
+        self.emit("call 'erlang':'apply'(");
+        self.emit(&full_module_var);
+        self.emit(", ");
+        self.emit(&method_name_var);
+        self.emit(", [");
+        self.emit(receiver_var);
+        for arg in args.iter().skip(1) {
+            self.emit(", ");
+            self.emit_expr(arg)?;
+        }
+        self.emit("])");
 
         Ok(())
     }
@@ -549,9 +726,10 @@ impl CoreErlangEmitter {
 
         // Emit explicitly implemented methods
         for method in &trait_impl.methods {
+            let simple_trait = Self::simple_trait_name(&trait_impl.trait_name);
             let mangled_name = format!(
                 "{}_{}_{}",
-                trait_impl.trait_name, trait_impl.type_name, method.name
+                simple_trait, trait_impl.type_name, method.name
             );
             let mangled_method = Function {
                 name: mangled_name,
@@ -569,12 +747,13 @@ impl CoreErlangEmitter {
 
         // Emit default methods not overridden in this impl
         if let Some(trait_def) = self.traits.get(&trait_impl.trait_name).cloned() {
+            let simple_trait = Self::simple_trait_name(&trait_impl.trait_name);
             for trait_method in &trait_def.methods {
                 if let Some(ref body) = trait_method.body {
                     if !impl_method_names.contains(&trait_method.name) {
                         let mangled_name = format!(
                             "{}_{}_{}",
-                            trait_impl.trait_name, trait_impl.type_name, trait_method.name
+                            simple_trait, trait_impl.type_name, trait_method.name
                         );
                         let default_method = Function {
                             name: mangled_name,
@@ -625,6 +804,12 @@ impl CoreErlangEmitter {
                     // Register local function for BIF shadowing
                     self.local_functions
                         .insert((func.name.clone(), func.params.len()));
+
+                    // Collect generic functions for monomorphization
+                    if !func.type_params.is_empty() {
+                        self.generic_functions
+                            .insert(func.name.clone(), func.clone());
+                    }
                 }
                 Item::Impl(impl_block) => {
                     // Register impl methods for Type::method() resolution
@@ -642,17 +827,19 @@ impl CoreErlangEmitter {
                     // Collect method names implemented in this impl
                     let impl_method_names: HashSet<String> =
                         trait_impl.methods.iter().map(|m| m.name.clone()).collect();
+                    let simple_trait =
+                        Self::simple_trait_name(&trait_impl.trait_name).to_string();
 
                     // Register trait impl methods for dispatch
                     for method in &trait_impl.methods {
-                        // Use full path: Trait_Type_method
+                        // Use simple trait name: Trait_Type_method
                         self.impl_methods.insert((
-                            format!("{}_{}", trait_impl.trait_name, trait_impl.type_name),
+                            format!("{}_{}", simple_trait, trait_impl.type_name),
                             method.name.clone(),
                         ));
 
                         // Track which types implement each trait method
-                        let key = (trait_impl.trait_name.clone(), method.name.clone());
+                        let key = (simple_trait.clone(), method.name.clone());
                         self.trait_impls
                             .entry(key)
                             .or_insert_with(Vec::new)
@@ -667,15 +854,11 @@ impl CoreErlangEmitter {
                             {
                                 // Register default method for dispatch
                                 self.impl_methods.insert((
-                                    format!(
-                                        "{}_{}",
-                                        trait_impl.trait_name, trait_impl.type_name
-                                    ),
+                                    format!("{}_{}", simple_trait, trait_impl.type_name),
                                     trait_method.name.clone(),
                                 ));
 
-                                let key =
-                                    (trait_impl.trait_name.clone(), trait_method.name.clone());
+                                let key = (simple_trait.clone(), trait_method.name.clone());
                                 self.trait_impls
                                     .entry(key)
                                     .or_insert_with(Vec::new)
@@ -731,13 +914,15 @@ impl CoreErlangEmitter {
                     // Collect method names explicitly implemented
                     let impl_method_names: HashSet<String> =
                         trait_impl.methods.iter().map(|m| m.name.clone()).collect();
+                    let simple_trait =
+                        Self::simple_trait_name(&trait_impl.trait_name);
 
                     // Export explicitly implemented methods
                     for method in &trait_impl.methods {
                         if method.is_pub {
                             let mangled_name = format!(
                                 "{}_{}_{}",
-                                trait_impl.trait_name, trait_impl.type_name, method.name
+                                simple_trait, trait_impl.type_name, method.name
                             );
                             exports.push(format!("'{}'/{}", mangled_name, method.params.len()));
                         }
@@ -751,7 +936,7 @@ impl CoreErlangEmitter {
                             {
                                 let mangled_name = format!(
                                     "{}_{}_{}",
-                                    trait_impl.trait_name,
+                                    simple_trait,
                                     trait_impl.type_name,
                                     trait_method.name
                                 );
@@ -775,6 +960,7 @@ impl CoreErlangEmitter {
         self.newline();
 
         // Emit grouped functions (supports multi-clause functions)
+        // Generic functions are also emitted (using dynamic dispatch) for cross-module calls
         let mut emitted_funcs: std::collections::HashSet<(String, usize)> =
             std::collections::HashSet::new();
         for item in &module.items {
@@ -818,11 +1004,64 @@ impl CoreErlangEmitter {
             }
         }
 
+        // Emit monomorphized functions
+        self.emit_monomorphized_functions()?;
+
         self.newline();
         self.emit("end");
         self.newline();
 
         Ok(self.output.clone())
+    }
+
+    /// Emit monomorphized versions of generic functions.
+    /// For each (func_name, [Type1, Type2, ...]) in pending_monomorphizations,
+    /// generate a specialized function func_name_Type1_Type2.
+    fn emit_monomorphized_functions(&mut self) -> CoreErlangResult<()> {
+        // Take the pending monomorphizations to avoid borrow issues
+        let monos: Vec<(String, Vec<String>)> =
+            self.pending_monomorphizations.drain().collect();
+
+        for (func_name, type_names) in monos {
+            if let Some(generic_func) = self.generic_functions.get(&func_name).cloned() {
+                // Set up type parameter substitution
+                self.type_param_subst.clear();
+                self.type_param_bounds.clear();
+
+                for (type_param, type_name) in
+                    generic_func.type_params.iter().zip(type_names.iter())
+                {
+                    self.type_param_subst
+                        .insert(type_param.name.clone(), type_name.clone());
+                    self.type_param_bounds
+                        .insert(type_param.name.clone(), type_param.bounds.clone());
+                }
+
+                // Create the monomorphized function name
+                let mono_name = format!("{}_{}", func_name, type_names.join("_"));
+
+                // Create a modified function with the monomorphized name
+                let mono_func = Function {
+                    name: mono_name,
+                    type_params: vec![], // No type params in monomorphized version
+                    params: generic_func.params.clone(),
+                    guard: generic_func.guard.clone(),
+                    return_type: generic_func.return_type.clone(),
+                    body: generic_func.body.clone(),
+                    is_pub: generic_func.is_pub,
+                    span: generic_func.span.clone(),
+                };
+
+                self.newline();
+                self.emit_function(&mono_func)?;
+
+                // Clear substitutions after emitting
+                self.type_param_subst.clear();
+                self.type_param_bounds.clear();
+            }
+        }
+
+        Ok(())
     }
 
     /// Emit a function definition.
@@ -1226,15 +1465,28 @@ impl CoreErlangEmitter {
                 type_args,
                 args,
             } => {
-                // type_args contains turbofish arguments like ::<Counter>
-                // For BEAM codegen, these are used for trait method dispatch
-                let _ = type_args; // Reserved for future monomorphization
-
                 // Check if it's a local function call or external
                 match func.as_ref() {
                     Expr::Ident(name) => {
-                        // Check if it's a local function (takes priority over BIFs)
-                        if self.local_functions.contains(&(name.clone(), args.len())) {
+                        // Check if this is a call to a generic function with type args
+                        if !type_args.is_empty()
+                            && self.generic_functions.contains_key(name)
+                        {
+                            // Record the monomorphization and call the specialized version
+                            let type_names: Vec<String> = type_args
+                                .iter()
+                                .map(|t| self.type_to_name(t))
+                                .collect();
+                            self.pending_monomorphizations
+                                .insert((name.clone(), type_names.clone()));
+
+                            // Call the monomorphized function: name_Type1_Type2
+                            let mono_name = format!("{}_{}", name, type_names.join("_"));
+                            self.emit(&format!("apply '{}'/{}", mono_name, args.len()));
+                            self.emit("(");
+                            self.emit_args(args)?;
+                            self.emit(")");
+                        } else if self.local_functions.contains(&(name.clone(), args.len())) {
                             // Local function call
                             self.emit(&format!("apply '{}'/{}", name, args.len()));
                             self.emit("(");

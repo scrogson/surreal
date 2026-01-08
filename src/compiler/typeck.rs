@@ -1079,8 +1079,8 @@ impl TypeChecker {
             }
 
             // Function calls
-            Expr::Call { func, args, .. } => {
-                self.infer_call(func, args)
+            Expr::Call { func, type_args, args } => {
+                self.infer_call(func, type_args, args)
             }
 
             // Method calls
@@ -1504,12 +1504,23 @@ impl TypeChecker {
     }
 
     /// Infer type of a function call.
-    fn infer_call(&mut self, func: &Expr, args: &[Expr]) -> TypeResult<Ty> {
+    fn infer_call(
+        &mut self,
+        func: &Expr,
+        type_args: &[ast::Type],
+        args: &[Expr],
+    ) -> TypeResult<Ty> {
         match func {
             Expr::Ident(name) => {
                 if let Some(info) = self.env.get_function(name).cloned() {
-                    // Instantiate generic function with fresh inference variables
-                    let instantiated = self.instantiate_function(&info);
+                    // Instantiate generic function
+                    let instantiated = if !type_args.is_empty() {
+                        // Explicit type arguments (turbofish syntax)
+                        self.instantiate_function_with_args(&info, type_args, name)?
+                    } else {
+                        // Type inference - use fresh variables
+                        self.instantiate_function(&info)
+                    };
 
                     // Check argument count
                     if args.len() != instantiated.params.len() {
@@ -1562,6 +1573,60 @@ impl TypeChecker {
                 Ok(Ty::Any)
             }
         }
+    }
+
+    /// Instantiate a generic function with explicit type arguments.
+    /// Validates that the type arguments satisfy the bounds.
+    fn instantiate_function_with_args(
+        &mut self,
+        info: &FnInfo,
+        type_args: &[ast::Type],
+        func_name: &str,
+    ) -> TypeResult<FnInfo> {
+        // Check type argument count
+        if type_args.len() != info.type_params.len() {
+            self.error(TypeError::new(format!(
+                "function '{}' expects {} type arguments, got {}",
+                func_name,
+                info.type_params.len(),
+                type_args.len()
+            )));
+            return Ok(info.clone());
+        }
+
+        // Build substitution map and validate bounds
+        let mut subst = HashMap::new();
+        for (type_arg, type_param) in type_args.iter().zip(info.type_params.iter()) {
+            let ty = self.ast_type_to_ty(type_arg);
+
+            // Check that the type satisfies all bounds
+            if let Err(missing_trait) = self.check_type_satisfies_bounds(&ty, &type_param.bounds) {
+                self.error(TypeError::with_help(
+                    format!(
+                        "type argument does not satisfy bound in call to '{}'",
+                        func_name
+                    ),
+                    format!(
+                        "type {} does not implement trait {}",
+                        ty, missing_trait
+                    ),
+                ));
+            }
+
+            subst.insert(type_param.name.clone(), ty);
+        }
+
+        // Apply substitution to create instantiated function
+        Ok(FnInfo {
+            name: info.name.clone(),
+            type_params: vec![], // Instantiated function has no type params
+            params: info
+                .params
+                .iter()
+                .map(|(name, ty)| (name.clone(), ty.substitute(&subst)))
+                .collect(),
+            ret: info.ret.substitute(&subst),
+        })
     }
 
     /// Infer type of a method call.

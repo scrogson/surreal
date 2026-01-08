@@ -81,6 +81,18 @@ pub trait Inspect {
     fn inspect(self, opts: InspectOpts) -> string;
 }
 
+/// Type-safe inspect with compile-time trait bound checking.
+/// Use this when you know the type implements Inspect.
+/// This function is monomorphized at compile time for each concrete type.
+pub fn inspect<T: Inspect>(value: T) -> string {
+    Inspect::inspect(value)
+}
+
+/// Type-safe inspect with options and compile-time trait bound checking.
+pub fn inspect_opts<T: Inspect>(value: T, opts: InspectOpts) -> string {
+    Inspect::inspect(value, opts)
+}
+
 // Helper function to format any term using Erlang's io_lib
 // This is used as the fallback for types without custom Inspect impls
 pub fn format_term(term: any) -> string {
