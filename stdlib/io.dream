@@ -22,9 +22,24 @@ pub fn println_int(n: int) -> atom {
     :io::format("~p~n", [n])
 }
 
-/// Print any term followed by a newline (uses Erlang term format).
-pub fn inspect(term: T) -> atom {
-    :io::format("~p~n", [term])
+/// Inspect a term and print it, returning the term for chaining.
+/// This is useful for debugging pipelines.
+///
+/// Example:
+///   let result = data |> transform() |> io::inspect() |> process();
+pub fn inspect<T>(term: T) -> T {
+    println(inspect::inspect_any(term));
+    term
+}
+
+/// Inspect a term with options and print it, returning the term for chaining.
+///
+/// Example:
+///   data |> io::inspect_opts(inspect::InspectOpts::pretty())
+///   data |> io::inspect_opts(inspect::InspectOpts::new().with_label("debug"))
+pub fn inspect_opts<T>(term: T, opts: inspect::InspectOpts) -> T {
+    println(inspect::inspect_any_opts(term, opts));
+    term
 }
 
 /// Read a line from standard input.

@@ -291,6 +291,9 @@ impl CoreErlangEmitter {
             )));
         }
 
+        // Get current module name without dream:: prefix
+        let current_module = self.module_name.strip_prefix(Self::MODULE_PREFIX).unwrap_or(&self.module_name).to_string();
+
         // Bind the first argument (receiver) to a variable for dispatch
         let receiver_var = self.fresh_var();
         self.emit(&format!("let <{}> = ", receiver_var));
@@ -310,7 +313,8 @@ impl CoreErlangEmitter {
         for (i, type_name) in impl_types.iter().enumerate() {
             let mangled_name = format!("{}_{}_{}", trait_name, type_name, method_name);
 
-            self.emit(&format!("<'{}'>", type_name));
+            // Match on fully qualified atom 'module::Type'
+            self.emit(&format!("<'{}::{}'>", current_module, type_name));
             self.emit(" when 'true' ->");
             self.newline();
             self.indent += 1;
@@ -361,6 +365,9 @@ impl CoreErlangEmitter {
         // Total arity includes receiver
         let arity = args.len() + 1;
 
+        // Get current module name without dream:: prefix
+        let current_module = self.module_name.strip_prefix(Self::MODULE_PREFIX).unwrap_or(&self.module_name).to_string();
+
         // Bind the receiver to a variable for dispatch
         let receiver_var = self.fresh_var();
         self.emit(&format!("let <{}> = ", receiver_var));
@@ -377,11 +384,12 @@ impl CoreErlangEmitter {
         self.newline();
         self.indent += 1;
 
-        // Generate a clause for each implementing type
+        // Generate a clause for each implementing type (local types)
         for (i, type_name) in impl_types.iter().enumerate() {
             let mangled_name = format!("{}_{}", type_name, method_name);
 
-            self.emit(&format!("<'{}'>", type_name));
+            // Match on fully qualified atom 'module::Type'
+            self.emit(&format!("<'{}::{}'>", current_module, type_name));
             self.emit(" when 'true' ->");
             self.newline();
             self.indent += 1;
@@ -416,6 +424,119 @@ impl CoreErlangEmitter {
         self.newline();
         self.indent -= 1;
         self.emit("end");
+
+        Ok(())
+    }
+
+    /// Emit dynamic method dispatch for cross-module struct methods.
+    /// Uses the __struct__ tag 'module::Type' atom to dispatch to the correct module.
+    fn emit_dynamic_method_dispatch(
+        &mut self,
+        method_name: &str,
+        receiver: &Expr,
+        args: &[Expr],
+    ) -> CoreErlangResult<()> {
+        // Bind the receiver to a variable for dispatch
+        let receiver_var = self.fresh_var();
+        self.emit(&format!("let <{}> = ", receiver_var));
+        self.emit_expr(receiver)?;
+        self.newline();
+        self.emit("in ");
+
+        // Get the struct tag atom 'module::Type'
+        let tag_var = self.fresh_var();
+        self.emit(&format!(
+            "let <{}> = call 'maps':'get'('__struct__', {}, 'undefined')",
+            tag_var, receiver_var
+        ));
+        self.newline();
+        self.emit("in ");
+
+        // Convert tag atom to list and split on "::"
+        // TagList = atom_to_list('module::Type') -> "module::Type"
+        let tag_list_var = self.fresh_var();
+        self.emit(&format!(
+            "let <{}> = call 'erlang':'atom_to_list'({})",
+            tag_list_var, tag_var
+        ));
+        self.newline();
+        self.emit("in ");
+
+        // Split on "::" using string:split/3 -> ["module", "Type"]
+        // "::" is [58, 58] in character codes
+        let parts_var = self.fresh_var();
+        self.emit(&format!(
+            "let <{}> = call 'string':'split'({}, [58, 58], 'all')",
+            parts_var, tag_list_var
+        ));
+        self.newline();
+        self.emit("in ");
+
+        // Extract module string: lists:nth(1, Parts)
+        let mod_str_var = self.fresh_var();
+        self.emit(&format!(
+            "let <{}> = call 'lists':'nth'(1, {})",
+            mod_str_var, parts_var
+        ));
+        self.newline();
+        self.emit("in ");
+
+        // Extract type string: lists:nth(2, Parts)
+        let type_str_var = self.fresh_var();
+        self.emit(&format!(
+            "let <{}> = call 'lists':'nth'(2, {})",
+            type_str_var, parts_var
+        ));
+        self.newline();
+        self.emit("in ");
+
+        // Build BEAM module: "dream::" ++ ModStr -> list_to_atom
+        // [100,114,101,97,109,58,58] = "dream::"
+        let beam_mod_str_var = self.fresh_var();
+        self.emit(&format!(
+            "let <{}> = call 'erlang':'++'([100, 114, 101, 97, 109, 58, 58], {})",
+            beam_mod_str_var, mod_str_var
+        ));
+        self.newline();
+        self.emit("in ");
+
+        let beam_mod_var = self.fresh_var();
+        self.emit(&format!(
+            "let <{}> = call 'erlang':'list_to_atom'({})",
+            beam_mod_var, beam_mod_str_var
+        ));
+        self.newline();
+        self.emit("in ");
+
+        // Build function name: TypeStr ++ "_" ++ method -> list_to_atom
+        // [95] = "_"
+        let method_chars = Self::string_to_core_list(method_name);
+        let func_str_var = self.fresh_var();
+        self.emit(&format!(
+            "let <{}> = call 'erlang':'++'({}, call 'erlang':'++'([95], {}))",
+            func_str_var, type_str_var, method_chars
+        ));
+        self.newline();
+        self.emit("in ");
+
+        let func_var = self.fresh_var();
+        self.emit(&format!(
+            "let <{}> = call 'erlang':'list_to_atom'({})",
+            func_var, func_str_var
+        ));
+        self.newline();
+        self.emit("in ");
+
+        // Call erlang:apply(BeamMod, Func, [Receiver | Args])
+        self.emit(&format!(
+            "call 'erlang':'apply'({}, {}, [{}",
+            beam_mod_var, func_var, receiver_var
+        ));
+        for arg in args {
+            self.emit(", ");
+            self.emit_expr(arg)?;
+        }
+        self.emit("])");
 
         Ok(())
     }
@@ -481,6 +602,12 @@ impl CoreErlangEmitter {
     /// Get the BEAM module name for a Dream module (with prefix).
     pub fn beam_module_name(name: &str) -> String {
         format!("{}{}", Self::MODULE_PREFIX, name)
+    }
+
+    /// Convert a Rust string to Core Erlang list format (e.g., "foo" -> "[102, 111, 111]")
+    fn string_to_core_list(s: &str) -> String {
+        let chars: Vec<String> = s.chars().map(|c| (c as u32).to_string()).collect();
+        format!("[{}]", chars.join(", "))
     }
 
     /// Emit a complete Core Erlang module.
@@ -1169,6 +1296,22 @@ impl CoreErlangEmitter {
                             self.emit(")");
                         }
                     }
+                    Expr::Path { segments } if segments.len() == 3 => {
+                        // Cross-module impl method call: module::Type::method()
+                        // Becomes: call 'dream::module':'Type_method'(args)
+                        let module = &segments[0];
+                        let type_name = &segments[1];
+                        let method = &segments[2];
+                        let mangled_name = format!("{}_{}", type_name, method);
+                        self.emit(&format!(
+                            "call '{}':'{}'",
+                            Self::beam_module_name(&module.to_lowercase()),
+                            mangled_name
+                        ));
+                        self.emit("(");
+                        self.emit_args(args)?;
+                        self.emit(")");
+                    }
                     _ => {
                         // Higher-order function application
                         self.emit("apply ");
@@ -1374,13 +1517,11 @@ impl CoreErlangEmitter {
                     let impl_types = self.find_impl_types_for_method(method);
 
                     if impl_types.is_empty() {
-                        // No impl methods - just call as local function
-                        self.emit(&format!("apply '{}'/{}", method, all_args.len()));
-                        self.emit("(");
-                        self.emit_args(&all_args)?;
-                        self.emit(")");
+                        // No local impl methods - use dynamic cross-module dispatch
+                        // The __struct__ tag format is 'module_TypeName', we parse it to find the module
+                        self.emit_dynamic_method_dispatch(method, receiver, args)?;
                     } else {
-                        // Runtime dispatch based on __struct__ tag
+                        // Runtime dispatch based on __struct__ tag for known local types
                         self.emit_method_dispatch(method, receiver, args, &impl_types)?;
                     }
                 }
@@ -1388,16 +1529,18 @@ impl CoreErlangEmitter {
 
             Expr::StructInit { name, fields } => {
                 // Structs become maps in Erlang with a __struct__ tag
-                // Check if the struct name is imported
-                let struct_tag = if let Some((module, original_name)) = self.imports.get(name) {
-                    format!("{}_{}", module.to_lowercase(), original_name)
+                // The tag is a fully qualified atom like 'module::Type'
+                let (module_name, type_name) = if let Some((module, original_name)) = self.imports.get(name) {
+                    (module.to_lowercase(), original_name.clone())
                 } else {
-                    name.clone()
+                    // Local struct - use current module name (strip dream:: prefix)
+                    let module_prefix = self.module_name.strip_prefix(Self::MODULE_PREFIX).unwrap_or(&self.module_name);
+                    (module_prefix.to_string(), name.clone())
                 };
 
                 self.emit("~{");
-                // Add __struct__ tag first
-                self.emit(&format!("'__struct__' => '{}'", struct_tag));
+                // Add __struct__ tag as fully qualified atom 'module::Type'
+                self.emit(&format!("'__struct__' => '{}::{}'", module_name, type_name));
                 for (field_name, value) in fields.iter() {
                     self.emit(", ");
                     self.emit(&format!("'{}' => ", field_name));
@@ -1821,16 +1964,18 @@ impl CoreErlangEmitter {
 
             Pattern::Struct { name, fields } => {
                 // Struct patterns become map patterns with __struct__ tag
-                // Check if the struct name is imported
-                let struct_tag = if let Some((module, original_name)) = self.imports.get(name) {
-                    format!("{}_{}", module.to_lowercase(), original_name)
+                // The tag is a fully qualified atom like 'module::Type'
+                let (module_name, type_name) = if let Some((module, original_name)) = self.imports.get(name) {
+                    (module.to_lowercase(), original_name.clone())
                 } else {
-                    name.clone()
+                    // Local struct - use current module name (strip dream:: prefix)
+                    let module_prefix = self.module_name.strip_prefix(Self::MODULE_PREFIX).unwrap_or(&self.module_name);
+                    (module_prefix.to_string(), name.clone())
                 };
 
                 self.emit("~{");
-                // Match __struct__ tag first
-                self.emit(&format!("'__struct__' := '{}'", struct_tag));
+                // Match __struct__ tag as fully qualified atom 'module::Type'
+                self.emit(&format!("'__struct__' := '{}::{}'", module_name, type_name));
                 for (field_name, pat) in fields.iter() {
                     self.emit(", ");
                     self.emit(&format!("'{}' := ", field_name));

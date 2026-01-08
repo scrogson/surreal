@@ -1,0 +1,115 @@
+// Dream Standard Library - Inspect Module
+//
+// Provides the Inspect trait for converting values to readable string representations.
+// Similar to Elixir's Inspect protocol.
+
+use string::concat;
+
+/// Options for controlling inspection output.
+pub struct InspectOpts {
+    /// Pretty print with newlines and indentation
+    pretty: bool,
+    /// Maximum number of items to show in collections (0 = unlimited)
+    limit: int,
+    /// Line width for pretty printing
+    width: int,
+    /// Optional label to prefix the output
+    label: string,
+}
+
+impl InspectOpts {
+    /// Create default inspect options.
+    pub fn new() -> InspectOpts {
+        InspectOpts {
+            pretty: false,
+            limit: 50,
+            width: 80,
+            label: "",
+        }
+    }
+
+    /// Create pretty-printing options.
+    pub fn pretty() -> InspectOpts {
+        InspectOpts {
+            pretty: true,
+            limit: 50,
+            width: 80,
+            label: "",
+        }
+    }
+
+    /// Set a label for the output.
+    pub fn with_label(self, label: string) -> InspectOpts {
+        InspectOpts {
+            pretty: self.pretty,
+            limit: self.limit,
+            width: self.width,
+            label: label,
+        }
+    }
+
+    /// Set the item limit.
+    pub fn with_limit(self, limit: int) -> InspectOpts {
+        InspectOpts {
+            pretty: self.pretty,
+            limit: limit,
+            width: self.width,
+            label: self.label,
+        }
+    }
+}
+
+/// Trait for types that can be inspected (converted to readable strings).
+///
+/// Implement this trait to customize how your types are displayed.
+/// The default implementation uses Erlang's term formatting.
+pub trait Inspect {
+    /// Convert to a string representation with default options.
+    fn inspect(self) -> string {
+        self.inspect(InspectOpts::new())
+    }
+
+    /// Convert to a string representation with custom options.
+    fn inspect(self, opts: InspectOpts) -> string;
+}
+
+// Helper function to format any term using Erlang's io_lib
+// This is used as the fallback for types without custom Inspect impls
+pub fn format_term(term: any) -> string {
+    :erlang::iolist_to_binary(:io_lib::format("~p", [term]))
+}
+
+// Format with a limit on collection items
+pub fn format_term_limit(term: any, limit: int) -> string {
+    if limit == 0 {
+        :erlang::iolist_to_binary(:io_lib::format("~p", [term]))
+    } else {
+        :erlang::iolist_to_binary(:io_lib::format("~P", [term, limit]))
+    }
+}
+
+/// Inspect any term, dispatching to Inspect trait if implemented.
+/// Falls back to Erlang's term formatting for primitives and unknown types.
+pub fn inspect_any(term: any) -> string {
+    do_inspect_any(term, InspectOpts::new())
+}
+
+pub fn inspect_any_opts(term: any, opts: InspectOpts) -> string {
+    do_inspect_any(term, opts)
+}
+
+fn do_inspect_any(term: any, opts: InspectOpts) -> string {
+    // Format the term
+    let formatted = if opts.limit == 0 {
+        format_term(term)
+    } else {
+        format_term_limit(term, opts.limit)
+    };
+
+    // Add label if present
+    if opts.label == "" {
+        formatted
+    } else {
+        concat(concat(opts.label, ": "), formatted)
+    }
+}
