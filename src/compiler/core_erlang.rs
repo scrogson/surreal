@@ -287,8 +287,22 @@ impl CoreErlangEmitter {
             Type::Ref => "ref".to_string(),
             Type::Any => "any".to_string(),
             Type::Map => "map".to_string(),
-            Type::Named { name, .. } => name.clone(),
-            Type::TypeVar(name) => name.clone(),
+            Type::Named { name, .. } => {
+                // Check if this is a type parameter that should be substituted
+                if let Some(concrete_type) = self.type_param_subst.get(name) {
+                    concrete_type.clone()
+                } else {
+                    name.clone()
+                }
+            }
+            Type::TypeVar(name) => {
+                // Check if this is a type parameter that should be substituted
+                if let Some(concrete_type) = self.type_param_subst.get(name) {
+                    concrete_type.clone()
+                } else {
+                    name.clone()
+                }
+            }
             Type::Tuple(types) => {
                 let names: Vec<String> = types.iter().map(|t| self.type_to_name(t)).collect();
                 format!("tuple_{}", names.join("_"))
@@ -895,6 +909,10 @@ impl CoreErlangEmitter {
         for item in &module.items {
             match item {
                 Item::Function(f) if f.is_pub => {
+                    // Skip generic functions - they are only exported when monomorphized
+                    if !f.type_params.is_empty() {
+                        continue;
+                    }
                     let key = (f.name.clone(), f.params.len());
                     if !exported.contains(&key) {
                         exports.push(format!("'{}'/{}", f.name, f.params.len()));
@@ -960,11 +978,15 @@ impl CoreErlangEmitter {
         self.newline();
 
         // Emit grouped functions (supports multi-clause functions)
-        // Generic functions are also emitted (using dynamic dispatch) for cross-module calls
+        // Skip generic functions - they are only emitted via monomorphization
         let mut emitted_funcs: std::collections::HashSet<(String, usize)> =
             std::collections::HashSet::new();
         for item in &module.items {
             if let Item::Function(f) = item {
+                // Skip generic functions - they can only be used via monomorphization
+                if !f.type_params.is_empty() {
+                    continue;
+                }
                 let key = (f.name.clone(), f.params.len());
                 if !emitted_funcs.contains(&key) {
                     emitted_funcs.insert(key.clone());
@@ -1538,10 +1560,22 @@ impl CoreErlangEmitter {
                             self.emit(")");
                         } else {
                             // Module:Function call - add dream:: prefix for Dream modules
+                            // Check if this is a call with type args (generic function)
+                            let func_name = if !type_args.is_empty() {
+                                // Cross-module generic call: genserver::start_typed::<Counter>()
+                                // becomes: call 'dream::genserver':'start_typed_Counter'()
+                                let type_names: Vec<String> = type_args
+                                    .iter()
+                                    .map(|t| self.type_to_name(t))
+                                    .collect();
+                                format!("{}_{}", segments[1], type_names.join("_"))
+                            } else {
+                                segments[1].clone()
+                            };
                             self.emit(&format!(
                                 "call '{}':'{}'",
                                 Self::beam_module_name(&segments[0].to_lowercase()),
-                                segments[1]
+                                func_name
                             ));
                             self.emit("(");
                             self.emit_args(args)?;

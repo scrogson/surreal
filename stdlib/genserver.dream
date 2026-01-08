@@ -151,7 +151,7 @@ pub fn stop_reason(server: pid, reason: atom) -> atom {
 
 // ============== Server API ==============
 
-/// Start a GenServer.
+/// Start a GenServer using dynamic dispatch (module-based).
 /// The module must implement the GenServer trait (have init, handle_call, handle_cast functions).
 pub fn start(module: atom, args: any) -> pid {
     spawn || {
@@ -161,6 +161,103 @@ pub fn start(module: atom, args: any) -> pid {
             :ignore => :ignore,
             (:stop, reason) => :erlang::exit(reason),
             _ => :erlang::exit(:bad_init_result)
+        }
+    }
+}
+
+// ============== Typed Server API (with trait bounds) ==============
+
+/// Start a GenServer using static dispatch (type-based).
+/// Uses monomorphization to call trait methods at compile time.
+/// This provides type safety - the compiler verifies T implements GenServer.
+pub fn start_typed<T: GenServer>(args: any) -> pid {
+    spawn || {
+        let init_result = GenServer::init::<T>(args);
+        match init_result {
+            (:ok, state) => server_loop_typed::<T>(state),
+            :ignore => :ignore,
+            (:stop, reason) => :erlang::exit(reason),
+            _ => :erlang::exit(:bad_init_result)
+        }
+    }
+}
+
+/// Start a linked GenServer using static dispatch.
+/// Links the calling process to the new server process.
+pub fn start_link_typed<T: GenServer>(args: any) -> pid {
+    let caller = process::current();
+    spawn || {
+        // Link to the caller before running init
+        process::link(caller);
+        let init_result = GenServer::init::<T>(args);
+        match init_result {
+            (:ok, state) => server_loop_typed::<T>(state),
+            :ignore => :ignore,
+            (:stop, reason) => :erlang::exit(reason),
+            _ => :erlang::exit(:bad_init_result)
+        }
+    }
+}
+
+/// The typed server loop using static dispatch.
+fn server_loop_typed<T: GenServer>(state: any) -> atom {
+    receive {
+        // Call protocol: {:gen_call, {pid, ref}, request}
+        (:gen_call, (from_pid, from_ref), msg) => {
+            let from = From { pid: from_pid, ref: from_ref };
+            let result = GenServer::handle_call::<T>(msg, from, state);
+            match result {
+                (:reply, response, new_state) => {
+                    reply(from, response);
+                    server_loop_typed::<T>(new_state)
+                },
+                (:noreply, new_state) => {
+                    server_loop_typed::<T>(new_state)
+                },
+                (:stop, reason, response, new_state) => {
+                    reply(from, response);
+                    GenServer::terminate::<T>(reason, new_state);
+                    :ok
+                },
+                _ => server_loop_typed::<T>(state)
+            }
+        },
+        // Cast protocol: {:gen_cast, request}
+        (:gen_cast, msg) => {
+            // Handle special :stop message
+            match msg {
+                :stop => {
+                    GenServer::terminate::<T>(:normal, state);
+                    :ok
+                },
+                (:stop, reason) => {
+                    GenServer::terminate::<T>(reason, state);
+                    :ok
+                },
+                _ => {
+                    let result = GenServer::handle_cast::<T>(msg, state);
+                    match result {
+                        (:noreply, new_state) => server_loop_typed::<T>(new_state),
+                        (:stop, reason, new_state) => {
+                            GenServer::terminate::<T>(reason, new_state);
+                            :ok
+                        },
+                        _ => server_loop_typed::<T>(state)
+                    }
+                }
+            }
+        },
+        // Any other message goes to handle_info
+        other => {
+            let result = GenServer::handle_info::<T>(other, state);
+            match result {
+                (:noreply, new_state) => server_loop_typed::<T>(new_state),
+                (:stop, reason, new_state) => {
+                    GenServer::terminate::<T>(reason, new_state);
+                    :ok
+                },
+                _ => server_loop_typed::<T>(state)
+            }
         }
     }
 }

@@ -360,6 +360,9 @@ pub struct TypeChecker {
     /// Type variable substitutions from unification (reserved for future use)
     #[allow(dead_code)]
     substitutions: HashMap<u32, Ty>,
+    /// Current function's type parameters and their bounds (for checking calls within generic functions)
+    /// Maps type param name (e.g., "T") to Vec<trait_name> (e.g., ["GenServer"])
+    current_type_param_bounds: HashMap<String, Vec<String>>,
 }
 
 impl TypeChecker {
@@ -371,6 +374,7 @@ impl TypeChecker {
             current_return_type: None,
             current_function_span: None,
             substitutions: HashMap::new(),
+            current_type_param_bounds: HashMap::new(),
         }
     }
 
@@ -549,6 +553,18 @@ impl TypeChecker {
             }
         };
 
+        // Check if this is a type parameter with declared bounds
+        if let Some(param_bounds) = self.current_type_param_bounds.get(&type_name) {
+            // This is a type parameter - check if its declared bounds satisfy the required bounds
+            for required_bound in bounds {
+                if !param_bounds.contains(required_bound) {
+                    return Err(required_bound.clone());
+                }
+            }
+            return Ok(());
+        }
+
+        // Not a type parameter - check if the concrete type implements the traits
         for bound in bounds {
             if !self.env.type_implements_trait(&type_name, bound) {
                 return Err(bound.clone());
@@ -864,6 +880,14 @@ impl TypeChecker {
         // Set current function span for error reporting
         self.current_function_span = Some(func.span.clone());
 
+        // Set type parameter bounds for this function (for checking calls within generic functions)
+        let old_type_param_bounds =
+            std::mem::replace(&mut self.current_type_param_bounds, HashMap::new());
+        for type_param in &func.type_params {
+            self.current_type_param_bounds
+                .insert(type_param.name.clone(), type_param.bounds.clone());
+        }
+
         // Bind parameters - use bind_pattern to handle all pattern types including enum variants
         let old_env = std::mem::replace(&mut self.env, scope);
         for param in &func.params {
@@ -915,6 +939,7 @@ impl TypeChecker {
 
         self.current_return_type = None;
         self.current_function_span = None;
+        self.current_type_param_bounds = old_type_param_bounds;
         Ok(())
     }
 

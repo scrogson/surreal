@@ -250,7 +250,7 @@ fn format_map(term: any, opts: InspectOpts) -> string {
         concat(concat(key_str, " => "), value_str)
     }, entries);
     let entries_str = join_strings(entry_strs, ", ");
-    concat(concat("%{", entries_str), "}")
+    concat(concat("{ ", entries_str), " }")
 }
 
 /// Join a list of strings with a separator
