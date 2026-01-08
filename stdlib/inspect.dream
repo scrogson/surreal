@@ -12,10 +12,6 @@ fn concat3(a: any, b: any, c: any) -> string {
     :erlang::iolist_to_binary([a, b, c])
 }
 
-// Quote character (34 = ASCII for ")
-fn quote() -> string {
-    :erlang::list_to_binary([34])
-}
 
 /// Options for controlling inspection output.
 pub struct InspectOpts {
@@ -170,7 +166,7 @@ fn extract_type_name(tag_str: any) -> string {
 fn format_value(term: any, opts: InspectOpts) -> string {
     if :erlang::is_binary(term) {
         // Binary string - show with quotes
-        concat3(quote(), term, quote())
+        concat3("\"", term, "\"")
     } else if :erlang::is_atom(term) {
         // Special handling for booleans
         if term == :true {
@@ -186,7 +182,7 @@ fn format_value(term: any, opts: InspectOpts) -> string {
         // Check if it's a printable string (charlist)
         if :io_lib::printable_list(term) {
             // It's a string - show with quotes
-            concat3(quote(), :erlang::list_to_binary(term), quote())
+            concat3("\"", :erlang::list_to_binary(term), "\"")
         } else {
             format_list(term, opts)
         }

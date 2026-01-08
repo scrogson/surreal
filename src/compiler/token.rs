@@ -2,6 +2,36 @@
 
 use logos::Logos;
 
+/// Process escape sequences in a string literal.
+/// Handles: \n, \r, \t, \\, \", \0
+fn process_escapes(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => result.push('\n'),
+                Some('r') => result.push('\r'),
+                Some('t') => result.push('\t'),
+                Some('\\') => result.push('\\'),
+                Some('"') => result.push('"'),
+                Some('0') => result.push('\0'),
+                Some(other) => {
+                    // Unknown escape - keep as-is
+                    result.push('\\');
+                    result.push(other);
+                }
+                None => result.push('\\'),
+            }
+        } else {
+            result.push(c);
+        }
+    }
+
+    result
+}
+
 /// Tokens produced by the lexer.
 #[derive(Logos, Debug, Clone, PartialEq)]
 #[logos(skip r"[ \t\n\r]+")]
@@ -63,7 +93,9 @@ pub enum Token {
 
     #[regex(r#""([^"\\]|\\.)*""#, |lex| {
         let s = lex.slice();
-        Some(s[1..s.len()-1].to_string())
+        // Strip quotes and process escape sequences
+        let content = &s[1..s.len()-1];
+        Some(process_escapes(content))
     })]
     String(String),
 
