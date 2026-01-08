@@ -981,7 +981,16 @@ impl<'source> Parser<'source> {
                         let name = segments.join("::");
                         self.advance(); // consume '{'
                         let mut fields = Vec::new();
+                        let mut base = None;
                         while !self.check(&Token::RBrace) && !self.is_at_end() {
+                            // Check for struct update syntax: ..base
+                            if self.check(&Token::DotDot) {
+                                self.advance();
+                                base = Some(Box::new(self.parse_expr()?));
+                                // After ..base, only } is allowed
+                                break;
+                            }
+
                             let field_name = self.expect_ident()?;
                             self.expect(&Token::Colon)?;
                             let field_value = self.parse_expr()?;
@@ -994,7 +1003,7 @@ impl<'source> Parser<'source> {
                             }
                         }
                         self.expect(&Token::RBrace)?;
-                        expr = Expr::StructInit { name, fields };
+                        expr = Expr::StructInit { name, fields, base };
                     }
                 }
 
@@ -1128,7 +1137,16 @@ impl<'source> Parser<'source> {
             if self.check(&Token::LBrace) {
                 self.advance();
                 let mut fields = Vec::new();
+                let mut base = None;
                 while !self.check(&Token::RBrace) && !self.is_at_end() {
+                    // Check for struct update syntax: ..base
+                    if self.check(&Token::DotDot) {
+                        self.advance();
+                        base = Some(Box::new(self.parse_expr()?));
+                        // After ..base, only } is allowed
+                        break;
+                    }
+
                     let field_name = self.expect_ident()?;
                     self.expect(&Token::Colon)?;
                     let field_value = self.parse_expr()?;
@@ -1141,7 +1159,7 @@ impl<'source> Parser<'source> {
                     }
                 }
                 self.expect(&Token::RBrace)?;
-                return Ok(Expr::StructInit { name, fields });
+                return Ok(Expr::StructInit { name, fields, base });
             }
 
             // Check for qualified path: Type::variant or Type::method

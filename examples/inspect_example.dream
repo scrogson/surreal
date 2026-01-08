@@ -1,0 +1,97 @@
+// Inspect Example - Debugging with io::inspect
+//
+// Demonstrates using io::inspect for debugging values in pipelines
+// and customizing output with InspectOpts.
+
+mod inspect_example {
+
+    pub struct User {
+        name: string,
+        age: int,
+        active: bool,
+    }
+
+    impl User {
+        pub fn new(name: string, age: int) -> User {
+            User { name: name, age: age, active: true }
+        }
+
+        pub fn deactivate(self) -> User {
+            User { active: false, ..self }
+        }
+
+        pub fn birthday(self) -> User {
+            User { age: self.age + 1, ..self }
+        }
+    }
+
+    pub fn main() -> atom {
+        io::println("=== Inspect Example ===");
+        io::println("");
+
+        // Basic inspect - prints and returns value
+        io::println("--- Basic Inspect ---");
+        let x = 42;
+        let y = io::inspect(x);
+        io::format("Returned value: ~p~n", [y]);
+        io::println("");
+
+        // Inspect different types
+        io::println("--- Inspecting Types ---");
+        io::inspect(123);                    // integer
+        io::inspect(:hello);                 // atom
+        io::inspect("world");                // string
+        io::inspect((1, 2, 3));              // tuple
+        io::inspect([1, 2, 3, 4, 5]);        // list
+        io::inspect(self());                 // pid
+        io::println("");
+
+        // Inspect with labels
+        io::println("--- Labels ---");
+        let nums = [1, 2, 3, 4, 5];
+        io::inspect_opts(nums, inspect::InspectOpts::new().with_label("numbers"));
+
+        let user = User::new("Alice", 30);
+        io::inspect_opts(user, inspect::InspectOpts::new().with_label("user"));
+        io::println("");
+
+        // Inspect in pipelines - great for debugging transformations
+        io::println("--- Pipeline Debugging ---");
+        let result = [1, 2, 3, 4, 5]
+            |> io::inspect()
+            |> enumerable::map(|x| { x * 2 })
+            |> io::inspect()
+            |> enumerable::filter(|x| { x > 4 })
+            |> io::inspect()
+            |> enumerable::reduce(0, |x, acc| { x + acc });
+
+        io::format("Final result: ~p~n", [result]);
+        io::println("");
+
+        // Struct update syntax with inspect
+        io::println("--- Struct Updates ---");
+        let alice = User::new("Alice", 30);
+        io::inspect_opts(alice, inspect::InspectOpts::new().with_label("created"));
+
+        let alice = alice.birthday();
+        io::inspect_opts(alice, inspect::InspectOpts::new().with_label("after birthday"));
+
+        let alice = alice.deactivate();
+        io::inspect_opts(alice, inspect::InspectOpts::new().with_label("deactivated"));
+        io::println("");
+
+        // InspectOpts builder pattern
+        io::println("--- InspectOpts Builder ---");
+        let opts = inspect::InspectOpts::new()
+            .with_label("debug")
+            .with_limit(3)
+            .with_pretty(true);
+
+        let long_list = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        io::inspect_opts(long_list, opts);
+        io::println("");
+
+        io::println("Done!");
+        :ok
+    }
+}

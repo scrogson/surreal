@@ -744,8 +744,9 @@ impl Codegen {
                 }
             }
 
-            Expr::StructInit { name, fields } => {
+            Expr::StructInit { name, fields, .. } => {
                 // Represent as map with __struct__ tag (like Elixir)
+                // TODO: Handle base expression for struct update syntax
                 // Check if the struct name is imported
                 let tag_name = if let Some((module, original_name)) = self.imports.get(name) {
                     format!("{}_{}", module, original_name)

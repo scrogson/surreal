@@ -1527,7 +1527,7 @@ impl CoreErlangEmitter {
                 }
             }
 
-            Expr::StructInit { name, fields } => {
+            Expr::StructInit { name, fields, base } => {
                 // Structs become maps in Erlang with a __struct__ tag
                 // The tag is a fully qualified atom like 'module::Type'
                 let (module_name, type_name) = if let Some((module, original_name)) = self.imports.get(name) {
@@ -1538,15 +1538,31 @@ impl CoreErlangEmitter {
                     (module_prefix.to_string(), name.clone())
                 };
 
-                self.emit("~{");
-                // Add __struct__ tag as fully qualified atom 'module::Type'
-                self.emit(&format!("'__struct__' => '{}::{}'", module_name, type_name));
-                for (field_name, value) in fields.iter() {
-                    self.emit(", ");
-                    self.emit(&format!("'{}' => ", field_name));
-                    self.emit_expr(value)?;
+                if let Some(base_expr) = base {
+                    // Struct update syntax: maps:merge(base, #{updated_fields})
+                    self.emit("call 'maps':'merge'(");
+                    self.emit_expr(base_expr)?;
+                    self.emit(", ~{");
+                    for (i, (field_name, value)) in fields.iter().enumerate() {
+                        if i > 0 {
+                            self.emit(", ");
+                        }
+                        self.emit(&format!("'{}' => ", field_name));
+                        self.emit_expr(value)?;
+                    }
+                    self.emit("}~)");
+                } else {
+                    // Full struct init
+                    self.emit("~{");
+                    // Add __struct__ tag as fully qualified atom 'module::Type'
+                    self.emit(&format!("'__struct__' => '{}::{}'", module_name, type_name));
+                    for (field_name, value) in fields.iter() {
+                        self.emit(", ");
+                        self.emit(&format!("'{}' => ", field_name));
+                        self.emit_expr(value)?;
+                    }
+                    self.emit("}~");
                 }
-                self.emit("}~");
             }
 
             Expr::EnumVariant { type_name: _, variant, args } => {

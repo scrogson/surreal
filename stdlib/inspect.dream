@@ -3,7 +3,19 @@
 // Provides the Inspect trait for converting values to readable string representations.
 // Similar to Elixir's Inspect protocol.
 
-use string::concat;
+// Binary-safe string concatenation
+fn concat(a: any, b: any) -> string {
+    :erlang::iolist_to_binary([a, b])
+}
+
+fn concat3(a: any, b: any, c: any) -> string {
+    :erlang::iolist_to_binary([a, b, c])
+}
+
+// Quote character (34 = ASCII for ")
+fn quote() -> string {
+    :erlang::list_to_binary([34])
+}
 
 /// Options for controlling inspection output.
 pub struct InspectOpts {
@@ -40,22 +52,22 @@ impl InspectOpts {
 
     /// Set a label for the output.
     pub fn with_label(self, label: string) -> InspectOpts {
-        InspectOpts {
-            pretty: self.pretty,
-            limit: self.limit,
-            width: self.width,
-            label: label,
-        }
+        InspectOpts { label: label, ..self }
     }
 
     /// Set the item limit.
     pub fn with_limit(self, limit: int) -> InspectOpts {
-        InspectOpts {
-            pretty: self.pretty,
-            limit: limit,
-            width: self.width,
-            label: self.label,
-        }
+        InspectOpts { limit: limit, ..self }
+    }
+
+    /// Set the line width.
+    pub fn with_width(self, width: int) -> InspectOpts {
+        InspectOpts { width: width, ..self }
+    }
+
+    /// Enable pretty printing.
+    pub fn with_pretty(self, pretty: bool) -> InspectOpts {
+        InspectOpts { pretty: pretty, ..self }
     }
 }
 
@@ -99,11 +111,14 @@ pub fn inspect_any_opts(term: any, opts: InspectOpts) -> string {
 }
 
 fn do_inspect_any(term: any, opts: InspectOpts) -> string {
-    // Format the term
-    let formatted = if opts.limit == 0 {
-        format_term(term)
+    // Check if this is a struct (map with __struct__ key)
+    let formatted = if :erlang::is_map(term) {
+        match :maps::get(:__struct__, term, :not_a_struct) {
+            :not_a_struct => format_value(term, opts),
+            struct_tag => format_struct(term, struct_tag, opts)
+        }
     } else {
-        format_term_limit(term, opts.limit)
+        format_value(term, opts)
     };
 
     // Add label if present
@@ -112,4 +127,126 @@ fn do_inspect_any(term: any, opts: InspectOpts) -> string {
     } else {
         concat(concat(opts.label, ": "), formatted)
     }
+}
+
+/// Format a struct in Rust-like syntax: TypeName { field: value, ... }
+fn format_struct(term: any, struct_tag: atom, opts: InspectOpts) -> string {
+    // Extract type name from tag (e.g., 'module::TypeName' -> 'TypeName')
+    let tag_str = :erlang::atom_to_list(struct_tag);
+    let type_name = extract_type_name(tag_str);
+
+    // Get all fields except __struct__
+    let all_fields = :maps::to_list(term);
+    let fields = :lists::filter(|entry| {
+        let key = :erlang::element(1, entry);
+        key != :__struct__
+    }, all_fields);
+
+    // Format fields
+    let field_strs = :lists::map(|entry| {
+        let key = :erlang::element(1, entry);
+        let value = :erlang::element(2, entry);
+        let key_str = :erlang::atom_to_list(key);
+        let value_str = format_value(value, opts);
+        concat(concat(:erlang::list_to_binary(key_str), ": "), value_str)
+    }, fields);
+
+    // Join with ", "
+    let fields_str = join_strings(field_strs, ", ");
+
+    // Build "TypeName { fields }"
+    concat(concat(concat(type_name, " { "), fields_str), " }")
+}
+
+/// Extract the type name from a fully qualified name like "module::TypeName"
+fn extract_type_name(tag_str: any) -> string {
+    // Find the last "::" and take everything after it
+    let parts = :string::split(tag_str, "::", :all);
+    let last = :lists::last(parts);
+    :erlang::list_to_binary(last)
+}
+
+/// Format a non-struct value
+fn format_value(term: any, opts: InspectOpts) -> string {
+    if :erlang::is_binary(term) {
+        // Binary string - show with quotes
+        concat3(quote(), term, quote())
+    } else if :erlang::is_atom(term) {
+        // Special handling for booleans
+        if term == :true {
+            "true"
+        } else if term == :false {
+            "false"
+        } else {
+            // Atom - show with colon prefix
+            let atom_str = :erlang::atom_to_list(term);
+            concat(":", :erlang::list_to_binary(atom_str))
+        }
+    } else if :erlang::is_list(term) {
+        // Check if it's a printable string (charlist)
+        if :io_lib::printable_list(term) {
+            // It's a string - show with quotes
+            concat3(quote(), :erlang::list_to_binary(term), quote())
+        } else {
+            format_list(term, opts)
+        }
+    } else if :erlang::is_tuple(term) {
+        format_tuple(term, opts)
+    } else if :erlang::is_map(term) {
+        // Check for nested struct
+        match :maps::get(:__struct__, term, :not_a_struct) {
+            :not_a_struct => format_map(term, opts),
+            struct_tag => format_struct(term, struct_tag, opts)
+        }
+    } else {
+        // Numbers, pids, etc - use default formatting
+        :erlang::iolist_to_binary(:io_lib::format("~p", [term]))
+    }
+}
+
+/// Format a list
+fn format_list(term: any, opts: InspectOpts) -> string {
+    let items = :lists::map(|item| { format_value(item, opts) }, term);
+    let items_str = join_strings(items, ", ");
+    concat(concat("[", items_str), "]")
+}
+
+/// Format a tuple
+fn format_tuple(term: any, opts: InspectOpts) -> string {
+    let size = :erlang::tuple_size(term);
+    let items = tuple_to_list(term, 1, size, opts);
+    let items_str = join_strings(items, ", ");
+    concat(concat("(", items_str), ")")
+}
+
+/// Convert tuple elements to formatted strings
+fn tuple_to_list(tuple: any, idx: int, size: int, opts: InspectOpts) -> [string] {
+    if idx > size {
+        []
+    } else {
+        let elem = :erlang::element(idx, tuple);
+        let formatted = format_value(elem, opts);
+        let rest = tuple_to_list(tuple, idx + 1, size, opts);
+        :lists::append([formatted], rest)
+    }
+}
+
+/// Format a plain map (not a struct)
+fn format_map(term: any, opts: InspectOpts) -> string {
+    let entries = :maps::to_list(term);
+    let entry_strs = :lists::map(|entry| {
+        let key = :erlang::element(1, entry);
+        let value = :erlang::element(2, entry);
+        let key_str = format_value(key, opts);
+        let value_str = format_value(value, opts);
+        concat(concat(key_str, " => "), value_str)
+    }, entries);
+    let entries_str = join_strings(entry_strs, ", ");
+    concat(concat("%{", entries_str), "}")
+}
+
+/// Join a list of strings with a separator
+fn join_strings(strings: [string], sep: string) -> string {
+    let iolist = :lists::join(sep, strings);
+    :erlang::iolist_to_binary(iolist)
 }

@@ -48,19 +48,18 @@ impl Map {
 }
 
 pub fn main() -> atom {
-    :io::format("=== Enum Module Example ===~n", []);
+    io::println("=== Enum Module Example ===");
 
-    // Basic list
+    // Basic list - using io::inspect for quick debugging
     let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-    :io::format("Numbers: ~p~n", [numbers]);
+    io::inspect_opts(numbers, inspect::InspectOpts::new().with_label("Numbers"));
 
-    // Map - transform each element
-    let doubled = enumerable::map(numbers, |x| { x * 2 });
-    :io::format("Doubled: ~p~n", [doubled]);
-
-    // Filter - keep matching elements
-    let evens = enumerable::filter(numbers, |x| { x % 2 == 0 });
-    :io::format("Evens: ~p~n", [evens]);
+    // Pipeline with inspect for debugging each step
+    let result = numbers
+        |> enumerable::map(|x| { x * 2 })
+        |> io::inspect_opts(inspect::InspectOpts::new().with_label("Doubled"))
+        |> enumerable::filter(|x| { x % 2 == 0 })
+        |> io::inspect_opts(inspect::InspectOpts::new().with_label("Evens"));
 
     // Reduce - accumulate a value
     let sum = enumerable::reduce(numbers, 0, |x, acc| { x + acc });

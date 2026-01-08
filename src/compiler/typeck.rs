@@ -1153,8 +1153,25 @@ impl TypeChecker {
             }
 
             // Struct initialization
-            Expr::StructInit { name, fields } => {
+            Expr::StructInit { name, fields, base } => {
                 if let Some(info) = self.env.get_struct(name).cloned() {
+                    let struct_ty = Ty::Named {
+                        name: name.clone(),
+                        module: None,
+                        args: vec![],
+                    };
+
+                    // Check base expression if present (struct update syntax)
+                    if let Some(base_expr) = base {
+                        let base_ty = self.infer_expr(base_expr)?;
+                        if !self.types_compatible(&base_ty, &struct_ty) {
+                            self.error(TypeError::with_help(
+                                "struct update base type mismatch".to_string(),
+                                format!("expected {}, found {}", struct_ty, base_ty),
+                            ));
+                        }
+                    }
+
                     // Check fields
                     for (field_name, field_expr) in fields {
                         let field_ty = self.infer_expr(field_expr)?;
@@ -1172,11 +1189,7 @@ impl TypeChecker {
                             )));
                         }
                     }
-                    Ok(Ty::Named {
-                        name: name.clone(),
-                        module: None,
-                        args: vec![],
-                    })
+                    Ok(struct_ty)
                 } else {
                     self.error(TypeError::new(format!("undefined struct: {}", name)));
                     Ok(Ty::Error)
@@ -1659,6 +1672,13 @@ impl TypeChecker {
 
         // Inference variables are compatible with anything (will be resolved later)
         if matches!(ty1, Ty::Infer(_)) || matches!(ty2, Ty::Infer(_)) {
+            return true;
+        }
+
+        // Self type is compatible with any named type (resolved at impl level)
+        if matches!(ty1, Ty::Named { name, .. } if name == "Self")
+            || matches!(ty2, Ty::Named { name, .. } if name == "Self")
+        {
             return true;
         }
 

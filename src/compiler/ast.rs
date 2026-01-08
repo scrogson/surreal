@@ -241,10 +241,13 @@ pub enum Expr {
     Tuple(Vec<Expr>),
     /// List expression.
     List(Vec<Expr>),
-    /// Struct initialization.
+    /// Struct initialization with optional base for update syntax.
+    /// `Point { x: 1, y: 2 }` or `Point { x: 1, ..base }`
     StructInit {
         name: String,
         fields: Vec<(String, Expr)>,
+        /// Optional base expression for struct update syntax `..base`
+        base: Option<Box<Expr>>,
     },
     /// Enum variant construction: `Some(42)` or `Option::Some(42)`.
     EnumVariant {
