@@ -85,47 +85,47 @@ extern mod erlang {
 }
 
 extern mod lists {
-    fn append(list1: [any], list2: [any]) -> [any];
-    fn concat(lists: [[any]]) -> [any];
-    fn delete(elem: any, list: [any]) -> [any];
-    fn duplicate(n: int, elem: any) -> [any];
-    fn filter(pred: fn(any) -> bool, list: [any]) -> [any];
-    fn flatten(list: [any]) -> [any];
-    fn foldl(fun: fn(any, any) -> any, acc: any, list: [any]) -> any;
-    fn foldr(fun: fn(any, any) -> any, acc: any, list: [any]) -> any;
-    fn foreach(fun: fn(any) -> any, list: [any]) -> atom;
-    fn keyfind(key: any, n: int, list: [any]) -> any;
-    fn keystore(key: any, n: int, list: [any], tuple: any) -> [any];
-    fn last(list: [any]) -> any;
-    fn map(fun: fn(any) -> any, list: [any]) -> [any];
-    fn member(elem: any, list: [any]) -> bool;
-    fn nth(n: int, list: [any]) -> any;
-    fn nthtail(n: int, list: [any]) -> [any];
-    fn reverse(list: [any]) -> [any];
-    fn sort(list: [any]) -> [any];
-    fn split(n: int, list: [any]) -> ([any], [any]);
+    fn append<T>(list1: [T], list2: [T]) -> [T];
+    fn concat<T>(lists: [[T]]) -> [T];
+    fn delete<T>(elem: T, list: [T]) -> [T];
+    fn duplicate<T>(n: int, elem: T) -> [T];
+    fn filter<T>(pred: fn(T) -> bool, list: [T]) -> [T];
+    fn flatten<T>(list: [T]) -> [T];
+    fn foldl<T, Acc>(fun: fn(T, Acc) -> Acc, acc: Acc, list: [T]) -> Acc;
+    fn foldr<T, Acc>(fun: fn(T, Acc) -> Acc, acc: Acc, list: [T]) -> Acc;
+    fn foreach<T>(fun: fn(T) -> any, list: [T]) -> atom;
+    fn keyfind<K>(key: K, n: int, list: [any]) -> any;
+    fn keystore<K>(key: K, n: int, list: [any], tuple: any) -> [any];
+    fn last<T>(list: [T]) -> T;
+    fn map<T, U>(fun: fn(T) -> U, list: [T]) -> [U];
+    fn member<T>(elem: T, list: [T]) -> bool;
+    fn nth<T>(n: int, list: [T]) -> T;
+    fn nthtail<T>(n: int, list: [T]) -> [T];
+    fn reverse<T>(list: [T]) -> [T];
+    fn sort<T>(list: [T]) -> [T];
+    fn split<T>(n: int, list: [T]) -> ([T], [T]);
     fn sum(list: [int]) -> int;
-    fn usort(list: [any]) -> [any];
-    fn zip(list1: [any], list2: [any]) -> [any];
-    fn zipwith(fun: fn(any, any) -> any, list1: [any], list2: [any]) -> [any];
+    fn usort<T>(list: [T]) -> [T];
+    fn zip<A, B>(list1: [A], list2: [B]) -> [(A, B)];
+    fn zipwith<A, B, C>(fun: fn(A, B) -> C, list1: [A], list2: [B]) -> [C];
 }
 
 extern mod maps {
-    fn new() -> any;
-    fn get(key: any, map: any) -> any;
-    fn get(key: any, map: any, default: any) -> any;
-    fn put(key: any, value: any, map: any) -> any;
-    fn remove(key: any, map: any) -> any;
-    fn keys(map: any) -> [any];
-    fn values(map: any) -> [any];
-    fn to_list(map: any) -> [any];
-    fn from_list(list: [any]) -> any;
-    fn is_key(key: any, map: any) -> bool;
-    fn size(map: any) -> int;
-    fn merge(map1: any, map2: any) -> any;
-    fn fold(fun: fn(any, any, any) -> any, acc: any, map: any) -> any;
-    fn map(fun: fn(any, any) -> any, map: any) -> any;
-    fn filter(pred: fn(any, any) -> bool, map: any) -> any;
+    fn new<K, V>() -> map;
+    fn get<K, V>(key: K, map: map) -> V;
+    fn get<K, V>(key: K, map: map, default: V) -> V;
+    fn put<K, V>(key: K, value: V, map: map) -> map;
+    fn remove<K>(key: K, map: map) -> map;
+    fn keys<K>(map: map) -> [K];
+    fn values<V>(map: map) -> [V];
+    fn to_list<K, V>(map: map) -> [(K, V)];
+    fn from_list<K, V>(list: [(K, V)]) -> map;
+    fn is_key<K>(key: K, map: map) -> bool;
+    fn size(map: map) -> int;
+    fn merge(map1: map, map2: map) -> map;
+    fn fold<K, V, Acc>(fun: fn(K, V, Acc) -> Acc, acc: Acc, map: map) -> Acc;
+    fn map<K, V, V2>(fun: fn(K, V) -> V2, map: map) -> map;
+    fn filter<K, V>(pred: fn(K, V) -> bool, map: map) -> map;
 }
 
 extern mod io {
@@ -203,15 +203,16 @@ extern mod supervisor {
 }
 
 extern mod ets {
+    // Note: ets tables are opaque references, using 'any' for table type
     fn new(name: atom, options: [any]) -> any;
-    fn insert(table: any, object: any) -> bool;
-    fn lookup(table: any, key: any) -> [any];
+    fn insert<T>(table: any, object: T) -> bool;
+    fn lookup<T>(table: any, key: any) -> [T];
     fn delete(table: any) -> bool;
-    fn delete(table: any, key: any) -> bool;
-    fn member(table: any, key: any) -> bool;
-    fn first(table: any) -> any;
-    fn next(table: any, key: any) -> any;
-    fn tab2list(table: any) -> [any];
+    fn delete<K>(table: any, key: K) -> bool;
+    fn member<K>(table: any, key: K) -> bool;
+    fn first<K>(table: any) -> K;
+    fn next<K>(table: any, key: K) -> K;
+    fn tab2list<T>(table: any) -> [T];
 }
 
 extern mod crypto {

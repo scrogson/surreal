@@ -225,9 +225,21 @@ fn compile_modules_with_registry(
         return ExitCode::from(1);
     }
 
+    // Load stub modules for FFI type checking
+    let stub_modules = load_stub_modules();
+
+    // Combine user modules with stub modules for type checking
+    // Stub modules provide extern declarations but won't generate code
+    let mut all_modules_for_typeck: Vec<Module> = stub_modules;
+    all_modules_for_typeck.extend(modules.iter().cloned());
+
     // Type check all modules together (allows cross-module type references)
     let mut has_errors = false;
-    for (module_name, result) in check_modules(&modules) {
+    for (module_name, result) in check_modules(&all_modules_for_typeck) {
+        // Skip errors from stub modules (they don't have function bodies)
+        if module_name.ends_with("_stubs") || module_name == "erlang" {
+            continue;
+        }
         if let Err(e) = result {
             has_errors = true;
             // Find the module to get source for error display
@@ -365,6 +377,76 @@ fn find_stdlib_dir() -> Option<PathBuf> {
     }
 
     None
+}
+
+/// Find the stubs directory relative to the executable or current directory.
+fn find_stubs_dir() -> Option<PathBuf> {
+    // Try relative to executable first
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            // Check ../stubs (for target/debug/dream -> stubs/)
+            let stubs = exe_dir.join("../../stubs");
+            if stubs.exists() {
+                return Some(stubs.canonicalize().unwrap_or(stubs));
+            }
+            // Check alongside executable
+            let stubs = exe_dir.join("stubs");
+            if stubs.exists() {
+                return Some(stubs);
+            }
+        }
+    }
+
+    // Try current directory
+    let stubs = PathBuf::from("stubs");
+    if stubs.exists() {
+        return Some(stubs.canonicalize().unwrap_or(stubs));
+    }
+
+    None
+}
+
+/// Load .dreamt stub files and parse them into modules.
+/// These provide type information for FFI calls to external libraries.
+fn load_stub_modules() -> Vec<Module> {
+    let stubs_dir = match find_stubs_dir() {
+        Some(dir) => dir,
+        None => return Vec::new(),
+    };
+
+    let entries = match fs::read_dir(&stubs_dir) {
+        Ok(entries) => entries,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut stub_modules = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("dreamt") {
+            continue;
+        }
+
+        // Read and parse the stub file
+        let source = match fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+
+        // Wrap in a module since parser expects that
+        let stub_name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("stubs");
+        let wrapped = format!("mod {} {{\n{}\n}}", stub_name, source);
+
+        let mut parser = dream::compiler::Parser::new(&wrapped);
+        match parser.parse_module() {
+            Ok(module) => stub_modules.push(module),
+            Err(e) => {
+                eprintln!("Warning: Failed to parse stub file {}: {:?}", path.display(), e);
+            }
+        }
+    }
+
+    stub_modules
 }
 
 /// Get the stdlib output directory.
