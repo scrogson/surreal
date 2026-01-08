@@ -388,6 +388,11 @@ impl CoreErlangEmitter {
                 format!("fn_{}_{}", param_names.join("_"), self.type_to_name(ret))
             }
             Type::AssociatedType { base, name } => format!("{}_{}", base, name),
+            Type::AtomLiteral(name) => format!("atom_{}", name),
+            Type::Union(types) => {
+                let names: Vec<String> = types.iter().map(|t| self.type_to_name(t)).collect();
+                format!("union_{}", names.join("_or_"))
+            }
         }
     }
 

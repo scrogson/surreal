@@ -542,6 +542,8 @@ pub enum Type {
     String,
     /// Atom type.
     Atom,
+    /// Literal atom type (e.g., `:ok` as a type).
+    AtomLiteral(std::string::String),
     /// Boolean type.
     Bool,
     /// Float type.
@@ -554,6 +556,8 @@ pub enum Type {
     Map,
     /// Any type (dynamic/untyped).
     Any,
+    /// Union type (e.g., `int | string` or `:ok | :error`).
+    Union(Vec<Type>),
     /// Function type (e.g., `fn(T, U) -> R`).
     Fn {
         params: Vec<Type>,

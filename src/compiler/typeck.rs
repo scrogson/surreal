@@ -66,6 +66,12 @@ pub enum Ty {
         base: String,
         name: String,
     },
+
+    /// Literal atom type (e.g., :ok, :error as types)
+    AtomLiteral(String),
+
+    /// Union type (e.g., :ok | :error, int | string)
+    Union(Vec<Ty>),
 }
 
 impl Ty {
@@ -79,6 +85,7 @@ impl Ty {
             Ty::Fn { params, ret } => {
                 params.iter().any(|t| t.has_infer()) || ret.has_infer()
             }
+            Ty::Union(tys) => tys.iter().any(|t| t.has_infer()),
             _ => false,
         }
     }
@@ -93,6 +100,7 @@ impl Ty {
             Ty::Fn { params, ret } => {
                 params.iter().any(|t| t.has_infer_id(target_id)) || ret.has_infer_id(target_id)
             }
+            Ty::Union(tys) => tys.iter().any(|t| t.has_infer_id(target_id)),
             _ => false,
         }
     }
@@ -119,6 +127,7 @@ impl Ty {
                 params: params.iter().map(|t| t.substitute(subst)).collect(),
                 ret: Box::new(ret.substitute(subst)),
             },
+            Ty::Union(tys) => Ty::Union(tys.iter().map(|t| t.substitute(subst)).collect()),
             _ => self.clone(),
         }
     }
@@ -177,6 +186,16 @@ impl std::fmt::Display for Ty {
             Ty::Error => write!(f, "<error>"),
             Ty::Any => write!(f, "any"),
             Ty::AssociatedType { base, name } => write!(f, "{}::{}", base, name),
+            Ty::AtomLiteral(name) => write!(f, ":{}", name),
+            Ty::Union(tys) => {
+                for (i, t) in tys.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " | ")?;
+                    }
+                    write!(f, "{}", t)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -439,6 +458,36 @@ impl TypeChecker {
             // Type variables unify with anything (for now)
             (Ty::Var(_), _) | (_, Ty::Var(_)) => Ok(()),
 
+            // AtomLiteral is a subtype of Atom
+            (Ty::AtomLiteral(_), Ty::Atom) | (Ty::Atom, Ty::AtomLiteral(_)) => Ok(()),
+
+            // AtomLiterals with the same value unify
+            (Ty::AtomLiteral(a), Ty::AtomLiteral(b)) if a == b => Ok(()),
+
+            // Union type unification:
+            // A type T unifies with a union if T matches any variant in the union
+            (ty, Ty::Union(variants)) | (Ty::Union(variants), ty) => {
+                // Check if the type matches any variant in the union
+                for variant in variants {
+                    if self.types_compatible(ty, variant) {
+                        return Ok(());
+                    }
+                }
+                // Also allow if ty is a union and all its variants are in the target union
+                if let Ty::Union(ty_variants) = ty {
+                    let all_match = ty_variants.iter().all(|v| {
+                        variants.iter().any(|target| self.types_compatible(v, target))
+                    });
+                    if all_match {
+                        return Ok(());
+                    }
+                }
+                Err(TypeError::new(format!(
+                    "type {} is not compatible with union {}",
+                    ty, Ty::Union(variants.clone())
+                )))
+            }
+
             // Named types must have same name and unify args
             (
                 Ty::Named { name: n1, args: a1, .. },
@@ -518,6 +567,9 @@ impl TypeChecker {
                 params: params.iter().map(|t| self.apply_substitutions(t)).collect(),
                 ret: Box::new(self.apply_substitutions(ret)),
             },
+            Ty::Union(tys) => {
+                Ty::Union(tys.iter().map(|t| self.apply_substitutions(t)).collect())
+            }
             // Primitives and type variables don't need substitution
             _ => ty.clone(),
         }
@@ -696,6 +748,10 @@ impl TypeChecker {
                 }
             }
             ast::Type::Any => Ty::Any,
+            ast::Type::AtomLiteral(name) => Ty::AtomLiteral(name.clone()),
+            ast::Type::Union(tys) => {
+                Ty::Union(tys.iter().map(|t| self.ast_type_to_ty(t)).collect())
+            }
         }
     }
 
@@ -1125,7 +1181,7 @@ impl TypeChecker {
             // Literals
             Expr::Int(_) => Ok(Ty::Int),
             Expr::String(_) => Ok(Ty::String),
-            Expr::Atom(_) => Ok(Ty::Atom),
+            Expr::Atom(name) => Ok(Ty::AtomLiteral(name.clone())),
             Expr::Bool(_) => Ok(Ty::Bool),
             Expr::Unit => Ok(Ty::Unit),
 
@@ -1180,13 +1236,40 @@ impl TypeChecker {
 
                 if let Some(else_blk) = else_block {
                     let else_ty = self.check_block(else_blk)?;
-                    if !self.types_compatible(&then_ty, &else_ty) {
-                        self.error(TypeError::with_help(
-                            "if branches have different types",
-                            format!("then: {}, else: {}", then_ty, else_ty),
-                        ));
+                    if self.types_compatible(&then_ty, &else_ty) {
+                        // Types are compatible, use the more general one
+                        // (e.g., :ok with atom → atom, :ok with :ok → :ok)
+                        if matches!(then_ty, Ty::AtomLiteral(_)) && matches!(else_ty, Ty::Atom) {
+                            Ok(else_ty)
+                        } else if matches!(else_ty, Ty::AtomLiteral(_)) && matches!(then_ty, Ty::Atom) {
+                            Ok(then_ty)
+                        } else {
+                            Ok(then_ty)
+                        }
+                    } else {
+                        // Types are different - create a union type
+                        // Flatten nested unions and deduplicate
+                        let mut variants = Vec::new();
+                        match &then_ty {
+                            Ty::Union(tys) => variants.extend(tys.clone()),
+                            ty => variants.push(ty.clone()),
+                        }
+                        match &else_ty {
+                            Ty::Union(tys) => {
+                                for ty in tys {
+                                    if !variants.iter().any(|v| self.types_compatible(v, ty)) {
+                                        variants.push(ty.clone());
+                                    }
+                                }
+                            }
+                            ty => {
+                                if !variants.iter().any(|v| self.types_compatible(v, ty)) {
+                                    variants.push(ty.clone());
+                                }
+                            }
+                        }
+                        Ok(Ty::Union(variants))
                     }
-                    Ok(then_ty)
                 } else {
                     Ok(Ty::Unit)
                 }
@@ -1862,6 +1945,19 @@ impl TypeChecker {
             (Ty::Ref, Ty::Ref) => true,
             (Ty::RawMap, Ty::RawMap) => true,
 
+            // AtomLiteral is compatible with Atom
+            (Ty::AtomLiteral(_), Ty::Atom) | (Ty::Atom, Ty::AtomLiteral(_)) => true,
+
+            // Same atom literals are compatible
+            (Ty::AtomLiteral(a), Ty::AtomLiteral(b)) => a == b,
+
+            // Union type compatibility:
+            // A type T is compatible with a union if T matches any variant in the union
+            (ty, Ty::Union(variants)) | (Ty::Union(variants), ty) => {
+                // Check if the type matches any variant in the union
+                variants.iter().any(|v| self.types_compatible(ty, v))
+            }
+
             (Ty::Tuple(tys1), Ty::Tuple(tys2)) => {
                 tys1.len() == tys2.len()
                     && tys1.iter().zip(tys2.iter()).all(|(t1, t2)| self.types_compatible(t1, t2))
@@ -2225,7 +2321,7 @@ impl MethodResolver {
             Expr::String(_) => Ty::String,
             Expr::Int(_) => Ty::Int,
             Expr::Bool(_) => Ty::Bool,
-            Expr::Atom(_) => Ty::Atom,
+            Expr::Atom(name) => Ty::AtomLiteral(name.clone()),
             Expr::Unit => Ty::Unit,
             Expr::List(_) => Ty::List(Box::new(Ty::Any)),
             Expr::Tuple(exprs) => {
@@ -2321,6 +2417,10 @@ impl MethodResolver {
                 }
             }
             ast::Type::Any => Ty::Any,
+            ast::Type::AtomLiteral(name) => Ty::AtomLiteral(name.clone()),
+            ast::Type::Union(tys) => {
+                Ty::Union(tys.iter().map(|t| self.ast_type_to_ty(t)).collect())
+            }
         }
     }
 }
@@ -2522,6 +2622,135 @@ mod tests {
                 fn test() -> any {
                     let m = :maps::new();
                     :maps::get(:foo, m)
+                }
+            }
+        "#);
+        assert!(result.is_ok());
+    }
+
+    // ========== Union Type Tests ==========
+
+    #[test]
+    fn test_atom_literal_return_type() {
+        let result = parse_and_check(r#"
+            mod test {
+                fn return_ok() -> :ok {
+                    :ok
+                }
+            }
+        "#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_atom_literal_wrong_return() {
+        let result = parse_and_check(r#"
+            mod test {
+                fn return_ok() -> :ok {
+                    :error
+                }
+            }
+        "#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_atom_literal_compatible_with_atom() {
+        let result = parse_and_check(r#"
+            mod test {
+                fn return_atom() -> atom {
+                    :hello
+                }
+            }
+        "#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_union_type_ok_or_error() {
+        let result = parse_and_check(r#"
+            mod test {
+                fn maybe_fail(succeed: bool) -> :ok | :error {
+                    if succeed {
+                        :ok
+                    } else {
+                        :error
+                    }
+                }
+            }
+        "#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_union_type_int_or_string() {
+        let result = parse_and_check(r#"
+            mod test {
+                fn get_value(use_int: bool) -> int | string {
+                    if use_int {
+                        42
+                    } else {
+                        "hello"
+                    }
+                }
+            }
+        "#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_union_type_value_matches_variant() {
+        // :ok should be assignable to :ok | :error
+        let result = parse_and_check(r#"
+            mod test {
+                fn returns_union() -> :ok | :error {
+                    :ok
+                }
+            }
+        "#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_union_type_wrong_variant() {
+        // :wrong should NOT be assignable to :ok | :error
+        let result = parse_and_check(r#"
+            mod test {
+                fn returns_union() -> :ok | :error {
+                    :wrong
+                }
+            }
+        "#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_if_creates_union_from_branches() {
+        // If branches with different types should create a union
+        let result = parse_and_check(r#"
+            mod test {
+                fn infer_union(b: bool) -> int | string {
+                    if b { 1 } else { "two" }
+                }
+            }
+        "#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_union_with_three_variants() {
+        let result = parse_and_check(r#"
+            mod test {
+                fn three_way(x: int) -> :a | :b | :c {
+                    if x == 1 {
+                        :a
+                    } else {
+                        if x == 2 {
+                            :b
+                        } else {
+                            :c
+                        }
+                    }
                 }
             }
         "#);

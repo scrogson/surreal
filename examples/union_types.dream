@@ -1,0 +1,121 @@
+// Union Types Example
+//
+// Dream supports union types (T | U) and literal atom types (:ok, :error).
+// This allows for precise typing of functions that can return multiple types.
+
+mod union_types {
+    // Literal atom types: functions can declare specific atoms as return types
+    pub fn always_ok() -> :ok {
+        :ok
+    }
+
+    // Union types: functions can return one of several types
+    pub fn maybe_fail(succeed: bool) -> :ok | :error {
+        if succeed {
+            :ok
+        } else {
+            :error
+        }
+    }
+
+    // Union types work with any types, not just atoms
+    pub fn parse_number(input: string) -> int | :error {
+        // In a real implementation, this would parse the string
+        // For demo purposes, we return based on the string
+        if input == "42" {
+            42
+        } else {
+            :error
+        }
+    }
+
+    // Multiple union variants
+    pub fn traffic_light(n: int) -> :red | :yellow | :green {
+        if n == 0 {
+            :red
+        } else {
+            if n == 1 {
+                :yellow
+            } else {
+                :green
+            }
+        }
+    }
+
+    // Literal atom types are subtypes of atom
+    // This function returns :hello but the type is atom
+    pub fn any_atom() -> atom {
+        :hello
+    }
+
+    // Pattern matching with union types
+    pub fn describe_result(success: bool) -> string {
+        let result = maybe_fail(success);
+        // Note: pattern matching on union values works normally
+        match result {
+            :ok => "Operation succeeded",
+            :error => "Operation failed",
+            _ => "Unknown"
+        }
+    }
+
+    // Union types can be used in structs too
+    pub struct ApiResponse {
+        status: :success | :failure,
+        code: int,
+    }
+
+    pub fn create_response(ok: bool) -> ApiResponse {
+        if ok {
+            ApiResponse { status: :success, code: 200 }
+        } else {
+            ApiResponse { status: :failure, code: 500 }
+        }
+    }
+
+    pub fn main() -> :ok {
+        // Test literal atom return types
+        let r1 = always_ok();
+        :io::format("always_ok() = ~p~n", [r1]);
+
+        // Test union types with atoms
+        let r2 = maybe_fail(true);
+        let r3 = maybe_fail(false);
+        :io::format("maybe_fail(true) = ~p~n", [r2]);
+        :io::format("maybe_fail(false) = ~p~n", [r3]);
+
+        // Test union types with different types
+        let r4 = parse_number("42");
+        let r5 = parse_number("invalid");
+        :io::format("parse_number(\"42\") = ~p~n", [r4]);
+        :io::format("parse_number(\"invalid\") = ~p~n", [r5]);
+
+        // Test three-way union
+        let light0 = traffic_light(0);
+        let light1 = traffic_light(1);
+        let light2 = traffic_light(2);
+        :io::format("traffic_light(0) = ~p~n", [light0]);
+        :io::format("traffic_light(1) = ~p~n", [light1]);
+        :io::format("traffic_light(2) = ~p~n", [light2]);
+
+        // Test atom literal subtype of atom
+        let any = any_atom();
+        :io::format("any_atom() = ~p~n", [any]);
+
+        // Test pattern matching on union
+        let desc1 = describe_result(true);
+        let desc2 = describe_result(false);
+        :io::format("describe_result(true) = ~p~n", [desc1]);
+        :io::format("describe_result(false) = ~p~n", [desc2]);
+
+        // Test struct with union field
+        let resp1 = create_response(true);
+        let resp2 = create_response(false);
+        :io::format("create_response(true).status = ~p~n", [resp1.status]);
+        :io::format("create_response(true).code = ~p~n", [resp1.code]);
+        :io::format("create_response(false).status = ~p~n", [resp2.status]);
+        :io::format("create_response(false).code = ~p~n", [resp2.code]);
+
+        :ok
+    }
+}

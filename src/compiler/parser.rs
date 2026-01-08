@@ -2094,6 +2094,30 @@ impl<'source> Parser<'source> {
 
     /// Parse a type.
     fn parse_type(&mut self) -> ParseResult<Type> {
+        // Parse primary type, then check for union (|)
+        let first = self.parse_primary_type()?;
+
+        // Check for union type: T | U | V
+        if self.check(&Token::Pipe) {
+            let mut variants = vec![first];
+            while self.check(&Token::Pipe) {
+                self.advance();
+                variants.push(self.parse_primary_type()?);
+            }
+            return Ok(Type::Union(variants));
+        }
+
+        Ok(first)
+    }
+
+    /// Parse a single (non-union) type.
+    fn parse_primary_type(&mut self) -> ParseResult<Type> {
+        // Atom literal type: :ok, :error
+        if let Some(Token::Atom(name)) = self.peek().cloned() {
+            self.advance();
+            return Ok(Type::AtomLiteral(name));
+        }
+
         // Handle 'float' which is tokenized as Token::Float (a binary segment keyword)
         if self.check(&Token::Float) {
             self.advance();
@@ -3391,5 +3415,133 @@ mod tests {
         // Count functions in erlang mod - bindgen generates many functions
         let fn_count = erlang.items.iter().filter(|item| matches!(item, ExternItem::Function(_))).count();
         assert!(fn_count >= 30, "erlang mod should have at least 30 functions, got {}", fn_count);
+    }
+
+    // ========== Union Type Parser Tests ==========
+
+    #[test]
+    fn test_parse_atom_literal_type() {
+        let source = r#"
+            mod test {
+                fn returns_ok() -> :ok {
+                    :ok
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = first_user_item(&module) {
+            assert_eq!(f.name, "returns_ok");
+            assert!(matches!(f.return_type, Some(Type::AtomLiteral(ref s)) if s == "ok"));
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_union_type() {
+        let source = r#"
+            mod test {
+                fn maybe_fail() -> :ok | :error {
+                    :ok
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = first_user_item(&module) {
+            assert_eq!(f.name, "maybe_fail");
+            if let Some(Type::Union(variants)) = &f.return_type {
+                assert_eq!(variants.len(), 2);
+                assert!(matches!(&variants[0], Type::AtomLiteral(s) if s == "ok"));
+                assert!(matches!(&variants[1], Type::AtomLiteral(s) if s == "error"));
+            } else {
+                panic!("expected union type, got {:?}", f.return_type);
+            }
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_union_with_primitive_types() {
+        let source = r#"
+            mod test {
+                fn get_value() -> int | string {
+                    42
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = first_user_item(&module) {
+            if let Some(Type::Union(variants)) = &f.return_type {
+                assert_eq!(variants.len(), 2);
+                assert!(matches!(&variants[0], Type::Int));
+                assert!(matches!(&variants[1], Type::String));
+            } else {
+                panic!("expected union type, got {:?}", f.return_type);
+            }
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_three_way_union() {
+        let source = r#"
+            mod test {
+                fn choice() -> :a | :b | :c {
+                    :a
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = first_user_item(&module) {
+            if let Some(Type::Union(variants)) = &f.return_type {
+                assert_eq!(variants.len(), 3);
+                assert!(matches!(&variants[0], Type::AtomLiteral(s) if s == "a"));
+                assert!(matches!(&variants[1], Type::AtomLiteral(s) if s == "b"));
+                assert!(matches!(&variants[2], Type::AtomLiteral(s) if s == "c"));
+            } else {
+                panic!("expected union type, got {:?}", f.return_type);
+            }
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_with_union_field() {
+        let source = r#"
+            mod test {
+                struct Response {
+                    status: :success | :failure,
+                    code: int,
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Struct(s) = first_user_item(&module) {
+            assert_eq!(s.name, "Response");
+            assert_eq!(s.fields.len(), 2);
+
+            let (status_name, status_type) = &s.fields[0];
+            assert_eq!(status_name, "status");
+            if let Type::Union(variants) = status_type {
+                assert_eq!(variants.len(), 2);
+            } else {
+                panic!("expected union type for status field");
+            }
+        } else {
+            panic!("expected struct");
+        }
     }
 }
