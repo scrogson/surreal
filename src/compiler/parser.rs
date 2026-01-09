@@ -162,12 +162,14 @@ impl<'source> Parser<'source> {
             Ok(Item::Struct(self.parse_struct(is_pub)?))
         } else if self.check(&Token::Enum) {
             Ok(Item::Enum(self.parse_enum(is_pub)?))
+        } else if self.check(&Token::Type) {
+            Ok(Item::TypeAlias(self.parse_type_alias(is_pub)?))
         } else if self.check(&Token::Mod) {
             self.parse_mod_decl(is_pub)
         } else {
             let span = self.current_span();
             Err(ParseError::new(
-                "expected `fn`, `struct`, `enum`, `mod`, `impl`, `trait`, `extern`, or `use`",
+                "expected `fn`, `struct`, `enum`, `type`, `mod`, `impl`, `trait`, `extern`, or `use`",
                 span,
             ))
         }
@@ -179,6 +181,30 @@ impl<'source> Parser<'source> {
         let name = self.expect_ident()?;
         self.expect(&Token::Semi)?;
         Ok(Item::ModDecl(ModDecl { name, is_pub }))
+    }
+
+    /// Parse a type alias: `type Result = :ok | :error;` or `type Result<T> = (:ok, T) | :error;`
+    fn parse_type_alias(&mut self, is_pub: bool) -> ParseResult<TypeAlias> {
+        self.expect(&Token::Type)?;
+        let name = self.expect_type_ident()?;
+
+        // Optional type parameters: <T, E>
+        let type_params = if self.check(&Token::Lt) {
+            self.parse_type_params()?
+        } else {
+            vec![]
+        };
+
+        self.expect(&Token::Eq)?;
+        let ty = self.parse_type()?;
+        self.expect(&Token::Semi)?;
+
+        Ok(TypeAlias {
+            name,
+            type_params,
+            ty,
+            is_pub,
+        })
     }
 
     /// Parse an external module declaration: `extern mod erlang { ... }`
@@ -3542,6 +3568,165 @@ mod tests {
             }
         } else {
             panic!("expected struct");
+        }
+    }
+
+    // ========== Type Alias Tests ==========
+
+    #[test]
+    fn test_parse_simple_type_alias() {
+        let source = r#"
+            mod test {
+                type UserId = int;
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::TypeAlias(alias) = first_user_item(&module) {
+            assert_eq!(alias.name, "UserId");
+            assert!(!alias.is_pub);
+            assert!(alias.type_params.is_empty());
+            // int is a primitive type, not a Named type
+            assert_eq!(alias.ty, Type::Int);
+        } else {
+            panic!("expected type alias");
+        }
+    }
+
+    #[test]
+    fn test_parse_pub_type_alias() {
+        let source = r#"
+            mod test {
+                pub type ApiResponse = :success | :failure;
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::TypeAlias(alias) = first_user_item(&module) {
+            assert_eq!(alias.name, "ApiResponse");
+            assert!(alias.is_pub);
+            if let Type::Union(variants) = &alias.ty {
+                assert_eq!(variants.len(), 2);
+            } else {
+                panic!("expected union type");
+            }
+        } else {
+            panic!("expected type alias");
+        }
+    }
+
+    #[test]
+    fn test_parse_type_alias_union() {
+        let source = r#"
+            mod test {
+                type Status = :ok | :error | :pending;
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::TypeAlias(alias) = first_user_item(&module) {
+            assert_eq!(alias.name, "Status");
+            if let Type::Union(variants) = &alias.ty {
+                assert_eq!(variants.len(), 3);
+            } else {
+                panic!("expected union type");
+            }
+        } else {
+            panic!("expected type alias");
+        }
+    }
+
+    #[test]
+    fn test_parse_type_alias_tuple() {
+        let source = r#"
+            mod test {
+                type Point = (int, int);
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::TypeAlias(alias) = first_user_item(&module) {
+            assert_eq!(alias.name, "Point");
+            if let Type::Tuple(elems) = &alias.ty {
+                assert_eq!(elems.len(), 2);
+            } else {
+                panic!("expected tuple type");
+            }
+        } else {
+            panic!("expected type alias");
+        }
+    }
+
+    #[test]
+    fn test_parse_generic_type_alias() {
+        let source = r#"
+            mod test {
+                type MyResult<T> = (:ok, T) | :error;
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::TypeAlias(alias) = first_user_item(&module) {
+            assert_eq!(alias.name, "MyResult");
+            assert_eq!(alias.type_params.len(), 1);
+            assert_eq!(alias.type_params[0].name, "T");
+            if let Type::Union(_) = &alias.ty {
+                // Good - it's a union type
+            } else {
+                panic!("expected union type");
+            }
+        } else {
+            panic!("expected type alias");
+        }
+    }
+
+    #[test]
+    fn test_parse_generic_type_alias_multiple_params() {
+        let source = r#"
+            mod test {
+                type Either<L, R> = (:left, L) | (:right, R);
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::TypeAlias(alias) = first_user_item(&module) {
+            assert_eq!(alias.name, "Either");
+            assert_eq!(alias.type_params.len(), 2);
+            assert_eq!(alias.type_params[0].name, "L");
+            assert_eq!(alias.type_params[1].name, "R");
+        } else {
+            panic!("expected type alias");
+        }
+    }
+
+    #[test]
+    fn test_parse_type_alias_function_type() {
+        let source = r#"
+            mod test {
+                type Handler = fn(int) -> string;
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::TypeAlias(alias) = first_user_item(&module) {
+            assert_eq!(alias.name, "Handler");
+            if let Type::Fn { params, ret } = &alias.ty {
+                assert_eq!(params.len(), 1);
+                assert_eq!(params[0], Type::Int);
+                // string is a primitive type
+                assert_eq!(ret.as_ref(), &Type::String);
+            } else {
+                panic!("expected function type, got {:?}", alias.ty);
+            }
+        } else {
+            panic!("expected type alias");
         }
     }
 }

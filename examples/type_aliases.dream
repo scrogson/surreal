@@ -1,0 +1,79 @@
+// Type Aliases Example
+//
+// Type aliases provide a way to give a name to an existing type.
+// They make code more readable and document intent.
+
+mod type_aliases {
+    // Simple type alias for a primitive type
+    type UserId = int;
+    type Username = string;
+
+    // Type alias with union types
+    type Status = :ok | :error;
+    type Result = :ok | :error | :pending;
+
+    // Type alias for tuple types
+    type Point = (int, int);
+    type Dimensions = (int, int, int);
+
+    // Type alias for function types
+    type Handler = fn(int) -> string;
+
+    // Public type aliases (can be exported)
+    pub type ApiResponse = :success | :failure;
+
+    // ========== Using Type Aliases ==========
+
+    pub fn create_user(id: UserId, name: Username) -> (UserId, Username) {
+        (id, name)
+    }
+
+    pub fn get_status(success: bool) -> Status {
+        if success { :ok } else { :error }
+    }
+
+    pub fn origin() -> Point {
+        (0, 0)
+    }
+
+    pub fn move_point(p: Point, dx: int, dy: int) -> Point {
+        let (x, y) = p;
+        (x + dx, y + dy)
+    }
+
+    pub fn process_result(r: Result) -> string {
+        match r {
+            :ok => "Success!",
+            :error => "Failed!",
+            :pending => "Still working...",
+            _ => "Unknown"
+        }
+    }
+
+    pub fn check_api(ok: bool) -> ApiResponse {
+        if ok { :success } else { :failure }
+    }
+
+    pub fn main() -> :ok {
+        // Using type aliases
+        let user = create_user(42, "alice");
+        :io::format("User: ~p~n", [user]);
+
+        let status = get_status(true);
+        :io::format("Status: ~p~n", [status]);
+
+        let point = origin();
+        :io::format("Origin: ~p~n", [point]);
+
+        let moved = move_point(point, 10, 20);
+        :io::format("Moved point: ~p~n", [moved]);
+
+        let result = process_result(:pending);
+        :io::format("Result message: ~p~n", [result]);
+
+        let api = check_api(true);
+        :io::format("API response: ~p~n", [api]);
+
+        :ok
+    }
+}

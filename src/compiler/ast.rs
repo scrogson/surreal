@@ -30,6 +30,8 @@ pub enum Item {
     Function(Function),
     Struct(StructDef),
     Enum(EnumDef),
+    /// Type alias: `type Result = :ok | :error;`
+    TypeAlias(TypeAlias),
     /// External module declaration: `mod foo;`
     ModDecl(ModDecl),
     /// Use declaration: `use foo::bar;`
@@ -45,6 +47,19 @@ pub enum Item {
     TraitDecl(TraitDecl),
     /// External module type declarations for FFI: `extern mod erlang { ... }`
     ExternMod(ExternMod),
+}
+
+/// Type alias definition.
+/// `type Result = :ok | :error;`
+/// `type Result<T> = (:ok, T) | :error;`
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeAlias {
+    pub name: String,
+    /// Generic type parameters (e.g., `<T, E>`)
+    pub type_params: Vec<TypeParam>,
+    /// The aliased type
+    pub ty: Type,
+    pub is_pub: bool,
 }
 
 // =============================================================================

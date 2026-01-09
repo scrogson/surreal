@@ -237,6 +237,10 @@ impl Codegen {
                     // External module declarations don't generate code
                     // They're used for type checking FFI calls
                 }
+                Item::TypeAlias(_) => {
+                    // Type aliases don't generate code
+                    // They're resolved at compile time by the type checker
+                }
             }
         }
 

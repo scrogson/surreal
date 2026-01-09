@@ -723,11 +723,20 @@ impl TypeChecker {
                     "pid" => Ty::Pid,
                     "ref" => Ty::Ref,
                     "binary" => Ty::Binary,
-                    _ => Ty::Named {
-                        name: name.clone(),
-                        module: None,
-                        args: type_args.iter().map(|t| self.ast_type_to_ty(t)).collect(),
-                    },
+                    _ => {
+                        // Check if it's a type alias
+                        if type_args.is_empty() {
+                            if let Some(aliased_ty) = self.env.type_aliases.get(name) {
+                                return aliased_ty.clone();
+                            }
+                        }
+                        // Otherwise, it's a named type (struct, enum, etc.)
+                        Ty::Named {
+                            name: name.clone(),
+                            module: None,
+                            args: type_args.iter().map(|t| self.ast_type_to_ty(t)).collect(),
+                        }
+                    }
                 }
             }
             ast::Type::Fn { params, ret } => Ty::Fn {
@@ -886,6 +895,12 @@ impl TypeChecker {
                 Item::ExternMod(extern_mod) => {
                     // Collect external function signatures from .dreamt stubs
                     self.collect_extern_mod(extern_mod, &extern_mod.name);
+                }
+                Item::TypeAlias(alias) => {
+                    // Type aliases are collected but resolved lazily in ast_type_to_ty
+                    // For now, store the raw AST type; we'll resolve it when used
+                    let ty = self.ast_type_to_ty(&alias.ty);
+                    self.env.type_aliases.insert(alias.name.clone(), ty);
                 }
                 _ => {}
             }
@@ -2751,6 +2766,98 @@ mod tests {
                             :c
                         }
                     }
+                }
+            }
+        "#);
+        assert!(result.is_ok());
+    }
+
+    // ========== Type Alias Tests ==========
+
+    #[test]
+    fn test_simple_type_alias() {
+        let result = parse_and_check(r#"
+            mod test {
+                type UserId = int;
+
+                fn get_user(id: UserId) -> UserId {
+                    id
+                }
+            }
+        "#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_type_alias_with_union() {
+        let result = parse_and_check(r#"
+            mod test {
+                type Status = :ok | :error;
+
+                fn get_status(success: bool) -> Status {
+                    if success { :ok } else { :error }
+                }
+            }
+        "#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_type_alias_resolves_correctly() {
+        // Using alias should be same as using the underlying type
+        let result = parse_and_check(r#"
+            mod test {
+                type Count = int;
+
+                fn add(a: Count, b: Count) -> Count {
+                    a + b
+                }
+
+                fn use_it() -> int {
+                    add(1, 2)
+                }
+            }
+        "#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_type_alias_wrong_type() {
+        // Type alias should enforce the underlying type
+        let result = parse_and_check(r#"
+            mod test {
+                type UserId = int;
+
+                fn bad() -> UserId {
+                    "not an int"
+                }
+            }
+        "#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_pub_type_alias() {
+        let result = parse_and_check(r#"
+            mod test {
+                pub type Result = :ok | :error;
+
+                pub fn get_result() -> Result {
+                    :ok
+                }
+            }
+        "#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_type_alias_tuple() {
+        let result = parse_and_check(r#"
+            mod test {
+                type Point = (int, int);
+
+                fn origin() -> Point {
+                    (0, 0)
                 }
             }
         "#);
