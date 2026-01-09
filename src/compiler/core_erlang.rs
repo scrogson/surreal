@@ -2223,6 +2223,63 @@ impl CoreErlangEmitter {
                 self.emit(")");
             }
 
+            Expr::Try { expr } => {
+                // The ? operator desugars to a case expression:
+                // - Ok(value) or 'ok' → return value or 'ok'
+                // - Err(e) → throw the error for early return
+                // A surrounding try/catch at function level can handle this.
+                let tmp = self.fresh_var();
+                let err_var = self.fresh_var();
+                self.emit("case ");
+                self.emit_expr(expr)?;
+                self.emit(" of");
+                self.indent += 1;
+                self.newline();
+
+                // Match Ok(value) → value
+                self.emit(&format!("<{{'ok', {}}}> when 'true' ->", tmp));
+                self.indent += 1;
+                self.newline();
+                self.emit(&tmp);
+                self.indent -= 1;
+                self.newline();
+
+                // Match 'ok' (for Result<(), E>) → 'ok'
+                self.emit("<'ok'> when 'true' ->");
+                self.indent += 1;
+                self.newline();
+                self.emit("'ok'");
+                self.indent -= 1;
+                self.newline();
+
+                // Match Some(value) for Option → value
+                self.emit(&format!("<{{'some', {}}}> when 'true' ->", tmp));
+                self.indent += 1;
+                self.newline();
+                self.emit(&tmp);
+                self.indent -= 1;
+                self.newline();
+
+                // Match Err(e) → throw for early return
+                self.emit(&format!("<{{'error', {}}}> when 'true' ->", err_var));
+                self.indent += 1;
+                self.newline();
+                self.emit(&format!("call 'erlang':'throw'({{'error', {}}})", err_var));
+                self.indent -= 1;
+                self.newline();
+
+                // Match None for Option → throw for early return
+                self.emit("<'none'> when 'true' ->");
+                self.indent += 1;
+                self.newline();
+                self.emit("call 'erlang':'throw'('none')");
+                self.indent -= 1;
+                self.newline();
+
+                self.indent -= 1;
+                self.emit("end");
+            }
+
             Expr::Path { segments } => {
                 // Module path - emit as atom or function reference
                 if segments.len() == 1 {

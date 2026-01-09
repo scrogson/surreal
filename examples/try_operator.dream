@@ -1,0 +1,49 @@
+// Try Operator Example
+//
+// The ? operator extracts values from Result and Option types.
+// - On Ok(value) or Some(value), it extracts the value
+// - On Err(e) or None, it throws for early return
+//
+// Note: Functions using ? should return Result to properly propagate errors.
+
+mod try_operator {
+    // Parse a number, returning Err if invalid
+    pub fn parse_int(s: string) -> Result<int, string> {
+        if s == "42" {
+            Ok(42)
+        } else if s == "0" {
+            Ok(0)
+        } else {
+            Err("not a valid number")
+        }
+    }
+
+    // Double a number from a string, using ? for error propagation
+    pub fn double_parsed(s: string) -> Result<int, string> {
+        let n = parse_int(s)?;
+        Ok(n * 2)
+    }
+
+    // Chain multiple fallible operations
+    pub fn add_parsed(a: string, b: string) -> Result<int, string> {
+        let x = parse_int(a)?;
+        let y = parse_int(b)?;
+        Ok(x + y)
+    }
+
+    pub fn main() -> :ok {
+        // Success cases - ? extracts the value
+        let r1 = double_parsed("42");
+        :io::format("double_parsed(42) = ~p~n", [r1]);
+
+        // Chain success
+        let r2 = add_parsed("42", "0");
+        :io::format("add_parsed(42, 0) = ~p~n", [r2]);
+
+        // Direct ? usage on Ok value
+        let value = parse_int("42")?;
+        :io::format("parse_int(42)? = ~p~n", [value]);
+
+        :ok
+    }
+}

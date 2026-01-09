@@ -1488,6 +1488,39 @@ impl TypeChecker {
                 Ok(Ty::Any)
             }
 
+            // Try operator: expr? - early return on Err/None
+            Expr::Try { expr } => {
+                let ty = self.infer_expr(expr)?;
+                // Extract the success type from Result<T, E> or Option<T>
+                if let Ty::Named { name, args, .. } = &ty {
+                    match name.as_str() {
+                        "Result" if args.len() >= 1 => {
+                            // Result<T, E> - the ? operator returns T
+                            // TODO: Check that function return type is compatible with Result<_, E>
+                            Ok(args[0].clone())
+                        }
+                        "Option" if args.len() >= 1 => {
+                            // Option<T> - the ? operator returns T
+                            // TODO: Check that function return type is compatible with Option<_>
+                            Ok(args[0].clone())
+                        }
+                        _ => {
+                            self.error(TypeError::new(format!(
+                                "the `?` operator can only be applied to Result or Option, found {}",
+                                ty
+                            )));
+                            Ok(Ty::Error)
+                        }
+                    }
+                } else {
+                    self.error(TypeError::new(format!(
+                        "the `?` operator can only be applied to Result or Option, found {}",
+                        ty
+                    )));
+                    Ok(Ty::Error)
+                }
+            }
+
             // Path (module::item)
             Expr::Path { segments: _ } => {
                 // For now, treat paths as Any
@@ -2278,6 +2311,9 @@ impl MethodResolver {
             Expr::FieldAccess { expr, .. } => {
                 self.resolve_expr(expr);
             }
+            Expr::Try { expr } => {
+                self.resolve_expr(expr);
+            }
             Expr::Spawn(e) => {
                 self.resolve_expr(e);
             }
@@ -2346,6 +2382,16 @@ impl MethodResolver {
             Expr::FieldAccess { expr, .. } => {
                 // Could look up struct field types, but Any is safe
                 let _ = self.infer_expr_type(expr);
+                Ty::Any
+            }
+            Expr::Try { expr } => {
+                // Return the inner type of Result<T, _> or Option<T>
+                let inner_ty = self.infer_expr_type(expr);
+                if let Ty::Named { name, args, .. } = &inner_ty {
+                    if (name == "Result" || name == "Option") && !args.is_empty() {
+                        return args[0].clone();
+                    }
+                }
                 Ty::Any
             }
             Expr::MethodCall { receiver, method, resolved_module, .. } => {

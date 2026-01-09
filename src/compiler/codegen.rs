@@ -356,6 +356,7 @@ impl Codegen {
             Expr::StructInit { fields, .. } => fields.iter().any(|(_, e)| Self::contains_call(e)),
             Expr::EnumVariant { args, .. } => args.iter().any(|e| Self::contains_call(e)),
             Expr::FieldAccess { expr, .. } => Self::contains_call(expr),
+            Expr::Try { expr } => Self::contains_call(expr),
             Expr::MethodCall { .. } => true, // Method calls are calls
             Expr::Send { to, msg } => Self::contains_call(to) || Self::contains_call(msg),
             Expr::Return(Some(e)) => Self::contains_call(e),
@@ -869,6 +870,17 @@ impl Codegen {
                 });
 
                 Ok(dest)
+            }
+
+            Expr::Try { expr } => {
+                // For the VM target, the ? operator extracts the value from Ok/Some
+                // or panics on Err/None. This is a simplified implementation.
+                // TODO: Implement proper early return with try/catch semantics
+                let result_reg = self.compile_expr(expr)?;
+
+                // For now, just return the result - the VM will need to handle
+                // Result/Option unwrapping at runtime
+                Ok(result_reg)
             }
 
             Expr::Call { func, args, .. } => {

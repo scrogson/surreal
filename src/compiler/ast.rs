@@ -317,6 +317,8 @@ pub enum Expr {
     },
     /// Field access: `expr.field`.
     FieldAccess { expr: Box<Expr>, field: String },
+    /// Try operator: `expr?` - early return on Err/None.
+    Try { expr: Box<Expr> },
     /// Module path access: `Module::item`.
     Path { segments: Vec<String> },
     /// Spawn expression.

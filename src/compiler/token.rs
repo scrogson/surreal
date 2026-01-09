@@ -212,6 +212,8 @@ pub enum Token {
     Dot,
     #[token("_")]
     Underscore,
+    #[token("?")]
+    Question,
 }
 
 impl std::fmt::Display for Token {
@@ -291,6 +293,7 @@ impl std::fmt::Display for Token {
             Token::DotDot => write!(f, ".."),
             Token::Dot => write!(f, "."),
             Token::Underscore => write!(f, "_"),
+            Token::Question => write!(f, "?"),
         }
     }
 }

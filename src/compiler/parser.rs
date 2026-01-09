@@ -1170,6 +1170,12 @@ impl<'source> Parser<'source> {
                         }
                     }
                 }
+            } else if self.check(&Token::Question) {
+                // Try operator: expr?
+                self.advance();
+                expr = Expr::Try {
+                    expr: Box::new(expr),
+                };
             } else {
                 break;
             }
