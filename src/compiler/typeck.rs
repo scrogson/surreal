@@ -941,6 +941,13 @@ impl TypeChecker {
         // First pass: collect all type definitions
         self.collect_types(module)?;
 
+        // Validate trait implementations (after types are collected)
+        for item in &module.items {
+            if let Item::TraitImpl(impl_def) = item {
+                self.validate_trait_impl(impl_def);
+            }
+        }
+
         // Second pass: collect all function signatures
         self.collect_functions(module)?;
 
@@ -1239,6 +1246,70 @@ impl TypeChecker {
         self.current_function_span = None;
         self.current_type_param_bounds = old_type_param_bounds;
         Ok(())
+    }
+
+    /// Validate that a trait implementation provides all required methods.
+    fn validate_trait_impl(&mut self, impl_def: &ast::TraitImpl) {
+        // Get trait definition
+        let trait_info = match self.env.traits.get(&impl_def.trait_name) {
+            Some(info) => info.clone(),
+            None => {
+                self.error(TypeError::new(format!(
+                    "trait '{}' not found",
+                    impl_def.trait_name
+                )));
+                return;
+            }
+        };
+
+        // Get implemented method names
+        let impl_methods: std::collections::HashSet<&str> = impl_def
+            .methods
+            .iter()
+            .map(|m| m.name.as_str())
+            .collect();
+
+        // Check each required method is implemented
+        let mut missing_methods = Vec::new();
+        for method in &trait_info.methods {
+            if !method.has_default && !impl_methods.contains(method.name.as_str()) {
+                missing_methods.push(method.name.clone());
+            }
+        }
+
+        if !missing_methods.is_empty() {
+            self.error(TypeError::with_help(
+                format!(
+                    "incomplete implementation of trait '{}' for '{}'",
+                    impl_def.trait_name, impl_def.type_name
+                ),
+                format!("missing required methods: {}", missing_methods.join(", ")),
+            ));
+        }
+
+        // Check associated types are bound
+        let bound_types: std::collections::HashSet<&str> = impl_def
+            .type_bindings
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect();
+
+        let mut missing_types = Vec::new();
+        for assoc_type in &trait_info.associated_types {
+            if !bound_types.contains(assoc_type.as_str()) {
+                missing_types.push(assoc_type.clone());
+            }
+        }
+
+        if !missing_types.is_empty() {
+            self.error(TypeError::with_help(
+                format!(
+                    "incomplete implementation of trait '{}' for '{}'",
+                    impl_def.trait_name, impl_def.type_name
+                ),
+                format!("missing associated types: {}", missing_types.join(", ")),
+            ));
+        }
     }
 
     /// Type check an impl block.
@@ -2951,6 +3022,13 @@ pub fn check_modules(modules: &[Module]) -> Vec<(String, TypeResult<Module>)> {
     for module in modules {
         // Clear errors before checking each module
         checker.errors.clear();
+
+        // Validate trait implementations for this module
+        for item in &module.items {
+            if let Item::TraitImpl(impl_def) = item {
+                checker.validate_trait_impl(impl_def);
+            }
+        }
 
         for item in &module.items {
             if let Item::Function(func) = item {
