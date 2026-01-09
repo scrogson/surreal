@@ -295,6 +295,136 @@ pub struct TraitImplInfo {
     pub methods: Vec<String>,
 }
 
+// ============================================================================
+// Match Exhaustiveness Checking Types
+// ============================================================================
+
+/// Represents a "constructor" - the shape a value can have.
+/// Used for exhaustiveness checking in match expressions.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Constructor {
+    /// Enum variant: (enum_name, variant_name, arity)
+    Variant(String, String, usize),
+    /// Boolean literal
+    Bool(bool),
+    /// Tuple with given arity
+    Tuple(usize),
+    /// List cons cell (head :: tail)
+    ListCons,
+    /// Empty list
+    ListNil,
+    /// Struct type
+    Struct(String),
+    /// Wildcard (matches anything)
+    Wildcard,
+    /// Non-exhaustive marker for open types (int, string, etc.)
+    NonExhaustive,
+}
+
+impl Constructor {
+    /// Check if this is a wildcard constructor.
+    pub fn is_wildcard(&self) -> bool {
+        matches!(self, Constructor::Wildcard)
+    }
+
+    /// Get the arity (number of sub-patterns) for this constructor.
+    pub fn arity(&self) -> usize {
+        match self {
+            Constructor::Variant(_, _, arity) => *arity,
+            Constructor::Bool(_) => 0,
+            Constructor::Tuple(arity) => *arity,
+            Constructor::ListCons => 2, // head and tail
+            Constructor::ListNil => 0,
+            Constructor::Struct(_) => 0, // struct fields handled separately
+            Constructor::Wildcard => 0,
+            Constructor::NonExhaustive => 0,
+        }
+    }
+}
+
+impl std::fmt::Display for Constructor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Constructor::Variant(enum_name, variant, _) => write!(f, "{}::{}", enum_name, variant),
+            Constructor::Bool(b) => write!(f, "{}", b),
+            Constructor::Tuple(n) => write!(f, "({}-tuple)", n),
+            Constructor::ListCons => write!(f, "[_ | _]"),
+            Constructor::ListNil => write!(f, "[]"),
+            Constructor::Struct(name) => write!(f, "{}", name),
+            Constructor::Wildcard => write!(f, "_"),
+            Constructor::NonExhaustive => write!(f, "_"),
+        }
+    }
+}
+
+/// A deconstructed pattern for exhaustiveness analysis.
+/// Normalized representation that's easier to analyze than AST patterns.
+#[derive(Debug, Clone)]
+pub struct DeconstructedPat {
+    /// The constructor this pattern matches
+    pub ctor: Constructor,
+    /// Sub-patterns for constructor fields
+    pub fields: Vec<DeconstructedPat>,
+    /// The type of the pattern
+    pub ty: Ty,
+}
+
+impl DeconstructedPat {
+    /// Create a wildcard pattern for a given type.
+    pub fn wildcard(ty: Ty) -> Self {
+        DeconstructedPat {
+            ctor: Constructor::Wildcard,
+            fields: vec![],
+            ty,
+        }
+    }
+
+    /// Check if this is a wildcard pattern.
+    pub fn is_wildcard(&self) -> bool {
+        self.ctor.is_wildcard()
+    }
+}
+
+/// A matrix of patterns for usefulness checking.
+/// Each row represents the patterns from one match arm.
+#[derive(Debug, Clone)]
+pub struct PatternMatrix {
+    /// Each row is a list of patterns (one per column being matched)
+    pub rows: Vec<Vec<DeconstructedPat>>,
+}
+
+impl PatternMatrix {
+    /// Create an empty pattern matrix.
+    pub fn new() -> Self {
+        PatternMatrix { rows: vec![] }
+    }
+
+    /// Add a row to the matrix.
+    pub fn push_row(&mut self, row: Vec<DeconstructedPat>) {
+        self.rows.push(row);
+    }
+
+    /// Check if the matrix is empty (no rows).
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    /// Get the number of columns (0 if empty).
+    pub fn num_columns(&self) -> usize {
+        self.rows.first().map(|r| r.len()).unwrap_or(0)
+    }
+}
+
+impl Default for PatternMatrix {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// Type Environment
+// ============================================================================
+
 /// Type environment for a scope.
 #[derive(Debug, Clone, Default)]
 pub struct TypeEnv {
@@ -2048,6 +2178,15 @@ impl TypeChecker {
             }
         }
 
+        // Check exhaustiveness
+        let missing = self.check_exhaustiveness(scrutinee_ty, arms);
+        if !missing.is_empty() {
+            self.error(TypeError::with_help(
+                "non-exhaustive match",
+                format!("missing patterns: {}", missing.join(", ")),
+            ));
+        }
+
         Ok(result_ty.unwrap_or(Ty::Unit))
     }
 
@@ -2131,6 +2270,379 @@ impl TypeChecker {
             }
 
             _ => false,
+        }
+    }
+
+    // =========================================================================
+    // Match Exhaustiveness Checking
+    // =========================================================================
+
+    /// Convert an AST Pattern to a DeconstructedPat for exhaustiveness analysis.
+    fn deconstruct_pattern(&self, pattern: &Pattern, ty: &Ty) -> DeconstructedPat {
+        match pattern {
+            // Wildcards and identifiers match anything
+            Pattern::Wildcard => DeconstructedPat::wildcard(ty.clone()),
+            Pattern::Ident(_) => DeconstructedPat::wildcard(ty.clone()),
+
+            // Boolean literals
+            Pattern::Bool(b) => DeconstructedPat {
+                ctor: Constructor::Bool(*b),
+                fields: vec![],
+                ty: ty.clone(),
+            },
+
+            // Enum variants
+            Pattern::Enum { name, variant, fields } => {
+                // Get enum info to determine field types
+                let field_types = self.get_enum_variant_types(name, variant);
+                let decon_fields: Vec<DeconstructedPat> = fields
+                    .iter()
+                    .zip(field_types.iter())
+                    .map(|(p, ft)| self.deconstruct_pattern(p, ft))
+                    .collect();
+                DeconstructedPat {
+                    ctor: Constructor::Variant(name.clone(), variant.clone(), fields.len()),
+                    fields: decon_fields,
+                    ty: ty.clone(),
+                }
+            }
+
+            // Tuple patterns
+            Pattern::Tuple(pats) => {
+                // Get element types from the scrutinee type
+                let elem_types: Vec<Ty> = match ty {
+                    Ty::Tuple(tys) => tys.clone(),
+                    _ => pats.iter().map(|_| Ty::Any).collect(),
+                };
+                let decon_fields: Vec<DeconstructedPat> = pats
+                    .iter()
+                    .zip(elem_types.iter())
+                    .map(|(p, et)| self.deconstruct_pattern(p, et))
+                    .collect();
+                DeconstructedPat {
+                    ctor: Constructor::Tuple(pats.len()),
+                    fields: decon_fields,
+                    ty: ty.clone(),
+                }
+            }
+
+            // List patterns
+            Pattern::List(pats) => {
+                if pats.is_empty() {
+                    DeconstructedPat {
+                        ctor: Constructor::ListNil,
+                        fields: vec![],
+                        ty: ty.clone(),
+                    }
+                } else {
+                    // Non-empty list treated as cons cell for first element
+                    // This is simplified - full implementation would recursively build cons cells
+                    let elem_ty = match ty {
+                        Ty::List(t) => (**t).clone(),
+                        _ => Ty::Any,
+                    };
+                    let head = self.deconstruct_pattern(&pats[0], &elem_ty);
+                    let tail = if pats.len() == 1 {
+                        DeconstructedPat {
+                            ctor: Constructor::ListNil,
+                            fields: vec![],
+                            ty: ty.clone(),
+                        }
+                    } else {
+                        // Remaining elements form the tail
+                        DeconstructedPat::wildcard(ty.clone())
+                    };
+                    DeconstructedPat {
+                        ctor: Constructor::ListCons,
+                        fields: vec![head, tail],
+                        ty: ty.clone(),
+                    }
+                }
+            }
+
+            // List cons pattern [h | t]
+            Pattern::ListCons { head, tail } => {
+                let elem_ty = match ty {
+                    Ty::List(t) => (**t).clone(),
+                    _ => Ty::Any,
+                };
+                let head_pat = self.deconstruct_pattern(head, &elem_ty);
+                let tail_pat = self.deconstruct_pattern(tail, ty);
+                DeconstructedPat {
+                    ctor: Constructor::ListCons,
+                    fields: vec![head_pat, tail_pat],
+                    ty: ty.clone(),
+                }
+            }
+
+            // Struct patterns - treat as matching the struct constructor
+            Pattern::Struct { name, fields: _ } => DeconstructedPat {
+                ctor: Constructor::Struct(name.clone()),
+                fields: vec![],
+                ty: ty.clone(),
+            },
+
+            // Literals that don't have finite alternatives - treat as wildcard for exhaustiveness
+            // (we'll use NonExhaustive for the type itself)
+            Pattern::Int(_) | Pattern::String(_) | Pattern::Atom(_) => {
+                DeconstructedPat::wildcard(ty.clone())
+            }
+
+            // Catch-all for other patterns
+            _ => DeconstructedPat::wildcard(ty.clone()),
+        }
+    }
+
+    /// Get the types of fields for an enum variant.
+    fn get_enum_variant_types(&self, enum_name: &str, variant_name: &str) -> Vec<Ty> {
+        if let Some(info) = self.env.get_enum(enum_name) {
+            for (vname, vtypes) in &info.variants {
+                if vname == variant_name {
+                    return vtypes.clone();
+                }
+            }
+        }
+        vec![]
+    }
+
+    /// Get all constructors for a type.
+    fn all_constructors(&self, ty: &Ty) -> Vec<Constructor> {
+        match ty {
+            Ty::Bool => vec![Constructor::Bool(true), Constructor::Bool(false)],
+
+            Ty::Named { name, .. } => {
+                // Check if it's an enum
+                if let Some(info) = self.env.get_enum(name) {
+                    info.variants
+                        .iter()
+                        .map(|(vname, fields)| {
+                            Constructor::Variant(name.clone(), vname.clone(), fields.len())
+                        })
+                        .collect()
+                } else if self.env.get_struct(name).is_some() {
+                    // It's a struct - single constructor
+                    vec![Constructor::Struct(name.clone())]
+                } else {
+                    // Unknown named type - treat as non-exhaustive
+                    vec![Constructor::NonExhaustive]
+                }
+            }
+
+            Ty::Tuple(tys) => vec![Constructor::Tuple(tys.len())],
+
+            Ty::List(_) => vec![Constructor::ListNil, Constructor::ListCons],
+
+            // Open types (int, string, etc.) require wildcard for exhaustiveness
+            Ty::Int | Ty::Float | Ty::String | Ty::Atom | Ty::Binary | Ty::Pid | Ty::Ref => {
+                vec![Constructor::NonExhaustive]
+            }
+
+            // For unit type, there's only one constructor (the unit value)
+            Ty::Unit => vec![Constructor::Tuple(0)],
+
+            // For inference variables and other types, be conservative
+            _ => vec![Constructor::NonExhaustive],
+        }
+    }
+
+    /// Check if a new pattern is useful given existing patterns.
+    /// Returns true if the pattern matches something not covered by existing patterns.
+    fn is_useful(&self, matrix: &PatternMatrix, pattern: &[DeconstructedPat]) -> bool {
+        // Base case: empty pattern vector
+        if pattern.is_empty() {
+            // Useful if matrix is empty (nothing covered yet)
+            return matrix.is_empty();
+        }
+
+        let first = &pattern[0];
+        let rest = &pattern[1..];
+
+        if first.is_wildcard() {
+            // Wildcard pattern: check all constructors for this type
+            let all_ctors = self.all_constructors(&first.ty);
+
+            // Check if type is non-exhaustive (open types like int)
+            if all_ctors.iter().any(|c| matches!(c, Constructor::NonExhaustive)) {
+                // For non-exhaustive types, wildcard is always useful if matrix doesn't
+                // have a wildcard covering all cases
+                let has_full_coverage = matrix.rows.iter().any(|row| {
+                    row.first().map(|p| p.is_wildcard()).unwrap_or(false)
+                });
+                return !has_full_coverage;
+            }
+
+            // For exhaustive types, check if any constructor is useful
+            for ctor in &all_ctors {
+                let specialized_matrix = self.specialize_matrix(matrix, ctor, &first.ty);
+                let specialized_pattern = self.specialize_pattern(first, rest, ctor);
+                if self.is_useful(&specialized_matrix, &specialized_pattern) {
+                    return true;
+                }
+            }
+            false
+        } else {
+            // Specific constructor: specialize for this constructor
+            let specialized_matrix = self.specialize_matrix(matrix, &first.ctor, &first.ty);
+            let specialized_pattern = self.specialize_pattern(first, rest, &first.ctor);
+            self.is_useful(&specialized_matrix, &specialized_pattern)
+        }
+    }
+
+    /// Specialize a pattern matrix for a specific constructor.
+    /// Only keeps rows that match the constructor, expanding fields.
+    fn specialize_matrix(
+        &self,
+        matrix: &PatternMatrix,
+        ctor: &Constructor,
+        ty: &Ty,
+    ) -> PatternMatrix {
+        let mut result = PatternMatrix::new();
+
+        for row in &matrix.rows {
+            if row.is_empty() {
+                continue;
+            }
+
+            let first = &row[0];
+            let rest = &row[1..];
+
+            if first.is_wildcard() {
+                // Wildcard matches any constructor - expand to wildcards for fields
+                let field_types = self.get_constructor_field_types(ctor, ty);
+                let wildcard_fields: Vec<DeconstructedPat> = field_types
+                    .iter()
+                    .map(|ft| DeconstructedPat::wildcard(ft.clone()))
+                    .collect();
+                let mut new_row = wildcard_fields;
+                new_row.extend(rest.iter().cloned());
+                result.push_row(new_row);
+            } else if self.constructors_match(&first.ctor, ctor) {
+                // Same constructor - expand fields
+                let mut new_row = first.fields.clone();
+                new_row.extend(rest.iter().cloned());
+                result.push_row(new_row);
+            }
+            // Different constructor - skip row
+        }
+
+        result
+    }
+
+    /// Specialize a single pattern for a constructor.
+    fn specialize_pattern(
+        &self,
+        first: &DeconstructedPat,
+        rest: &[DeconstructedPat],
+        ctor: &Constructor,
+    ) -> Vec<DeconstructedPat> {
+        let mut result = if first.is_wildcard() {
+            // Expand wildcard to wildcard fields
+            let field_types = self.get_constructor_field_types(ctor, &first.ty);
+            field_types
+                .iter()
+                .map(|ft| DeconstructedPat::wildcard(ft.clone()))
+                .collect()
+        } else {
+            first.fields.clone()
+        };
+        result.extend(rest.iter().cloned());
+        result
+    }
+
+    /// Get field types for a constructor.
+    fn get_constructor_field_types(&self, ctor: &Constructor, ty: &Ty) -> Vec<Ty> {
+        match ctor {
+            Constructor::Variant(enum_name, variant, _) => {
+                self.get_enum_variant_types(enum_name, variant)
+            }
+            Constructor::Tuple(arity) => match ty {
+                Ty::Tuple(tys) => tys.clone(),
+                _ => (0..*arity).map(|_| Ty::Any).collect(),
+            },
+            Constructor::ListCons => {
+                let elem_ty = match ty {
+                    Ty::List(t) => (**t).clone(),
+                    _ => Ty::Any,
+                };
+                vec![elem_ty, ty.clone()]
+            }
+            _ => vec![],
+        }
+    }
+
+    /// Check if two constructors match.
+    fn constructors_match(&self, c1: &Constructor, c2: &Constructor) -> bool {
+        match (c1, c2) {
+            (Constructor::Variant(e1, v1, _), Constructor::Variant(e2, v2, _)) => {
+                e1 == e2 && v1 == v2
+            }
+            (Constructor::Bool(b1), Constructor::Bool(b2)) => b1 == b2,
+            (Constructor::Tuple(n1), Constructor::Tuple(n2)) => n1 == n2,
+            (Constructor::ListCons, Constructor::ListCons) => true,
+            (Constructor::ListNil, Constructor::ListNil) => true,
+            (Constructor::Struct(s1), Constructor::Struct(s2)) => s1 == s2,
+            _ => false,
+        }
+    }
+
+    /// Compute missing patterns for error messages.
+    fn compute_missing_patterns(&self, matrix: &PatternMatrix, ty: &Ty) -> Vec<String> {
+        let all_ctors = self.all_constructors(ty);
+
+        // Get constructors used in the first column
+        let used_ctors: std::collections::HashSet<Constructor> = matrix
+            .rows
+            .iter()
+            .filter_map(|row| row.first())
+            .filter(|p| !p.is_wildcard())
+            .map(|p| p.ctor.clone())
+            .collect();
+
+        // Check if there's a wildcard in the first column
+        let has_wildcard = matrix
+            .rows
+            .iter()
+            .filter_map(|row| row.first())
+            .any(|p| p.is_wildcard());
+
+        if has_wildcard {
+            return vec![];
+        }
+
+        // Find missing constructors
+        let mut missing = Vec::new();
+
+        for ctor in all_ctors {
+            if matches!(ctor, Constructor::NonExhaustive) {
+                // Non-exhaustive type needs wildcard pattern
+                missing.push("_".to_string());
+                break;
+            }
+            if !used_ctors.contains(&ctor) {
+                missing.push(ctor.to_string());
+            }
+        }
+
+        missing
+    }
+
+    /// Check exhaustiveness of match arms and return missing patterns if any.
+    pub fn check_exhaustiveness(&self, scrutinee_ty: &Ty, arms: &[MatchArm]) -> Vec<String> {
+        // Build pattern matrix from arms (skip guarded patterns)
+        let mut matrix = PatternMatrix::new();
+        for arm in arms {
+            if arm.guard.is_none() {
+                let decon = self.deconstruct_pattern(&arm.pattern, scrutinee_ty);
+                matrix.push_row(vec![decon]);
+            }
+        }
+
+        // Check if wildcard pattern is useful (meaning match is non-exhaustive)
+        let wildcard = vec![DeconstructedPat::wildcard(scrutinee_ty.clone())];
+        if self.is_useful(&matrix, &wildcard) {
+            self.compute_missing_patterns(&matrix, scrutinee_ty)
+        } else {
+            vec![]
         }
     }
 }
