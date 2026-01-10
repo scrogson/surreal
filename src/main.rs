@@ -9,7 +9,8 @@ use clap::{Parser, Subcommand};
 use dream::{
     compiler::{
         check_modules, resolve_stdlib_methods, CompilerError, CoreErlangEmitter,
-        GenericFunctionRegistry, Item, Module, ModuleLoader, SharedGenericRegistry,
+        GenericFunctionRegistry, Item, Module, ModuleLoader, Parser as DreamParser,
+        SharedGenericRegistry,
     },
     config::{generate_dream_toml, generate_main_dream, ApplicationConfig, ProjectConfig},
 };
@@ -677,6 +678,24 @@ fn compile_stdlib() -> Result<PathBuf, String> {
     Ok(output_dir)
 }
 
+/// Extract the module name(s) from a Dream source file.
+/// Returns the name of the first module declared in the file.
+fn extract_module_name(source_file: &Path) -> Option<String> {
+    let source = fs::read_to_string(source_file).ok()?;
+    let mut parser = DreamParser::new(&source);
+
+    // Use a dummy fallback name - we'll get the real name from the parsed result
+    let fallback = source_file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown");
+
+    match parser.parse_file_modules(fallback) {
+        Ok(modules) if !modules.is_empty() => Some(modules[0].name.clone()),
+        _ => None,
+    }
+}
+
 /// Build and run the project or a standalone file.
 fn cmd_run(
     file: Option<&Path>,
@@ -700,18 +719,27 @@ fn cmd_run(
         // Standalone file mode - no application support
         let build_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
+        // Extract actual module name from the source file before building
+        let base_name = match extract_module_name(source_file) {
+            Some(name) => name,
+            None => {
+                // Fall back to filename if parsing fails
+                source_file
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("main")
+                    .to_string()
+            }
+        };
+
         // Build the standalone file
         let build_result = cmd_build(Some(source_file), "beam", Some(&build_dir));
         if build_result != ExitCode::SUCCESS {
             return build_result;
         }
 
-        // Module name comes from the file name (with dream:: prefix)
-        let base_name = source_file
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("main");
-        let module_name = CoreErlangEmitter::beam_module_name(base_name);
+        // Module name from parsed AST (with dream:: prefix)
+        let module_name = CoreErlangEmitter::beam_module_name(&base_name);
 
         (build_dir, module_name, None)
     } else {

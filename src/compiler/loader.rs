@@ -125,11 +125,27 @@ impl ModuleLoader {
         // Load all modules from this file
         let modules = self.load_file_modules(path, module_name)?;
 
-        // Return the first module (or find the one matching the name)
-        modules
-            .into_iter()
-            .find(|m| m.name == module_name)
-            .or_else(|| self.loaded.values().find(|m| m.name == module_name).cloned())
+        // First try to find a module matching the expected name
+        if let Some(m) = modules.iter().find(|m| m.name == module_name) {
+            return Ok(m.clone());
+        }
+
+        // Check if it was already loaded with that name
+        if let Some(m) = self.loaded.values().find(|m| m.name == module_name) {
+            return Ok(m.clone());
+        }
+
+        // For standalone files, return the first module regardless of name
+        // This allows files with `mod different_name { }` to work
+        if let Some(m) = modules.into_iter().next() {
+            return Ok(m);
+        }
+
+        // Last resort: check loaded modules for any match
+        self.loaded
+            .values()
+            .next()
+            .cloned()
             .ok_or_else(|| LoadError::new(format!("module '{}' not found in file", module_name)))
     }
 
