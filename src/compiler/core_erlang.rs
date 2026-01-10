@@ -2331,8 +2331,39 @@ impl CoreErlangEmitter {
                         let first = &segments[0];
                         let second = &segments[1];
 
-                        // Check if this is a trait dispatch: Trait::method(value, ...)
-                        if self.traits.contains_key(first) {
+                        // Check if this is a trait dispatch with explicit type args: Trait::method::<T>(...)
+                        // In this case, use the type arg to call the concrete implementation directly
+                        // But only if the type args are concrete types, not type parameters
+                        let has_concrete_type_args = !effective_type_args.is_empty()
+                            && effective_type_args.iter().all(|t| {
+                                match t {
+                                    // Type parameters of the current function should use runtime dispatch
+                                    Type::Named { name, .. } | Type::TypeVar(name) => {
+                                        !self.current_func_type_params.contains(name)
+                                    }
+                                    // Concrete types like int, string, etc. can use static dispatch
+                                    _ => true,
+                                }
+                            });
+
+                        if self.traits.contains_key(first) && has_concrete_type_args {
+                            let type_names: Vec<String> = effective_type_args
+                                .iter()
+                                .map(|t| self.type_to_name(t))
+                                .collect();
+                            // Trait_Type_method format: GenServer_Counter_init
+                            let mangled_name = format!(
+                                "{}_{}_{}",
+                                first,
+                                type_names.first().unwrap_or(&"".to_string()),
+                                second
+                            );
+                            self.emit(&format!("apply '{}'/{}", mangled_name, args.len()));
+                            self.emit("(");
+                            self.emit_args(args)?;
+                            self.emit(")");
+                        } else if self.traits.contains_key(first) {
+                            // Trait dispatch without explicit type args - use runtime dispatch
                             self.emit_trait_dispatch(first, second, args)?;
                         } else if self.cross_module_inlining_source.is_some()
                             && !type_args.is_empty()
