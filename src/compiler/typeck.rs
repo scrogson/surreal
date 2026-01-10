@@ -572,6 +572,8 @@ pub struct TypeChecker {
     /// Current function's type parameters and their bounds (for checking calls within generic functions)
     /// Maps type param name (e.g., "T") to Vec<trait_name> (e.g., ["GenServer"])
     current_type_param_bounds: HashMap<String, Vec<String>>,
+    /// Current module being type-checked (for resolving local function calls)
+    current_module: Option<String>,
 }
 
 impl TypeChecker {
@@ -584,6 +586,7 @@ impl TypeChecker {
             current_function_span: None,
             substitutions: HashMap::new(),
             current_type_param_bounds: HashMap::new(),
+            current_module: None,
         }
     }
 
@@ -2034,7 +2037,16 @@ impl TypeChecker {
     ) -> TypeResult<Ty> {
         match func {
             Expr::Ident(name) => {
-                if let Some(info) = self.env.get_function(name).cloned() {
+                // First try local module's qualified name, then fall back to simple name
+                let local_qualified = self.current_module.as_ref()
+                    .map(|m| format!("{}::{}", m, name));
+
+                let info = local_qualified
+                    .as_ref()
+                    .and_then(|qn| self.env.get_function(qn).cloned())
+                    .or_else(|| self.env.get_function(name).cloned());
+
+                if let Some(info) = info {
                     // Instantiate generic function
                     let instantiated = if !type_args.is_empty() {
                         // Explicit type arguments (turbofish syntax)
@@ -3189,6 +3201,8 @@ pub fn check_modules(modules: &[Module]) -> Vec<(String, TypeResult<Module>)> {
     for module in modules {
         // Clear errors before checking each module
         checker.errors.clear();
+        // Set current module for local function resolution
+        checker.current_module = Some(module.name.clone());
 
         // Validate trait implementations for this module
         for item in &module.items {
