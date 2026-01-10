@@ -1,0 +1,23 @@
+// Test trait definitions with uppercase names
+
+mod test {
+    pub trait Display {
+        fn display(self) -> string;
+    }
+
+    pub struct Point {
+        x: int,
+        y: int
+    }
+
+    impl Display for Point {
+        fn display(self) -> string {
+            "point"
+        }
+    }
+
+    pub fn main() -> atom {
+        let p = Point { x: 1, y: 2 };
+        :ok
+    }
+}

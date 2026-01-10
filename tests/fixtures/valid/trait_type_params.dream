@@ -1,0 +1,46 @@
+// Test trait type parameters and From/Into traits
+
+mod test {
+    // Parameterized trait definition
+    pub trait From<T> {
+        fn from(value: T) -> Self;
+    }
+
+    pub trait Into<T> {
+        fn into(self) -> T;
+    }
+
+    // Struct to convert to
+    pub struct UserId {
+        id: int
+    }
+
+    // Implement From<int> for UserId
+    impl From<int> for UserId {
+        fn from(value: int) -> UserId {
+            UserId { id: value }
+        }
+    }
+
+    // Implement From<string> for UserId (use length)
+    impl From<string> for UserId {
+        fn from(value: string) -> UserId {
+            UserId { id: :erlang::length(value) }
+        }
+    }
+
+    pub fn main() -> atom {
+        // Type::from with turbofish
+        let u1 = UserId::from::<int>(42);
+
+        // Type::from with inference
+        let u2 = UserId::from(100);
+        let u3 = UserId::from("hello");
+
+        // Method syntax for into
+        let u4 = 200.into::<UserId>();
+        let u5 = "world".into::<UserId>();
+
+        :ok
+    }
+}

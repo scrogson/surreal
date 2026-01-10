@@ -1,0 +1,26 @@
+// Test turbofish syntax on method calls
+
+mod test {
+    pub trait From<T> {
+        fn from(value: T) -> Self;
+    }
+
+    pub struct Wrapper {
+        value: int
+    }
+
+    impl From<int> for Wrapper {
+        fn from(value: int) -> Wrapper {
+            Wrapper { value: value }
+        }
+    }
+
+    pub fn main() -> atom {
+        let w = Wrapper { value: 42 };
+
+        // Method with turbofish for into
+        let n = 100.into::<Wrapper>();
+
+        :ok
+    }
+}

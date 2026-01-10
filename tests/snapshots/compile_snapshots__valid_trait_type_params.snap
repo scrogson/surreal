@@ -1,0 +1,6 @@
+---
+source: tests/compile_snapshots.rs
+assertion_line: 77
+expression: result
+---
+success
