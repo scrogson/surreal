@@ -361,8 +361,7 @@ fn handle_terminate_child(children: [any], child_id: atom) -> any {
     let maybe_child = find_child_by_id(children, child_id);
     match maybe_child {
         :not_found => handle_unknown_request(),
-        child => do_terminate_child(child),
-        _ => handle_unknown_request()
+        child => do_terminate_child(child)
     }
 }
 
