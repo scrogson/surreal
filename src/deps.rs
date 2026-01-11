@@ -338,6 +338,7 @@ impl DepsManager {
             }
 
             self.compile_erlang_dep(&pkg_name)?;
+            self.compile_elixir_dep(&pkg_name)?;
         }
 
         println!("Dependencies compiled.");
@@ -398,6 +399,92 @@ impl DepsManager {
 
         println!("  {} compiled", name);
         Ok(())
+    }
+
+    /// Compile an Elixir dependency.
+    fn compile_elixir_dep(&self, name: &str) -> DepsResult<()> {
+        let deps_dir = self.deps_dir();
+        let pkg_dir = deps_dir.join(name);
+        let lib_dir = pkg_dir.join("lib");
+        let ebin_dir = pkg_dir.join("ebin");
+
+        // Check if there are .ex files to compile
+        if !lib_dir.exists() {
+            return Ok(());
+        }
+
+        let ex_files: Vec<_> = Self::find_ex_files(&lib_dir);
+
+        if ex_files.is_empty() {
+            return Ok(());
+        }
+
+        // Check if elixirc is available
+        let elixirc_check = std::process::Command::new("elixirc")
+            .arg("--version")
+            .output();
+
+        if elixirc_check.is_err() {
+            println!("  Skipping {} (Elixir not installed)", name);
+            return Ok(());
+        }
+
+        println!("  Compiling {} (Elixir)...", name);
+
+        // Create ebin directory
+        fs::create_dir_all(&ebin_dir).map_err(|e| {
+            DepsError::new(format!("Failed to create ebin for {}: {}", name, e))
+        })?;
+
+        // Collect all dependency ebin paths for -pa flags
+        let dep_paths: Vec<PathBuf> = self.dep_ebin_paths();
+
+        // Build elixirc command with all .ex files
+        let mut cmd = std::process::Command::new("elixirc");
+        cmd.arg("--ignore-module-conflict");
+        cmd.arg("-o").arg(&ebin_dir);
+
+        // Add dependency paths so Elixir can find already-compiled modules
+        for dep_path in &dep_paths {
+            cmd.arg("-pa").arg(dep_path);
+        }
+
+        // Add all .ex files
+        for ex_file in &ex_files {
+            cmd.arg(ex_file);
+        }
+
+        let status = cmd.status().map_err(|e| {
+            DepsError::new(format!("Failed to run elixirc for {}: {}", name, e))
+        })?;
+
+        if !status.success() {
+            return Err(DepsError::new(format!(
+                "Failed to compile Elixir files in {}",
+                name
+            )));
+        }
+
+        println!("  {} compiled", name);
+        Ok(())
+    }
+
+    /// Recursively find all .ex files in a directory.
+    fn find_ex_files(dir: &Path) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    files.extend(Self::find_ex_files(&path));
+                } else if path.extension().map_or(false, |ext| ext == "ex") {
+                    files.push(path);
+                }
+            }
+        }
+
+        files
     }
 
     /// Get all ebin paths for dependencies.
