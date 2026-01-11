@@ -1,8 +1,9 @@
 //! Dream interactive shell (REPL)
 //!
 //! Provides an interactive environment for evaluating Dream expressions
-//! using the BEAM runtime.
+//! using the BEAM runtime with a persistent process for fast evaluation.
 
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, ExitCode, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -13,6 +14,9 @@ use dream::compiler::{BinOp, Expr, Parser};
 
 /// Counter for generating unique module names
 static EVAL_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Erlang eval server code - runs in a loop reading filenames and evaluating them
+const EVAL_SERVER: &str = r#"Loop = fun Loop() -> case io:get_line("") of eof -> ok; {error, _} -> ok; Line -> Filename = string:trim(Line), case Filename of "" -> Loop(); _ -> Result = try ModName = list_to_atom(filename:basename(Filename, ".core")), case compile:file(Filename, [from_core, binary, return_errors]) of {ok, ModName, Binary} -> code:purge(ModName), case code:load_binary(ModName, Filename, Binary) of {module, ModName} -> Val = ModName:'__eval__'(), code:purge(ModName), code:delete(ModName), {ok, Val}; {error, What} -> {error, {load_failed, What}} end; {error, Errors, _Warnings} -> {error, {compile_failed, Errors}} end catch Class:Reason:Stack -> {error, {Class, Reason, Stack}} end, case Result of {ok, Value} -> io:format("~s~p~n", [<<1>>, Value]); {error, Err} -> io:format("~s~p~n", [<<2>>, Err]) end, Loop() end end end, Loop()"#;
 
 /// Binding stored from a let statement
 #[derive(Clone, Debug)]
@@ -28,52 +32,76 @@ struct ReplState {
     bindings: Vec<Binding>,
     /// The running BEAM process
     beam_process: Option<Child>,
+    /// Stdin handle for the BEAM process
+    beam_stdin: Option<std::process::ChildStdin>,
+    /// Stdout reader for the BEAM process
+    beam_stdout: Option<BufReader<std::process::ChildStdout>>,
     /// Path to stdlib beam files
     stdlib_path: Option<String>,
+    /// Temp directory for this session
+    temp_dir: std::path::PathBuf,
 }
 
 impl ReplState {
     fn new() -> Self {
-        // Find stdlib path
         let stdlib_path = find_stdlib_path();
+        let temp_dir = std::env::temp_dir();
 
         Self {
             bindings: Vec::new(),
             beam_process: None,
+            beam_stdin: None,
+            beam_stdout: None,
             stdlib_path,
+            temp_dir,
         }
     }
 
     /// Start the BEAM process if not already running
-    fn ensure_beam_running(&mut self) -> std::io::Result<()> {
+    fn ensure_beam_running(&mut self) -> Result<(), String> {
         if self.beam_process.is_some() {
             return Ok(());
         }
 
+        // The eval server code is self-contained
+        let eval_code = format!("{}.", EVAL_SERVER);
+
         let mut cmd = Command::new("erl");
-        cmd.arg("-noinput");
+        cmd.arg("-noshell");
+
+        // Add temp dir to code path
+        cmd.arg("-pa").arg(&self.temp_dir);
 
         // Add stdlib to code path if available
         if let Some(ref stdlib) = self.stdlib_path {
             cmd.arg("-pa").arg(stdlib);
         }
 
-        // Start in eval mode - we'll send expressions to evaluate
-        cmd.arg("-eval")
-            .arg("dream_repl_server:start().")
-            .stdin(Stdio::piped())
+        cmd.arg("-eval").arg(&eval_code);
+
+        cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
 
-        // For now, we'll use a simpler approach: compile and run each expression
-        // as a separate module, using erl -noshell -eval
-        self.beam_process = None; // We won't use a persistent process yet
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to start BEAM: {}", e))?;
+
+        let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
+        let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
+
+        self.beam_process = Some(child);
+        self.beam_stdin = Some(stdin);
+        self.beam_stdout = Some(BufReader::new(stdout));
 
         Ok(())
     }
 
     /// Evaluate an expression and return the result as a string
     fn eval_expr(&mut self, expr: &Expr) -> Result<String, String> {
+        // Ensure BEAM is running
+        self.ensure_beam_running()?;
+
         // Generate a unique module name
         let counter = EVAL_COUNTER.fetch_add(1, Ordering::SeqCst);
         let module_name = format!("dream_repl_{}", counter);
@@ -82,55 +110,44 @@ impl ReplState {
         let core_erlang = self.generate_core_erlang(&module_name, expr)?;
 
         // Write to temp file
-        let temp_dir = std::env::temp_dir();
-        let core_file = temp_dir.join(format!("{}.core", module_name));
-        let beam_file = temp_dir.join(format!("{}.beam", module_name));
+        let core_file = self.temp_dir.join(format!("{}.core", module_name));
 
         std::fs::write(&core_file, &core_erlang)
             .map_err(|e| format!("Failed to write Core Erlang: {}", e))?;
 
-        // Compile with erlc
-        let erlc_status = Command::new("erlc")
-            .arg("+from_core")
-            .arg("-o")
-            .arg(&temp_dir)
-            .arg(&core_file)
-            .status()
-            .map_err(|e| format!("Failed to run erlc: {}", e))?;
+        // Send filename to BEAM process
+        let stdin = self.beam_stdin.as_mut().ok_or("BEAM stdin not available")?;
+        writeln!(stdin, "{}", core_file.display())
+            .map_err(|e| format!("Failed to send to BEAM: {}", e))?;
+        stdin
+            .flush()
+            .map_err(|e| format!("Failed to flush: {}", e))?;
 
-        if !erlc_status.success() {
-            return Err("Compilation failed".to_string());
-        }
+        // Read result from BEAM process
+        let stdout = self
+            .beam_stdout
+            .as_mut()
+            .ok_or("BEAM stdout not available")?;
+        let mut line = String::new();
+        stdout
+            .read_line(&mut line)
+            .map_err(|e| format!("Failed to read from BEAM: {}", e))?;
 
-        // Run with erl
-        let eval_expr = format!(
-            "io:format(\"~p~n\", ['{}':'__eval__'()]), halt().",
-            module_name
-        );
-
-        let mut cmd = Command::new("erl");
-        cmd.arg("-noshell").arg("-pa").arg(&temp_dir);
-
-        if let Some(ref stdlib) = self.stdlib_path {
-            cmd.arg("-pa").arg(stdlib);
-        }
-
-        cmd.arg("-eval").arg(&eval_expr);
-
-        let output = cmd
-            .output()
-            .map_err(|e| format!("Failed to run erl: {}", e))?;
-
-        // Clean up temp files
+        // Clean up temp file
         let _ = std::fs::remove_file(&core_file);
-        let _ = std::fs::remove_file(&beam_file);
 
-        if output.status.success() {
-            let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        // Parse result - first byte is status (1 = ok, 2 = error)
+        if line.is_empty() {
+            return Err("No response from BEAM".to_string());
+        }
+
+        let first_byte = line.as_bytes().first().copied().unwrap_or(0);
+        let result = line[1..].trim().to_string();
+
+        if first_byte == 1 {
             Ok(result)
         } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(format!("Evaluation failed: {}", stderr))
+            Err(format!("Evaluation error: {}", result))
         }
     }
 
@@ -265,9 +282,13 @@ impl ReplState {
 
 impl Drop for ReplState {
     fn drop(&mut self) {
+        // Close stdin to signal EOF to the eval loop
+        self.beam_stdin.take();
+
         // Kill the BEAM process if running
         if let Some(ref mut child) = self.beam_process {
             let _ = child.kill();
+            let _ = child.wait();
         }
     }
 }
@@ -279,7 +300,10 @@ fn find_stdlib_path() -> Option<String> {
         if let Some(exe_dir) = exe_path.parent() {
             let stdlib = exe_dir.join("../stdlib");
             if stdlib.exists() {
-                return stdlib.canonicalize().ok().map(|p| p.to_string_lossy().into_owned());
+                return stdlib
+                    .canonicalize()
+                    .ok()
+                    .map(|p| p.to_string_lossy().into_owned());
             }
         }
     }
@@ -414,7 +438,9 @@ fn parse_and_eval(state: &mut ReplState, input: &str) -> Result<String, String> 
 
     // Parse as an expression
     let mut parser = Parser::new(input);
-    let expr = parser.parse_expr().map_err(|e| format!("Parse error: {:?}", e))?;
+    let expr = parser
+        .parse_expr()
+        .map_err(|e| format!("Parse error: {:?}", e))?;
 
     // Evaluate
     state.eval_expr(&expr)
