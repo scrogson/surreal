@@ -65,3 +65,108 @@ pub fn to_list<T, E>(res: Result<T, E>) -> [T] {
         Err(_) => [],
     }
 }
+
+/// Unwrap the result with a custom error message.
+/// Panics with the given message if the result is Err.
+pub fn expect<T, E>(res: Result<T, E>, msg: string) -> T {
+    match res {
+        Ok(x) => x,
+        Err(_) => :erlang::error(msg),
+    }
+}
+
+/// Unwrap the error with a custom message.
+/// Panics with the given message if the result is Ok.
+pub fn expect_err<T, E>(res: Result<T, E>, msg: string) -> E {
+    match res {
+        Ok(_) => :erlang::error(msg),
+        Err(e) => e,
+    }
+}
+
+/// Unwrap the result, returning the result of calling `f` if Err.
+pub fn unwrap_or_else<T, E>(res: Result<T, E>, f: fn(E) -> T) -> T {
+    match res {
+        Ok(x) => x,
+        Err(e) => f(e),
+    }
+}
+
+/// Convert Ok(v) to Some(v), Err to None.
+pub fn ok<T, E>(res: Result<T, E>) -> Option<T> {
+    match res {
+        Ok(x) => Some(x),
+        Err(_) => None,
+    }
+}
+
+/// Convert Err(e) to Some(e), Ok to None.
+pub fn err<T, E>(res: Result<T, E>) -> Option<E> {
+    match res {
+        Ok(_) => None,
+        Err(e) => Some(e),
+    }
+}
+
+/// Apply a function to the Ok value (if Ok), or return Err unchanged.
+pub fn map<T, U, E>(res: Result<T, E>, f: fn(T) -> U) -> Result<U, E> {
+    match res {
+        Ok(x) => Ok(f(x)),
+        Err(e) => Err(e),
+    }
+}
+
+/// Apply a function to the Err value (if Err), or return Ok unchanged.
+pub fn map_err<T, E, F>(res: Result<T, E>, f: fn(E) -> F) -> Result<T, F> {
+    match res {
+        Ok(x) => Ok(x),
+        Err(e) => Err(f(e)),
+    }
+}
+
+/// Apply a function to the Ok value (if Ok), or return a default.
+pub fn map_or<T, U, E>(res: Result<T, E>, default: U, f: fn(T) -> U) -> U {
+    match res {
+        Ok(x) => f(x),
+        Err(_) => default,
+    }
+}
+
+/// Apply a function to the Ok value (if Ok), or compute a default from the error.
+pub fn map_or_else<T, U, E>(res: Result<T, E>, default_f: fn(E) -> U, f: fn(T) -> U) -> U {
+    match res {
+        Ok(x) => f(x),
+        Err(e) => default_f(e),
+    }
+}
+
+/// Return Err if the result is Err, otherwise call `f` with the Ok value and return the result.
+/// This is sometimes called "flatmap" or "bind".
+pub fn and_then<T, U, E>(res: Result<T, E>, f: fn(T) -> Result<U, E>) -> Result<U, E> {
+    match res {
+        Ok(x) => f(x),
+        Err(e) => Err(e),
+    }
+}
+
+/// Return the result if it is Ok, otherwise call `f` with the Err value and return its result.
+pub fn or_else<T, E, F>(res: Result<T, E>, f: fn(E) -> Result<T, F>) -> Result<T, F> {
+    match res {
+        Ok(x) => Ok(x),
+        Err(e) => f(e),
+    }
+}
+
+/// Return Err if the result is Err, otherwise return `other`.
+pub fn and<T, U, E>(res: Result<T, E>, other: Result<U, E>) -> Result<U, E> {
+    match res {
+        Ok(_) => other,
+        Err(e) => Err(e),
+    }
+}
+
+// TODO: flatten and transpose require nested generics which needs parser work
+// /// Convert Result<Result<T, E>, E> to Result<T, E>.
+// pub fn flatten<T, E>(res: Result<Result<T, E>, E>) -> Result<T, E>
+// /// Convert Result<Option<T>, E> to Option<Result<T, E>>.
+// pub fn transpose<T, E>(res: Result<Option<T>, E>) -> Option<Result<T, E>>
