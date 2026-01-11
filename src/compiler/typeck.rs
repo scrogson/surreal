@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use crate::compiler::ast::{
     self, BinOp, Block, Expr, ExternItem, ExternMod, Function, ImplBlock, Item, MatchArm, Module,
-    Pattern, Stmt, StringPart, TypeParam, UnaryOp,
+    Pattern, Stmt, StringPart, TypeParam, UnaryOp, VariantKind,
 };
 use crate::compiler::error::{TypeError, TypeResult};
 
@@ -244,12 +244,23 @@ pub struct StructInfo {
     pub fields: Vec<(String, Ty)>,
 }
 
+/// The kind of an enum variant (type-checked version).
+#[derive(Debug, Clone)]
+pub enum VariantInfoKind {
+    /// Unit variant: `None`
+    Unit,
+    /// Tuple variant: `Some(T)`
+    Tuple(Vec<Ty>),
+    /// Struct variant: `Move { x: Int, y: Int }`
+    Struct(Vec<(String, Ty)>),
+}
+
 /// Information about an enum type.
 #[derive(Debug, Clone)]
 pub struct EnumInfo {
     pub name: String,
     pub type_params: Vec<TypeParam>,
-    pub variants: Vec<(String, Vec<Ty>)>,
+    pub variants: Vec<(String, VariantInfoKind)>,
 }
 
 /// Information about a function.
@@ -865,11 +876,19 @@ impl TypeChecker {
             variants: info
                 .variants
                 .iter()
-                .map(|(name, fields)| {
-                    (
-                        name.clone(),
-                        fields.iter().map(|t| t.substitute(&subst)).collect(),
-                    )
+                .map(|(name, kind)| {
+                    let new_kind = match kind {
+                        VariantInfoKind::Unit => VariantInfoKind::Unit,
+                        VariantInfoKind::Tuple(fields) => {
+                            VariantInfoKind::Tuple(fields.iter().map(|t| t.substitute(&subst)).collect())
+                        }
+                        VariantInfoKind::Struct(fields) => {
+                            VariantInfoKind::Struct(fields.iter()
+                                .map(|(n, t)| (n.clone(), t.substitute(&subst)))
+                                .collect())
+                        }
+                    };
+                    (name.clone(), new_kind)
                 })
                 .collect(),
         };
@@ -1022,8 +1041,20 @@ impl TypeChecker {
                         .variants
                         .iter()
                         .map(|v| {
-                            let field_tys = v.fields.iter().map(|t| self.ast_type_to_ty(t)).collect();
-                            (v.name.clone(), field_tys)
+                            let kind = match &v.kind {
+                                VariantKind::Unit => VariantInfoKind::Unit,
+                                VariantKind::Tuple(fields) => {
+                                    let field_tys = fields.iter().map(|t| self.ast_type_to_ty(t)).collect();
+                                    VariantInfoKind::Tuple(field_tys)
+                                }
+                                VariantKind::Struct(fields) => {
+                                    let field_tys = fields.iter()
+                                        .map(|(name, ty)| (name.clone(), self.ast_type_to_ty(ty)))
+                                        .collect();
+                                    VariantInfoKind::Struct(field_tys)
+                                }
+                            };
+                            (v.name.clone(), kind)
                         })
                         .collect();
                     self.env.enums.insert(
@@ -1670,25 +1701,45 @@ impl TypeChecker {
                     // Instantiate the generic enum with fresh inference vars
                     let (instantiated, subst) = self.instantiate_enum(&info);
 
-                    if let Some((_, expected_tys)) = instantiated.variants.iter().find(|(v, _)| v == variant) {
-                        if args.len() != expected_tys.len() {
-                            self.error(TypeError::new(format!(
-                                "variant '{}' expects {} arguments, got {}",
-                                variant,
-                                expected_tys.len(),
-                                args.len()
-                            )));
-                        }
-                        // Check and unify argument types
-                        for (arg, expected_ty) in args.iter().zip(expected_tys.iter()) {
-                            let arg_ty = self.infer_expr(arg)?;
-                            if self.unify(&arg_ty, expected_ty).is_err()
-                                && !self.types_compatible(&arg_ty, expected_ty)
-                            {
-                                self.error(TypeError::with_help(
-                                    format!("type mismatch in variant '{}'", variant),
-                                    format!("expected {}, found {}", expected_ty, arg_ty),
-                                ));
+                    if let Some((_, variant_kind)) = instantiated.variants.iter().find(|(v, _)| v == variant) {
+                        match variant_kind {
+                            VariantInfoKind::Unit => {
+                                if !args.is_empty() {
+                                    self.error(TypeError::new(format!(
+                                        "unit variant '{}' takes no arguments, got {}",
+                                        variant,
+                                        args.len()
+                                    )));
+                                }
+                            }
+                            VariantInfoKind::Tuple(expected_tys) => {
+                                if args.len() != expected_tys.len() {
+                                    self.error(TypeError::new(format!(
+                                        "variant '{}' expects {} arguments, got {}",
+                                        variant,
+                                        expected_tys.len(),
+                                        args.len()
+                                    )));
+                                }
+                                // Check and unify argument types
+                                for (arg, expected_ty) in args.iter().zip(expected_tys.iter()) {
+                                    let arg_ty = self.infer_expr(arg)?;
+                                    if self.unify(&arg_ty, expected_ty).is_err()
+                                        && !self.types_compatible(&arg_ty, expected_ty)
+                                    {
+                                        self.error(TypeError::with_help(
+                                            format!("type mismatch in variant '{}'", variant),
+                                            format!("expected {}, found {}", expected_ty, arg_ty),
+                                        ));
+                                    }
+                                }
+                            }
+                            VariantInfoKind::Struct(_) => {
+                                // Struct variants use struct literal syntax, not tuple syntax
+                                self.error(TypeError::new(format!(
+                                    "struct variant '{}' must be constructed with named fields: {}::{}{{ ... }}",
+                                    variant, enum_name, variant
+                                )));
                             }
                         }
                     } else {
@@ -1719,22 +1770,27 @@ impl TypeChecker {
                     // Could be a variant without a type name (e.g., Some(x))
                     // Search all enums for this variant
                     for (name, info) in &self.env.enums.clone() {
-                        if let Some((_, _expected_tys)) =
+                        if let Some((_, _expected_kind)) =
                             info.variants.iter().find(|(v, _)| v == variant)
                         {
                             // Found the enum - instantiate it
                             let (instantiated, subst) = self.instantiate_enum(&info);
-                            let inst_expected: Vec<Ty> = instantiated
-                                .variants
-                                .iter()
-                                .find(|(v, _)| v == variant)
-                                .map(|(_, tys)| tys.clone())
-                                .unwrap_or_default();
-
-                            // Unify arguments
-                            for (arg, expected_ty) in args.iter().zip(inst_expected.iter()) {
-                                let arg_ty = self.infer_expr(arg)?;
-                                let _ = self.unify(&arg_ty, expected_ty);
+                            if let Some((_, variant_kind)) = instantiated.variants.iter().find(|(v, _)| v == variant) {
+                                // Unify arguments based on variant kind
+                                match variant_kind {
+                                    VariantInfoKind::Unit => {
+                                        // No arguments to unify
+                                    }
+                                    VariantInfoKind::Tuple(expected_tys) => {
+                                        for (arg, expected_ty) in args.iter().zip(expected_tys.iter()) {
+                                            let arg_ty = self.infer_expr(arg)?;
+                                            let _ = self.unify(&arg_ty, expected_ty);
+                                        }
+                                    }
+                                    VariantInfoKind::Struct(_) => {
+                                        // Struct variants handled elsewhere
+                                    }
+                                }
                             }
 
                             // Build type arguments
@@ -2518,12 +2574,16 @@ impl TypeChecker {
         }
     }
 
-    /// Get the types of fields for an enum variant.
+    /// Get the types of fields for an enum variant (tuple variants only).
     fn get_enum_variant_types(&self, enum_name: &str, variant_name: &str) -> Vec<Ty> {
         if let Some(info) = self.env.get_enum(enum_name) {
-            for (vname, vtypes) in &info.variants {
+            for (vname, vkind) in &info.variants {
                 if vname == variant_name {
-                    return vtypes.clone();
+                    return match vkind {
+                        VariantInfoKind::Unit => vec![],
+                        VariantInfoKind::Tuple(tys) => tys.clone(),
+                        VariantInfoKind::Struct(fields) => fields.iter().map(|(_, ty)| ty.clone()).collect(),
+                    };
                 }
             }
         }
@@ -2540,8 +2600,13 @@ impl TypeChecker {
                 if let Some(info) = self.env.get_enum(name) {
                     info.variants
                         .iter()
-                        .map(|(vname, fields)| {
-                            Constructor::Variant(name.clone(), vname.clone(), fields.len())
+                        .map(|(vname, vkind)| {
+                            let arity = match vkind {
+                                VariantInfoKind::Unit => 0,
+                                VariantInfoKind::Tuple(tys) => tys.len(),
+                                VariantInfoKind::Struct(fields) => fields.len(),
+                            };
+                            Constructor::Variant(name.clone(), vname.clone(), arity)
                         })
                         .collect()
                 } else if self.env.get_struct(name).is_some() {

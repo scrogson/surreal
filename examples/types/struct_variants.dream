@@ -1,0 +1,36 @@
+/// Struct variants in enums - Rust-style enum variants with named fields
+
+mod struct_variants {
+    // An enum with all three variant kinds
+    enum Message {
+        Quit,
+        Move { x: Int, y: Int },
+        Write(String),
+        ChangeColor { r: Int, g: Int, b: Int },
+    }
+
+    // A more practical example: representing events
+    enum Event {
+        Click { x: Int, y: Int, button: Int },
+        KeyPress { key: String },
+        Resize(Int, Int),
+        Close,
+    }
+
+    pub fn main() -> atom {
+        io::println("=== Struct Variants Example ===");
+        // TODO: Construction and pattern matching for struct variants
+        // will be added in a future update. For now, this file demonstrates
+        // that struct variants can be defined in enums.
+        //
+        // Future syntax will be:
+        // let msg = Message::Move { x: 10, y: 20 };
+        // match msg {
+        //     Message::Move { x, y } => io::println("Moving to ({x}, {y})"),
+        //     Message::Quit => io::println("Quitting"),
+        //     _ => io::println("Other message"),
+        // }
+        io::println("Struct variant definitions work!");
+        :ok
+    }
+}

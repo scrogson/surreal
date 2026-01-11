@@ -891,7 +891,8 @@ impl<'source> Parser<'source> {
         while !self.check(&Token::RBrace) && !self.is_at_end() {
             let variant_name = self.expect_type_ident()?;
 
-            let fields = if self.check(&Token::LParen) {
+            let kind = if self.check(&Token::LParen) {
+                // Tuple variant: Some(T)
                 self.advance();
                 let mut fs = Vec::new();
                 if !self.check(&Token::RParen) {
@@ -904,14 +905,33 @@ impl<'source> Parser<'source> {
                     }
                 }
                 self.expect(&Token::RParen)?;
-                fs
+                VariantKind::Tuple(fs)
+            } else if self.check(&Token::LBrace) {
+                // Struct variant: Move { x: Int, y: Int }
+                self.advance();
+                let mut fields = Vec::new();
+                while !self.check(&Token::RBrace) && !self.is_at_end() {
+                    let field_name = self.expect_ident()?;
+                    self.expect(&Token::Colon)?;
+                    let field_type = self.parse_type()?;
+                    fields.push((field_name, field_type));
+
+                    if self.check(&Token::Comma) {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(&Token::RBrace)?;
+                VariantKind::Struct(fields)
             } else {
-                Vec::new()
+                // Unit variant: None
+                VariantKind::Unit
             };
 
             variants.push(EnumVariant {
                 name: variant_name,
-                fields,
+                kind,
             });
 
             if self.check(&Token::Comma) {
@@ -2821,9 +2841,61 @@ mod tests {
             assert_eq!(e.name, "Option");
             assert_eq!(e.variants.len(), 2);
             assert_eq!(e.variants[0].name, "Some");
-            assert_eq!(e.variants[0].fields.len(), 1);
+            assert!(matches!(&e.variants[0].kind, VariantKind::Tuple(fields) if fields.len() == 1));
             assert_eq!(e.variants[1].name, "None");
-            assert_eq!(e.variants[1].fields.len(), 0);
+            assert!(matches!(&e.variants[1].kind, VariantKind::Unit));
+        } else {
+            panic!("expected enum");
+        }
+    }
+
+    #[test]
+    fn test_parse_enum_struct_variants() {
+        let source = r#"
+            mod test {
+                enum Message {
+                    Quit,
+                    Move { x: Int, y: Int },
+                    Write(String),
+                    ChangeColor { r: Int, g: Int, b: Int },
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Enum(e) = first_user_item(&module) {
+            assert_eq!(e.name, "Message");
+            assert_eq!(e.variants.len(), 4);
+
+            // Quit - unit variant
+            assert_eq!(e.variants[0].name, "Quit");
+            assert!(matches!(&e.variants[0].kind, VariantKind::Unit));
+
+            // Move { x: Int, y: Int } - struct variant
+            assert_eq!(e.variants[1].name, "Move");
+            if let VariantKind::Struct(fields) = &e.variants[1].kind {
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].0, "x");
+                assert_eq!(fields[1].0, "y");
+            } else {
+                panic!("expected Struct variant for Move");
+            }
+
+            // Write(String) - tuple variant
+            assert_eq!(e.variants[2].name, "Write");
+            assert!(matches!(&e.variants[2].kind, VariantKind::Tuple(fields) if fields.len() == 1));
+
+            // ChangeColor { r: Int, g: Int, b: Int } - struct variant
+            assert_eq!(e.variants[3].name, "ChangeColor");
+            if let VariantKind::Struct(fields) = &e.variants[3].kind {
+                assert_eq!(fields.len(), 3);
+                assert_eq!(fields[0].0, "r");
+                assert_eq!(fields[1].0, "g");
+                assert_eq!(fields[2].0, "b");
+            } else {
+                panic!("expected Struct variant for ChangeColor");
+            }
         } else {
             panic!("expected enum");
         }
@@ -3087,11 +3159,15 @@ mod tests {
             assert_eq!(e.variants.len(), 2);
             assert_eq!(e.variants[0].name, "Some");
             // The field type should be a TypeVar "T"
-            if let Type::Named { name, type_args } = &e.variants[0].fields[0] {
-                assert_eq!(name, "T");
-                assert!(type_args.is_empty());
+            if let VariantKind::Tuple(fields) = &e.variants[0].kind {
+                if let Type::Named { name, type_args } = &fields[0] {
+                    assert_eq!(name, "T");
+                    assert!(type_args.is_empty());
+                } else {
+                    panic!("expected Named type for T");
+                }
             } else {
-                panic!("expected Named type for T");
+                panic!("expected Tuple variant");
             }
         } else {
             panic!("expected enum");

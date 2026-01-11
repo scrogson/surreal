@@ -3,7 +3,7 @@
 //! The prelude contains fundamental types like Option and Result that are
 //! injected into every module at parse time.
 
-use crate::compiler::ast::{EnumDef, EnumVariant, Item, Type, TypeParam};
+use crate::compiler::ast::{EnumDef, EnumVariant, Item, Type, TypeParam, VariantKind};
 
 /// Generate the prelude items to be injected into every module.
 /// Returns Option<T> and Result<T, E> enum definitions.
@@ -16,11 +16,11 @@ pub fn prelude_items() -> Vec<Item> {
             variants: vec![
                 EnumVariant {
                     name: "Some".to_string(),
-                    fields: vec![Type::TypeVar("T".to_string())],
+                    kind: VariantKind::Tuple(vec![Type::TypeVar("T".to_string())]),
                 },
                 EnumVariant {
                     name: "None".to_string(),
-                    fields: vec![],
+                    kind: VariantKind::Unit,
                 },
             ],
             is_pub: false, // Private - each module gets its own copy
@@ -35,11 +35,11 @@ pub fn prelude_items() -> Vec<Item> {
             variants: vec![
                 EnumVariant {
                     name: "Ok".to_string(),
-                    fields: vec![Type::TypeVar("T".to_string())],
+                    kind: VariantKind::Tuple(vec![Type::TypeVar("T".to_string())]),
                 },
                 EnumVariant {
                     name: "Err".to_string(),
-                    fields: vec![Type::TypeVar("E".to_string())],
+                    kind: VariantKind::Tuple(vec![Type::TypeVar("E".to_string())]),
                 },
             ],
             is_pub: false, // Private - each module gets its own copy

@@ -820,9 +820,20 @@ pub struct EnumDef {
     pub is_pub: bool,
 }
 
+/// The kind of an enum variant.
+#[derive(Debug, Clone, PartialEq)]
+pub enum VariantKind {
+    /// Unit variant: `None`
+    Unit,
+    /// Tuple variant: `Some(T)`
+    Tuple(Vec<Type>),
+    /// Struct variant: `Move { x: Int, y: Int }`
+    Struct(Vec<(String, Type)>),
+}
+
 /// Enum variant.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumVariant {
     pub name: String,
-    pub fields: Vec<Type>,
+    pub kind: VariantKind,
 }
