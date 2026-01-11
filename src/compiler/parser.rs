@@ -1354,14 +1354,19 @@ impl<'source> Parser<'source> {
                                     self.expect(&Token::RParen)?;
                                     EnumVariantArgs::Tuple(args)
                                 } else if self.check(&Token::LBrace) {
-                                    // Struct variant: mod::Type::Variant { field: value }
+                                    // Struct variant: mod::Type::Variant { field: value } or { field } shorthand
                                     self.advance();
                                     let mut fields = Vec::new();
                                     if !self.check(&Token::RBrace) {
                                         loop {
                                             let field_name = self.expect_ident()?;
-                                            self.expect(&Token::Colon)?;
-                                            let field_value = self.parse_expr()?;
+                                            // Support shorthand: `{ x }` is equivalent to `{ x: x }`
+                                            let field_value = if self.check(&Token::Colon) {
+                                                self.advance();
+                                                self.parse_expr()?
+                                            } else {
+                                                Expr::Ident(field_name.clone())
+                                            };
                                             fields.push((field_name, field_value));
                                             if !self.check(&Token::Comma) {
                                                 break;
@@ -1539,15 +1544,21 @@ impl<'source> Parser<'source> {
                         });
                     }
 
-                    // Check for struct fields: TypeIdent::Variant { field: value }
+                    // Check for struct fields: TypeIdent::Variant { field: value } or { field } shorthand
                     if self.check(&Token::LBrace) {
                         self.advance();
                         let mut fields = Vec::new();
                         if !self.check(&Token::RBrace) {
                             loop {
                                 let field_name = self.expect_ident()?;
-                                self.expect(&Token::Colon)?;
-                                let field_value = self.parse_expr()?;
+                                // Support shorthand: `{ x }` is equivalent to `{ x: x }`
+                                let field_value = if self.check(&Token::Colon) {
+                                    self.advance();
+                                    self.parse_expr()?
+                                } else {
+                                    // Shorthand: field name becomes the value (identifier)
+                                    Expr::Ident(field_name.clone())
+                                };
                                 fields.push((field_name, field_value));
                                 if !self.check(&Token::Comma) {
                                     break;
@@ -3026,6 +3037,51 @@ mod tests {
                     assert_eq!(fields.len(), 2);
                     assert_eq!(fields[0].0, "x");
                     assert_eq!(fields[1].0, "y");
+                } else {
+                    panic!("expected struct variant args");
+                }
+            } else {
+                panic!("expected EnumVariant expression");
+            }
+        } else {
+            panic!("expected let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_variant_shorthand() {
+        let source = r#"
+            mod test {
+                enum Point {
+                    Coord { x: int, y: int },
+                }
+
+                fn main() {
+                    let x = 10;
+                    let y = 20;
+                    let pt = Point::Coord { x, y };
+                    pt
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        // Find the function
+        let func = module.items.iter().find_map(|item| {
+            if let Item::Function(f) = item { Some(f) } else { None }
+        }).expect("expected function");
+
+        // Check the third let statement (let pt = ...)
+        if let Some(Stmt::Let { value: init, .. }) = func.body.stmts.get(2) {
+            if let Expr::EnumVariant { args, .. } = init {
+                if let EnumVariantArgs::Struct(fields) = args {
+                    assert_eq!(fields.len(), 2);
+                    // Check that shorthand expanded to Ident
+                    assert_eq!(fields[0].0, "x");
+                    assert!(matches!(&fields[0].1, Expr::Ident(n) if n == "x"));
+                    assert_eq!(fields[1].0, "y");
+                    assert!(matches!(&fields[1].1, Expr::Ident(n) if n == "y"));
                 } else {
                     panic!("expected struct variant args");
                 }

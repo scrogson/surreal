@@ -19,18 +19,18 @@ mod struct_variants {
 
     fn describe_message(msg: Message) -> string {
         match msg {
-            Message::Move { x, y } => "Moving to position",
+            Message::Move { x, y } => "Moving to position x={x}, y={y}",
             Message::Quit => "Quitting",
-            Message::Write(s) => "Writing message",
-            Message::ChangeColor { r, g, b } => "Changing color",
+            Message::Write(s) => "Writing message s={s}",
+            Message::ChangeColor { r, g, b } => "Changing color to r={r}, g={g}, b={b}"
         }
     }
 
     fn describe_event(event: Event) -> string {
         match event {
-            Event::Click { x, y, button } => "Mouse click",
-            Event::KeyPress { key } => "Key press",
-            Event::Resize(w, h) => "Window resize",
+            Event::Click { x, y, button } => "Mouse click x={x}, y={y}, button={button}",
+            Event::KeyPress { key } => "Key press key={key}",
+            Event::Resize(w, h) => "Window resize w={w}, h={h}",
             Event::Close => "Window close",
         }
     }
@@ -60,6 +60,12 @@ mod struct_variants {
         io::println(describe_event(key));
         io::println(describe_event(resize));
         io::println(describe_event(close));
+
+        // Field shorthand: when variable name matches field name
+        let x = 50;
+        let y = 75;
+        let shorthand_move = Message::Move { x, y };  // same as { x: x, y: y }
+        io::println(describe_message(shorthand_move));
 
         io::println("Struct variant construction and matching work!");
         :ok
