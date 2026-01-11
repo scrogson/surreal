@@ -216,7 +216,7 @@ fn server_loop_typed<T: GenServer>(state: any) -> atom {
                 },
                 (:stop, reason, response, new_state) => {
                     reply(from, response);
-                    GenServer::terminate::<T>(reason, new_state);
+                    terminate_typed::<T>(new_state, reason);
                     :ok
                 },
                 _ => server_loop_typed::<T>(state)
@@ -227,11 +227,11 @@ fn server_loop_typed<T: GenServer>(state: any) -> atom {
             // Handle special :stop message
             match msg {
                 :stop => {
-                    GenServer::terminate::<T>(:normal, state);
+                    terminate_typed::<T>(state, :normal);
                     :ok
                 },
                 (:stop, reason) => {
-                    GenServer::terminate::<T>(reason, state);
+                    terminate_typed::<T>(state, reason);
                     :ok
                 },
                 _ => {
@@ -239,7 +239,7 @@ fn server_loop_typed<T: GenServer>(state: any) -> atom {
                     match result {
                         (:noreply, new_state) => server_loop_typed::<T>(new_state),
                         (:stop, reason, new_state) => {
-                            GenServer::terminate::<T>(reason, new_state);
+                            terminate_typed::<T>(new_state, reason);
                             :ok
                         },
                         _ => server_loop_typed::<T>(state)
@@ -253,7 +253,7 @@ fn server_loop_typed<T: GenServer>(state: any) -> atom {
             match result {
                 (:noreply, new_state) => server_loop_typed::<T>(new_state),
                 (:stop, reason, new_state) => {
-                    GenServer::terminate::<T>(reason, new_state);
+                    terminate_typed::<T>(new_state, reason);
                     :ok
                 },
                 _ => server_loop_typed::<T>(state)
@@ -339,4 +339,10 @@ fn call_terminate(module: atom, reason: atom, state: any) -> atom {
         true => :erlang::apply(module, :terminate, [reason, state]),
         false => :ok  // Default: do nothing
     }
+}
+
+/// Call terminate for typed GenServer. Takes state first so trait dispatch
+/// can use the state's __struct__ tag for method resolution.
+fn terminate_typed<T: GenServer>(state: any, reason: atom) -> atom {
+    GenServer::terminate::<T>(reason, state)
 }
