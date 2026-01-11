@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 
 use crate::compiler::ast::{
-    self, BinOp, Block, Expr, ExternItem, ExternMod, Function, ImplBlock, Item, MatchArm, Module,
-    Pattern, Stmt, StringPart, TypeParam, UnaryOp, VariantKind,
+    self, BinOp, Block, EnumPatternFields, EnumVariantArgs, Expr, ExternItem, ExternMod, Function,
+    ImplBlock, Item, MatchArm, Module, Pattern, Stmt, StringPart, TypeParam, UnaryOp, VariantKind,
 };
 use crate::compiler::error::{TypeError, TypeResult};
 
@@ -896,6 +896,113 @@ impl TypeChecker {
         (instantiated, subst)
     }
 
+    /// Check that variant arguments match the expected variant kind.
+    fn check_variant_args(
+        &mut self,
+        variant: &str,
+        expected_kind: &VariantInfoKind,
+        args: &EnumVariantArgs,
+    ) -> TypeResult<()> {
+        match (expected_kind, args) {
+            (VariantInfoKind::Unit, EnumVariantArgs::Unit) => {
+                // Good - unit variant with no args
+            }
+            (VariantInfoKind::Unit, EnumVariantArgs::Tuple(exprs)) if exprs.is_empty() => {
+                // Also ok - Some() parsed as Tuple([])
+            }
+            (VariantInfoKind::Unit, EnumVariantArgs::Tuple(exprs)) => {
+                self.error(TypeError::new(format!(
+                    "unit variant '{}' takes no arguments, got {}",
+                    variant,
+                    exprs.len()
+                )));
+            }
+            (VariantInfoKind::Unit, EnumVariantArgs::Struct(_)) => {
+                self.error(TypeError::new(format!(
+                    "unit variant '{}' does not take struct fields",
+                    variant
+                )));
+            }
+            (VariantInfoKind::Tuple(expected_tys), EnumVariantArgs::Tuple(exprs)) => {
+                if exprs.len() != expected_tys.len() {
+                    self.error(TypeError::new(format!(
+                        "variant '{}' expects {} arguments, got {}",
+                        variant,
+                        expected_tys.len(),
+                        exprs.len()
+                    )));
+                }
+                // Check and unify argument types
+                for (arg, expected_ty) in exprs.iter().zip(expected_tys.iter()) {
+                    let arg_ty = self.infer_expr(arg)?;
+                    if self.unify(&arg_ty, expected_ty).is_err()
+                        && !self.types_compatible(&arg_ty, expected_ty)
+                    {
+                        self.error(TypeError::with_help(
+                            format!("type mismatch in variant '{}'", variant),
+                            format!("expected {}, found {}", expected_ty, arg_ty),
+                        ));
+                    }
+                }
+            }
+            (VariantInfoKind::Tuple(_), EnumVariantArgs::Unit) => {
+                self.error(TypeError::new(format!(
+                    "tuple variant '{}' requires arguments",
+                    variant
+                )));
+            }
+            (VariantInfoKind::Tuple(_), EnumVariantArgs::Struct(_)) => {
+                self.error(TypeError::new(format!(
+                    "tuple variant '{}' should use tuple syntax, not struct syntax",
+                    variant
+                )));
+            }
+            (VariantInfoKind::Struct(expected_fields), EnumVariantArgs::Struct(field_exprs)) => {
+                // Check each provided field
+                for (field_name, field_expr) in field_exprs {
+                    if let Some((_, expected_ty)) = expected_fields.iter().find(|(n, _)| n == field_name) {
+                        let field_ty = self.infer_expr(field_expr)?;
+                        if self.unify(&field_ty, expected_ty).is_err()
+                            && !self.types_compatible(&field_ty, expected_ty)
+                        {
+                            self.error(TypeError::with_help(
+                                format!("type mismatch in field '{}' of variant '{}'", field_name, variant),
+                                format!("expected {}, found {}", expected_ty, field_ty),
+                            ));
+                        }
+                    } else {
+                        self.error(TypeError::new(format!(
+                            "unknown field '{}' in variant '{}'",
+                            field_name, variant
+                        )));
+                    }
+                }
+                // Check for missing required fields
+                for (expected_name, _) in expected_fields {
+                    if !field_exprs.iter().any(|(n, _)| n == expected_name) {
+                        self.error(TypeError::new(format!(
+                            "missing field '{}' in variant '{}'",
+                            expected_name, variant
+                        )));
+                    }
+                }
+            }
+            (VariantInfoKind::Struct(_), EnumVariantArgs::Unit) => {
+                self.error(TypeError::new(format!(
+                    "struct variant '{}' requires fields",
+                    variant
+                )));
+            }
+            (VariantInfoKind::Struct(_), EnumVariantArgs::Tuple(_)) => {
+                self.error(TypeError::new(format!(
+                    "struct variant '{}' should use struct syntax {{ field: value }}, not tuple syntax",
+                    variant
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Convert AST type to internal type representation.
     fn ast_type_to_ty(&self, ast_ty: &ast::Type) -> Ty {
         match ast_ty {
@@ -1486,8 +1593,18 @@ impl TypeChecker {
             }
             Pattern::Enum { name: _, variant: _, fields } => {
                 // For enum patterns, bind fields to Any for now
-                for p in fields {
-                    self.bind_pattern(p, &Ty::Any)?;
+                match fields {
+                    EnumPatternFields::Unit => {}
+                    EnumPatternFields::Tuple(patterns) => {
+                        for p in patterns {
+                            self.bind_pattern(p, &Ty::Any)?;
+                        }
+                    }
+                    EnumPatternFields::Struct(field_patterns) => {
+                        for (_, p) in field_patterns {
+                            self.bind_pattern(p, &Ty::Any)?;
+                        }
+                    }
                 }
             }
             Pattern::BitString(segments) => {
@@ -1702,46 +1819,7 @@ impl TypeChecker {
                     let (instantiated, subst) = self.instantiate_enum(&info);
 
                     if let Some((_, variant_kind)) = instantiated.variants.iter().find(|(v, _)| v == variant) {
-                        match variant_kind {
-                            VariantInfoKind::Unit => {
-                                if !args.is_empty() {
-                                    self.error(TypeError::new(format!(
-                                        "unit variant '{}' takes no arguments, got {}",
-                                        variant,
-                                        args.len()
-                                    )));
-                                }
-                            }
-                            VariantInfoKind::Tuple(expected_tys) => {
-                                if args.len() != expected_tys.len() {
-                                    self.error(TypeError::new(format!(
-                                        "variant '{}' expects {} arguments, got {}",
-                                        variant,
-                                        expected_tys.len(),
-                                        args.len()
-                                    )));
-                                }
-                                // Check and unify argument types
-                                for (arg, expected_ty) in args.iter().zip(expected_tys.iter()) {
-                                    let arg_ty = self.infer_expr(arg)?;
-                                    if self.unify(&arg_ty, expected_ty).is_err()
-                                        && !self.types_compatible(&arg_ty, expected_ty)
-                                    {
-                                        self.error(TypeError::with_help(
-                                            format!("type mismatch in variant '{}'", variant),
-                                            format!("expected {}, found {}", expected_ty, arg_ty),
-                                        ));
-                                    }
-                                }
-                            }
-                            VariantInfoKind::Struct(_) => {
-                                // Struct variants use struct literal syntax, not tuple syntax
-                                self.error(TypeError::new(format!(
-                                    "struct variant '{}' must be constructed with named fields: {}::{}{{ ... }}",
-                                    variant, enum_name, variant
-                                )));
-                            }
-                        }
+                        self.check_variant_args(variant, variant_kind, args)?;
                     } else {
                         self.error(TypeError::new(format!(
                             "enum '{}' has no variant '{}'",
@@ -1774,23 +1852,9 @@ impl TypeChecker {
                             info.variants.iter().find(|(v, _)| v == variant)
                         {
                             // Found the enum - instantiate it
-                            let (instantiated, subst) = self.instantiate_enum(&info);
+                            let (instantiated, subst) = self.instantiate_enum(info);
                             if let Some((_, variant_kind)) = instantiated.variants.iter().find(|(v, _)| v == variant) {
-                                // Unify arguments based on variant kind
-                                match variant_kind {
-                                    VariantInfoKind::Unit => {
-                                        // No arguments to unify
-                                    }
-                                    VariantInfoKind::Tuple(expected_tys) => {
-                                        for (arg, expected_ty) in args.iter().zip(expected_tys.iter()) {
-                                            let arg_ty = self.infer_expr(arg)?;
-                                            let _ = self.unify(&arg_ty, expected_ty);
-                                        }
-                                    }
-                                    VariantInfoKind::Struct(_) => {
-                                        // Struct variants handled elsewhere
-                                    }
-                                }
+                                self.check_variant_args(variant, variant_kind, args)?;
                             }
 
                             // Build type arguments
@@ -2476,13 +2540,29 @@ impl TypeChecker {
 
                 // Get enum info to determine field types
                 let field_types = self.get_enum_variant_types(&enum_name, variant);
-                let decon_fields: Vec<DeconstructedPat> = fields
-                    .iter()
-                    .zip(field_types.iter())
-                    .map(|(p, ft)| self.deconstruct_pattern(p, ft))
-                    .collect();
+                let (decon_fields, arity) = match fields {
+                    EnumPatternFields::Unit => (vec![], 0),
+                    EnumPatternFields::Tuple(patterns) => {
+                        let decon: Vec<DeconstructedPat> = patterns
+                            .iter()
+                            .zip(field_types.iter())
+                            .map(|(p, ft)| self.deconstruct_pattern(p, ft))
+                            .collect();
+                        let len = patterns.len();
+                        (decon, len)
+                    }
+                    EnumPatternFields::Struct(field_patterns) => {
+                        // For struct patterns, deconstruct each named field
+                        let decon: Vec<DeconstructedPat> = field_patterns
+                            .iter()
+                            .map(|(_, p)| self.deconstruct_pattern(p, &Ty::Any))
+                            .collect();
+                        let len = field_patterns.len();
+                        (decon, len)
+                    }
+                };
                 DeconstructedPat {
-                    ctor: Constructor::Variant(enum_name, variant.clone(), fields.len()),
+                    ctor: Constructor::Variant(enum_name, variant.clone(), arity),
                     fields: decon_fields,
                     ty: ty.clone(),
                 }
@@ -2989,7 +3069,17 @@ impl TypeChecker {
             Expr::EnumVariant { type_name, variant, args } => Expr::EnumVariant {
                 type_name: type_name.clone(),
                 variant: variant.clone(),
-                args: args.iter().map(|a| self.annotate_expr(a)).collect(),
+                args: match args {
+                    EnumVariantArgs::Unit => EnumVariantArgs::Unit,
+                    EnumVariantArgs::Tuple(exprs) => {
+                        EnumVariantArgs::Tuple(exprs.iter().map(|a| self.annotate_expr(a)).collect())
+                    }
+                    EnumVariantArgs::Struct(fields) => {
+                        EnumVariantArgs::Struct(
+                            fields.iter().map(|(n, e)| (n.clone(), self.annotate_expr(e))).collect()
+                        )
+                    }
+                },
             },
 
             Expr::Closure { params, body } => Expr::Closure {
@@ -3102,7 +3192,7 @@ impl TypeChecker {
                 body: Expr::EnumVariant {
                     type_name: Some("Result".to_string()),
                     variant: "Ok".to_string(),
-                    args: vec![Expr::Unit],
+                    args: EnumVariantArgs::Tuple(vec![Expr::Unit]),
                 },
             }
         } else {
@@ -3117,7 +3207,7 @@ impl TypeChecker {
                 body: Expr::EnumVariant {
                     type_name: Some("Result".to_string()),
                     variant: "Ok".to_string(),
-                    args: vec![Expr::Ident("__ffi_val".to_string())],
+                    args: EnumVariantArgs::Tuple(vec![Expr::Ident("__ffi_val".to_string())]),
                 },
             }
         };
@@ -3131,7 +3221,7 @@ impl TypeChecker {
             body: Expr::EnumVariant {
                 type_name: Some("Result".to_string()),
                 variant: "Err".to_string(),
-                args: vec![Expr::Ident("__ffi_err".to_string())],
+                args: EnumVariantArgs::Tuple(vec![Expr::Ident("__ffi_err".to_string())]),
             },
         };
 
@@ -3161,7 +3251,7 @@ impl TypeChecker {
             body: Expr::EnumVariant {
                 type_name: Some("Option".to_string()),
                 variant: "None".to_string(),
-                args: vec![],
+                args: EnumVariantArgs::Unit,
             },
         };
 
@@ -3171,7 +3261,7 @@ impl TypeChecker {
             body: Expr::EnumVariant {
                 type_name: Some("Option".to_string()),
                 variant: "Some".to_string(),
-                args: vec![Expr::Ident("__ffi_val".to_string())],
+                args: EnumVariantArgs::Tuple(vec![Expr::Ident("__ffi_val".to_string())]),
             },
         };
 
@@ -3526,8 +3616,18 @@ impl MethodResolver {
                 }
             }
             Expr::EnumVariant { args, .. } => {
-                for arg in args {
-                    self.resolve_expr(arg);
+                match args {
+                    EnumVariantArgs::Unit => {}
+                    EnumVariantArgs::Tuple(exprs) => {
+                        for arg in exprs {
+                            self.resolve_expr(arg);
+                        }
+                    }
+                    EnumVariantArgs::Struct(fields) => {
+                        for (_, expr) in fields {
+                            self.resolve_expr(expr);
+                        }
+                    }
                 }
             }
             Expr::FieldAccess { expr, .. } => {

@@ -517,14 +517,14 @@ pub enum Expr {
         /// Optional base expression for struct update syntax `..base`
         base: Option<Box<Expr>>,
     },
-    /// Enum variant construction: `Some(42)` or `Option::Some(42)`.
+    /// Enum variant construction: `Some(42)` or `Option::Some(42)` or `Move { x: 1, y: 2 }`.
     EnumVariant {
         /// Optional type name (e.g., `Option` in `Option::Some`)
         type_name: Option<String>,
         /// Variant name (e.g., `Some`)
         variant: String,
-        /// Arguments for tuple variants
-        args: Vec<Expr>,
+        /// Arguments for tuple or struct variants
+        args: EnumVariantArgs,
     },
     /// Field access: `expr.field`.
     FieldAccess { expr: Box<Expr>, field: String },
@@ -671,11 +671,11 @@ pub enum Pattern {
         name: String,
         fields: Vec<(String, Pattern)>,
     },
-    /// Enum variant pattern.
+    /// Enum variant pattern: `Some(x)`, `None`, or `Move { x, y }`.
     Enum {
         name: String,
         variant: String,
-        fields: Vec<Pattern>,
+        fields: EnumPatternFields,
     },
     /// Bit string / binary pattern: `<<A:8, B:16/little, Rest/binary>>`.
     BitString(Vec<BitStringSegment<Box<Pattern>>>),
@@ -829,6 +829,28 @@ pub enum VariantKind {
     Tuple(Vec<Type>),
     /// Struct variant: `Move { x: Int, y: Int }`
     Struct(Vec<(String, Type)>),
+}
+
+/// Arguments for enum variant construction expressions.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EnumVariantArgs {
+    /// Unit variant: `None`
+    Unit,
+    /// Tuple variant: `Some(42)`
+    Tuple(Vec<Expr>),
+    /// Struct variant: `Move { x: 10, y: 20 }`
+    Struct(Vec<(String, Expr)>),
+}
+
+/// Fields for enum variant patterns.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EnumPatternFields {
+    /// Unit variant: `None`
+    Unit,
+    /// Tuple variant: `Some(x)`
+    Tuple(Vec<Pattern>),
+    /// Struct variant: `Move { x, y }` or `Move { x: px, y: py }`
+    Struct(Vec<(String, Pattern)>),
 }
 
 /// Enum variant.

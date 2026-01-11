@@ -4,33 +4,64 @@ mod struct_variants {
     // An enum with all three variant kinds
     enum Message {
         Quit,
-        Move { x: Int, y: Int },
-        Write(String),
-        ChangeColor { r: Int, g: Int, b: Int },
+        Move { x: int, y: int },
+        Write(string),
+        ChangeColor { r: int, g: int, b: int },
     }
 
     // A more practical example: representing events
     enum Event {
-        Click { x: Int, y: Int, button: Int },
-        KeyPress { key: String },
-        Resize(Int, Int),
+        Click { x: int, y: int, button: int },
+        KeyPress { key: string },
+        Resize(int, int),
         Close,
+    }
+
+    fn describe_message(msg: Message) -> string {
+        match msg {
+            Message::Move { x, y } => "Moving to position",
+            Message::Quit => "Quitting",
+            Message::Write(s) => "Writing message",
+            Message::ChangeColor { r, g, b } => "Changing color",
+        }
+    }
+
+    fn describe_event(event: Event) -> string {
+        match event {
+            Event::Click { x, y, button } => "Mouse click",
+            Event::KeyPress { key } => "Key press",
+            Event::Resize(w, h) => "Window resize",
+            Event::Close => "Window close",
+        }
     }
 
     pub fn main() -> atom {
         io::println("=== Struct Variants Example ===");
-        // TODO: Construction and pattern matching for struct variants
-        // will be added in a future update. For now, this file demonstrates
-        // that struct variants can be defined in enums.
-        //
-        // Future syntax will be:
-        // let msg = Message::Move { x: 10, y: 20 };
-        // match msg {
-        //     Message::Move { x, y } => io::println("Moving to ({x}, {y})"),
-        //     Message::Quit => io::println("Quitting"),
-        //     _ => io::println("Other message"),
-        // }
-        io::println("Struct variant definitions work!");
+
+        // Construct struct variants
+        let move_msg = Message::Move { x: 10, y: 20 };
+        let color_msg = Message::ChangeColor { r: 255, g: 128, b: 0 };
+        let quit_msg = Message::Quit;
+        let write_msg = Message::Write("Hello");
+
+        // Use pattern matching
+        io::println(describe_message(move_msg));
+        io::println(describe_message(color_msg));
+        io::println(describe_message(quit_msg));
+        io::println(describe_message(write_msg));
+
+        // Event examples
+        let click = Event::Click { x: 100, y: 200, button: 1 };
+        let key = Event::KeyPress { key: "Enter" };
+        let resize = Event::Resize(800, 600);
+        let close = Event::Close;
+
+        io::println(describe_event(click));
+        io::println(describe_event(key));
+        io::println(describe_event(resize));
+        io::println(describe_event(close));
+
+        io::println("Struct variant construction and matching work!");
         :ok
     }
 }

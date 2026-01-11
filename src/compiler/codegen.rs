@@ -3,8 +3,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::compiler::ast::{
-    BinOp, BitEndianness, BitSegmentType, BitSignedness, BitStringSegment, Block, Expr, Function,
-    Item, Module as AstModule, Pattern as AstPattern, Stmt, UnaryOp, UseDecl, UseTree,
+    BinOp, BitEndianness, BitSegmentType, BitSignedness, BitStringSegment, Block,
+    EnumPatternFields, EnumVariantArgs, Expr, Function, Item, Module as AstModule,
+    Pattern as AstPattern, Stmt, UnaryOp, UseDecl, UseTree,
 };
 use crate::instruction::{Instruction, Operand, Pattern as VmPattern, Register, Source};
 use crate::Module;
@@ -357,7 +358,11 @@ impl Codegen {
             }
             Expr::Tuple(elems) | Expr::List(elems) => elems.iter().any(|e| Self::contains_call(e)),
             Expr::StructInit { fields, .. } => fields.iter().any(|(_, e)| Self::contains_call(e)),
-            Expr::EnumVariant { args, .. } => args.iter().any(|e| Self::contains_call(e)),
+            Expr::EnumVariant { args, .. } => match args {
+                EnumVariantArgs::Unit => false,
+                EnumVariantArgs::Tuple(exprs) => exprs.iter().any(|e| Self::contains_call(e)),
+                EnumVariantArgs::Struct(fields) => fields.iter().any(|(_, e)| Self::contains_call(e)),
+            },
             Expr::FieldAccess { expr, .. } => Self::contains_call(expr),
             Expr::Try { expr } => Self::contains_call(expr),
             Expr::MethodCall { .. } => true, // Method calls are calls
@@ -829,39 +834,88 @@ impl Codegen {
                 variant,
                 args,
             } => {
-                if args.is_empty() {
-                    // Unit variant: just an atom
-                    let dest = self.regs.alloc();
-                    self.emit(Instruction::LoadAtom {
-                        name: variant.clone(),
-                        dest,
-                    });
-                    Ok(dest)
-                } else {
-                    // Tuple variant: {:Variant, arg1, arg2, ...}
-                    let tag_reg = self.regs.alloc();
-                    self.emit(Instruction::LoadAtom {
-                        name: variant.clone(),
-                        dest: tag_reg,
-                    });
-                    self.emit(Instruction::Push {
-                        source: Operand::Reg(tag_reg),
-                    });
-
-                    for arg in args {
-                        let arg_reg = self.compile_expr(arg)?;
-                        self.emit(Instruction::Push {
-                            source: Operand::Reg(arg_reg),
+                match args {
+                    EnumVariantArgs::Unit => {
+                        // Unit variant: just an atom
+                        let dest = self.regs.alloc();
+                        self.emit(Instruction::LoadAtom {
+                            name: variant.clone(),
+                            dest,
                         });
+                        Ok(dest)
                     }
+                    EnumVariantArgs::Tuple(exprs) => {
+                        // Tuple variant: {:Variant, arg1, arg2, ...}
+                        let tag_reg = self.regs.alloc();
+                        self.emit(Instruction::LoadAtom {
+                            name: variant.clone(),
+                            dest: tag_reg,
+                        });
+                        self.emit(Instruction::Push {
+                            source: Operand::Reg(tag_reg),
+                        });
 
-                    let dest = self.regs.alloc();
-                    self.emit(Instruction::MakeTuple {
-                        arity: (args.len() + 1) as u8, // +1 for tag
-                        dest,
-                    });
+                        for arg in exprs {
+                            let arg_reg = self.compile_expr(arg)?;
+                            self.emit(Instruction::Push {
+                                source: Operand::Reg(arg_reg),
+                            });
+                        }
 
-                    Ok(dest)
+                        let dest = self.regs.alloc();
+                        self.emit(Instruction::MakeTuple {
+                            arity: (exprs.len() + 1) as u8, // +1 for tag
+                            dest,
+                        });
+
+                        Ok(dest)
+                    }
+                    EnumVariantArgs::Struct(fields) => {
+                        // Struct variant: {:Variant, #{field1 => val1, ...}}
+                        // Compile as a tuple with an atom tag and a map
+                        let tag_reg = self.regs.alloc();
+                        self.emit(Instruction::LoadAtom {
+                            name: variant.clone(),
+                            dest: tag_reg,
+                        });
+                        self.emit(Instruction::Push {
+                            source: Operand::Reg(tag_reg),
+                        });
+
+                        // Build the map of fields
+                        for (field_name, field_expr) in fields {
+                            let key_reg = self.regs.alloc();
+                            self.emit(Instruction::LoadAtom {
+                                name: field_name.clone(),
+                                dest: key_reg,
+                            });
+                            self.emit(Instruction::Push {
+                                source: Operand::Reg(key_reg),
+                            });
+
+                            let val_reg = self.compile_expr(field_expr)?;
+                            self.emit(Instruction::Push {
+                                source: Operand::Reg(val_reg),
+                            });
+                        }
+
+                        let map_reg = self.regs.alloc();
+                        self.emit(Instruction::MakeMap {
+                            count: fields.len() as u8,
+                            dest: map_reg,
+                        });
+                        self.emit(Instruction::Push {
+                            source: Operand::Reg(map_reg),
+                        });
+
+                        let dest = self.regs.alloc();
+                        self.emit(Instruction::MakeTuple {
+                            arity: 2, // tag + map
+                            dest,
+                        });
+
+                        Ok(dest)
+                    }
                 }
             }
 
@@ -1448,16 +1502,33 @@ impl Codegen {
                 variant,
                 fields,
             } => {
-                if fields.is_empty() {
-                    // Unit variant: just the atom
-                    Ok(VmPattern::Atom(variant.clone()))
-                } else {
-                    // Tuple variant: {:Variant, field1, ...}
-                    let mut vm_patterns = vec![VmPattern::Atom(variant.clone())];
-                    for field_pattern in fields {
-                        vm_patterns.push(self.compile_pattern(field_pattern)?);
+                match fields {
+                    EnumPatternFields::Unit => {
+                        // Unit variant: just the atom
+                        Ok(VmPattern::Atom(variant.clone()))
                     }
-                    Ok(VmPattern::Tuple(vm_patterns))
+                    EnumPatternFields::Tuple(patterns) => {
+                        // Tuple variant: {:Variant, field1, ...}
+                        let mut vm_patterns = vec![VmPattern::Atom(variant.clone())];
+                        for field_pattern in patterns {
+                            vm_patterns.push(self.compile_pattern(field_pattern)?);
+                        }
+                        Ok(VmPattern::Tuple(vm_patterns))
+                    }
+                    EnumPatternFields::Struct(field_patterns) => {
+                        // Struct variant: {:Variant, #{field1 => pattern1, ...}}
+                        let mut map_patterns = Vec::new();
+                        for (field_name, field_pattern) in field_patterns {
+                            map_patterns.push((
+                                VmPattern::Atom(field_name.clone()),
+                                self.compile_pattern(field_pattern)?,
+                            ));
+                        }
+                        Ok(VmPattern::Tuple(vec![
+                            VmPattern::Atom(variant.clone()),
+                            VmPattern::Map(map_patterns),
+                        ]))
+                    }
                 }
             }
 

@@ -45,9 +45,10 @@ impl GenericFunctionRegistry {
 pub type SharedGenericRegistry = Arc<RwLock<GenericFunctionRegistry>>;
 
 use crate::compiler::ast::{
-    BinOp, BitEndianness, BitSegmentType, BitSignedness, BitStringSegment, Block, Expr, Function,
-    Item, MatchArm, Module, ModuleContext, ModulePath, PathPrefix, Pattern, Stmt, StringPart,
-    TraitDef, TraitImpl, Type, UnaryOp, UseDecl, UseTree,
+    BinOp, BitEndianness, BitSegmentType, BitSignedness, BitStringSegment, Block,
+    EnumPatternFields, EnumVariantArgs, Expr, Function, Item, MatchArm, Module, ModuleContext,
+    ModulePath, PathPrefix, Pattern, Stmt, StringPart, TraitDef, TraitImpl, Type, UnaryOp,
+    UseDecl, UseTree,
 };
 
 /// Core Erlang emitter error.
@@ -334,8 +335,18 @@ impl CoreErlangEmitter {
                 }
             }
             Pattern::Enum { fields, .. } => {
-                for p in fields {
-                    self.collect_pattern_vars(p);
+                match fields {
+                    EnumPatternFields::Unit => {}
+                    EnumPatternFields::Tuple(patterns) => {
+                        for p in patterns {
+                            self.collect_pattern_vars(p);
+                        }
+                    }
+                    EnumPatternFields::Struct(field_patterns) => {
+                        for (_, p) in field_patterns {
+                            self.collect_pattern_vars(p);
+                        }
+                    }
                 }
             }
             _ => {}
@@ -2093,6 +2104,80 @@ impl CoreErlangEmitter {
         Ok(())
     }
 
+    /// Emit a default enum pattern (non-Result types).
+    fn emit_enum_pattern_default(&mut self, variant: &str, fields: &EnumPatternFields) -> CoreErlangResult<()> {
+        match fields {
+            EnumPatternFields::Unit => {
+                // Unit variant: just an atom
+                self.emit(&format!("'{}'", variant.to_lowercase()));
+            }
+            EnumPatternFields::Tuple(patterns) => {
+                // Tuple variant: {'variant', pat1, pat2, ...}
+                self.emit("{");
+                self.emit(&format!("'{}'", variant.to_lowercase()));
+                for pat in patterns {
+                    self.emit(", ");
+                    self.emit_pattern(pat)?;
+                }
+                self.emit("}");
+            }
+            EnumPatternFields::Struct(field_patterns) => {
+                // Struct variant: {'variant', ~{field1 => pat1, field2 => pat2, ...}~}
+                self.emit("{");
+                self.emit(&format!("'{}'", variant.to_lowercase()));
+                self.emit(", ~{");
+                let mut first = true;
+                for (field_name, field_pat) in field_patterns {
+                    if !first {
+                        self.emit(", ");
+                    }
+                    first = false;
+                    self.emit(&format!("'{}' := ", field_name));
+                    self.emit_pattern(field_pat)?;
+                }
+                self.emit("}~}");
+            }
+        }
+        Ok(())
+    }
+
+    /// Emit a default enum variant (non-Result types).
+    fn emit_enum_variant_default(&mut self, variant: &str, args: &EnumVariantArgs) -> CoreErlangResult<()> {
+        match args {
+            EnumVariantArgs::Unit => {
+                // Unit variant: just an atom
+                self.emit(&format!("'{}'", variant.to_lowercase()));
+            }
+            EnumVariantArgs::Tuple(exprs) => {
+                // Tuple variant: {'variant', arg1, arg2, ...}
+                self.emit("{");
+                self.emit(&format!("'{}'", variant.to_lowercase()));
+                for arg in exprs {
+                    self.emit(", ");
+                    self.emit_expr(arg)?;
+                }
+                self.emit("}");
+            }
+            EnumVariantArgs::Struct(fields) => {
+                // Struct variant: {'variant', #{field1 => val1, field2 => val2, ...}}
+                self.emit("{");
+                self.emit(&format!("'{}'", variant.to_lowercase()));
+                self.emit(", ~{");
+                let mut first = true;
+                for (field_name, field_expr) in fields {
+                    if !first {
+                        self.emit(", ");
+                    }
+                    first = false;
+                    self.emit(&format!("'{}' => ", field_name));
+                    self.emit_expr(field_expr)?;
+                }
+                self.emit("}~}");
+            }
+        }
+        Ok(())
+    }
+
     /// Emit an expression.
     fn emit_expr(&mut self, expr: &Expr) -> CoreErlangResult<()> {
         match expr {
@@ -2815,65 +2900,44 @@ impl CoreErlangEmitter {
                 let is_result = type_name.as_deref() == Some("Result")
                     || (type_name.is_none() && (variant == "Ok" || variant == "Err"));
                 if is_result {
-                    match variant.as_str() {
-                        "Ok" => {
-                            if args.len() == 1 {
-                                if let Expr::Unit = &args[0] {
-                                    // Ok(()) becomes just 'ok'
-                                    self.emit("'ok'");
-                                } else {
-                                    // Ok(value) becomes {'ok', value}
-                                    self.emit("{'ok', ");
-                                    self.emit_expr(&args[0])?;
-                                    self.emit("}");
-                                }
+                    match (variant.as_str(), args) {
+                        ("Ok", EnumVariantArgs::Tuple(exprs)) if exprs.len() == 1 => {
+                            if let Expr::Unit = &exprs[0] {
+                                // Ok(()) becomes just 'ok'
+                                self.emit("'ok'");
                             } else {
-                                // Multiple args (shouldn't happen for Result, but handle it)
-                                self.emit("{'ok'");
-                                for arg in args {
-                                    self.emit(", ");
-                                    self.emit_expr(arg)?;
-                                }
+                                // Ok(value) becomes {'ok', value}
+                                self.emit("{'ok', ");
+                                self.emit_expr(&exprs[0])?;
                                 self.emit("}");
                             }
                         }
-                        "Err" => {
+                        ("Ok", EnumVariantArgs::Tuple(exprs)) => {
+                            // Multiple args (shouldn't happen for Result, but handle it)
+                            self.emit("{'ok'");
+                            for arg in exprs {
+                                self.emit(", ");
+                                self.emit_expr(arg)?;
+                            }
+                            self.emit("}");
+                        }
+                        ("Err", EnumVariantArgs::Tuple(exprs)) => {
                             // Err(value) becomes {'error', value}
                             self.emit("{'error'");
-                            for arg in args {
+                            for arg in exprs {
                                 self.emit(", ");
                                 self.emit_expr(arg)?;
                             }
                             self.emit("}");
                         }
                         _ => {
-                            // Unknown Result variant, use default behavior
-                            if args.is_empty() {
-                                self.emit(&format!("'{}'", variant.to_lowercase()));
-                            } else {
-                                self.emit("{");
-                                self.emit(&format!("'{}'", variant.to_lowercase()));
-                                for arg in args {
-                                    self.emit(", ");
-                                    self.emit_expr(arg)?;
-                                }
-                                self.emit("}");
-                            }
+                            // Unknown Result variant or struct variant, use default behavior
+                            self.emit_enum_variant_default(variant, args)?;
                         }
                     }
                 } else {
-                    // Default enum variant handling: tagged tuples
-                    if args.is_empty() {
-                        self.emit(&format!("'{}'", variant.to_lowercase()));
-                    } else {
-                        self.emit("{");
-                        self.emit(&format!("'{}'", variant.to_lowercase()));
-                        for arg in args {
-                            self.emit(", ");
-                            self.emit_expr(arg)?;
-                        }
-                        self.emit("}");
-                    }
+                    // Default enum variant handling
+                    self.emit_enum_variant_default(variant, args)?;
                 }
             }
 
@@ -3366,61 +3430,42 @@ impl CoreErlangEmitter {
                 let is_result = name == "Result" || name.is_empty() && (variant == "Ok" || variant == "Err");
 
                 if is_result {
-                    match variant.as_str() {
-                        "Ok" => {
-                            // Check if this is Ok() or Ok(()) - both should match 'ok'
-                            let is_unit_ok = fields.is_empty() ||
-                                (fields.len() == 1 && matches!(fields[0], Pattern::Tuple(ref t) if t.is_empty()));
-
+                    match (variant.as_str(), fields) {
+                        ("Ok", EnumPatternFields::Unit) => {
+                            self.emit("'ok'");
+                        }
+                        ("Ok", EnumPatternFields::Tuple(pats)) => {
+                            // Check if this is Ok(()) - should match 'ok'
+                            let is_unit_ok = pats.len() == 1 && matches!(&pats[0], Pattern::Tuple(t) if t.is_empty());
                             if is_unit_ok {
                                 self.emit("'ok'");
                             } else {
                                 // Ok(value) matches {'ok', value}
                                 self.emit("{'ok'");
-                                for field in fields {
+                                for field in pats {
                                     self.emit(", ");
                                     self.emit_pattern(field)?;
                                 }
                                 self.emit("}");
                             }
                         }
-                        "Err" => {
+                        ("Err", EnumPatternFields::Tuple(pats)) => {
                             // Err(e) matches {'error', e}
                             self.emit("{'error'");
-                            for field in fields {
+                            for field in pats {
                                 self.emit(", ");
                                 self.emit_pattern(field)?;
                             }
                             self.emit("}");
                         }
                         _ => {
-                            // Unknown Result variant, use default
-                            if fields.is_empty() {
-                                self.emit(&format!("'{}'", variant.to_lowercase()));
-                            } else {
-                                self.emit("{");
-                                self.emit(&format!("'{}'", variant.to_lowercase()));
-                                for field in fields {
-                                    self.emit(", ");
-                                    self.emit_pattern(field)?;
-                                }
-                                self.emit("}");
-                            }
+                            // Unknown Result variant or struct variant, use default
+                            self.emit_enum_pattern_default(variant, fields)?;
                         }
                     }
                 } else {
                     // Default enum pattern handling
-                    if fields.is_empty() {
-                        self.emit(&format!("'{}'", variant.to_lowercase()));
-                    } else {
-                        self.emit("{");
-                        self.emit(&format!("'{}'", variant.to_lowercase()));
-                        for field in fields {
-                            self.emit(", ");
-                            self.emit_pattern(field)?;
-                        }
-                        self.emit("}");
-                    }
+                    self.emit_enum_pattern_default(variant, fields)?;
                 }
             }
 

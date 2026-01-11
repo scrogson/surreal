@@ -1338,7 +1338,7 @@ impl<'source> Parser<'source> {
                                 let variant = segments[variant_idx].clone();
                                 let type_path = segments[..variant_idx].join("::");
 
-                                // Check for args
+                                // Check for tuple args
                                 let args = if self.check(&Token::LParen) {
                                     self.advance();
                                     let mut args = Vec::new();
@@ -1352,9 +1352,27 @@ impl<'source> Parser<'source> {
                                         }
                                     }
                                     self.expect(&Token::RParen)?;
-                                    args
+                                    EnumVariantArgs::Tuple(args)
+                                } else if self.check(&Token::LBrace) {
+                                    // Struct variant: mod::Type::Variant { field: value }
+                                    self.advance();
+                                    let mut fields = Vec::new();
+                                    if !self.check(&Token::RBrace) {
+                                        loop {
+                                            let field_name = self.expect_ident()?;
+                                            self.expect(&Token::Colon)?;
+                                            let field_value = self.parse_expr()?;
+                                            fields.push((field_name, field_value));
+                                            if !self.check(&Token::Comma) {
+                                                break;
+                                            }
+                                            self.advance();
+                                        }
+                                    }
+                                    self.expect(&Token::RBrace)?;
+                                    EnumVariantArgs::Struct(fields)
                                 } else {
-                                    vec![]
+                                    EnumVariantArgs::Unit
                                 };
 
                                 expr = Expr::EnumVariant {
@@ -1500,7 +1518,7 @@ impl<'source> Parser<'source> {
                 if let Some(Token::TypeIdent(variant)) = self.peek().cloned() {
                     self.advance();
 
-                    // Check for args: TypeIdent::Variant(args)
+                    // Check for tuple args: TypeIdent::Variant(args)
                     if self.check(&Token::LParen) {
                         self.advance();
                         let mut args = Vec::new();
@@ -1517,7 +1535,31 @@ impl<'source> Parser<'source> {
                         return Ok(Expr::EnumVariant {
                             type_name: Some(name),
                             variant,
-                            args,
+                            args: EnumVariantArgs::Tuple(args),
+                        });
+                    }
+
+                    // Check for struct fields: TypeIdent::Variant { field: value }
+                    if self.check(&Token::LBrace) {
+                        self.advance();
+                        let mut fields = Vec::new();
+                        if !self.check(&Token::RBrace) {
+                            loop {
+                                let field_name = self.expect_ident()?;
+                                self.expect(&Token::Colon)?;
+                                let field_value = self.parse_expr()?;
+                                fields.push((field_name, field_value));
+                                if !self.check(&Token::Comma) {
+                                    break;
+                                }
+                                self.advance();
+                            }
+                        }
+                        self.expect(&Token::RBrace)?;
+                        return Ok(Expr::EnumVariant {
+                            type_name: Some(name),
+                            variant,
+                            args: EnumVariantArgs::Struct(fields),
                         });
                     }
 
@@ -1525,7 +1567,7 @@ impl<'source> Parser<'source> {
                     return Ok(Expr::EnumVariant {
                         type_name: Some(name),
                         variant,
-                        args: vec![],
+                        args: EnumVariantArgs::Unit,
                     });
                 } else if let Some(Token::Ident(method)) = self.peek().cloned() {
                     // Static method path: Type::method
@@ -1559,7 +1601,7 @@ impl<'source> Parser<'source> {
                 return Ok(Expr::EnumVariant {
                     type_name: None,
                     variant: name,
-                    args,
+                    args: EnumVariantArgs::Tuple(args),
                 });
             }
 
@@ -1567,7 +1609,7 @@ impl<'source> Parser<'source> {
             return Ok(Expr::EnumVariant {
                 type_name: None,
                 variant: name,
-                args: vec![],
+                args: EnumVariantArgs::Unit,
             });
         }
 
@@ -1970,6 +2012,7 @@ impl<'source> Parser<'source> {
                     let variant = self.expect_type_ident()?;
 
                     let fields = if self.check(&Token::LParen) {
+                        // Tuple variant pattern: mod::Type::Variant(...)
                         self.advance();
                         let mut fs = Vec::new();
                         if !self.check(&Token::RParen) {
@@ -1982,9 +2025,34 @@ impl<'source> Parser<'source> {
                             }
                         }
                         self.expect(&Token::RParen)?;
-                        fs
+                        EnumPatternFields::Tuple(fs)
+                    } else if self.check(&Token::LBrace) {
+                        // Struct variant pattern: mod::Type::Variant { field, field: pattern, .. }
+                        self.advance();
+                        let mut fs = Vec::new();
+                        while !self.check(&Token::RBrace) && !self.is_at_end() {
+                            if self.check(&Token::DotDot) {
+                                self.advance();
+                                break;
+                            }
+                            let field_name = self.expect_ident()?;
+                            let field_pattern = if self.check(&Token::Colon) {
+                                self.advance();
+                                self.parse_pattern()?
+                            } else {
+                                Pattern::Ident(field_name.clone())
+                            };
+                            fs.push((field_name, field_pattern));
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                        self.expect(&Token::RBrace)?;
+                        EnumPatternFields::Struct(fs)
                     } else {
-                        Vec::new()
+                        EnumPatternFields::Unit
                     };
 
                     return Ok(Pattern::Enum {
@@ -2040,12 +2108,13 @@ impl<'source> Parser<'source> {
         if let Some(Token::TypeIdent(name)) = self.peek().cloned() {
             self.advance();
 
-            // Enum variant: Name::Variant or Name::Variant(...)
+            // Enum variant: Name::Variant or Name::Variant(...) or Name::Variant { ... }
             if self.check(&Token::ColonColon) {
                 self.advance();
                 let variant = self.expect_type_ident()?;
 
                 let fields = if self.check(&Token::LParen) {
+                    // Tuple variant pattern
                     self.advance();
                     let mut fs = Vec::new();
                     if !self.check(&Token::RParen) {
@@ -2058,9 +2127,34 @@ impl<'source> Parser<'source> {
                         }
                     }
                     self.expect(&Token::RParen)?;
-                    fs
+                    EnumPatternFields::Tuple(fs)
+                } else if self.check(&Token::LBrace) {
+                    // Struct variant pattern: Type::Variant { field, field: pattern, .. }
+                    self.advance();
+                    let mut fs = Vec::new();
+                    while !self.check(&Token::RBrace) && !self.is_at_end() {
+                        if self.check(&Token::DotDot) {
+                            self.advance();
+                            break;
+                        }
+                        let field_name = self.expect_ident()?;
+                        let field_pattern = if self.check(&Token::Colon) {
+                            self.advance();
+                            self.parse_pattern()?
+                        } else {
+                            Pattern::Ident(field_name.clone())
+                        };
+                        fs.push((field_name, field_pattern));
+                        if self.check(&Token::Comma) {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    self.expect(&Token::RBrace)?;
+                    EnumPatternFields::Struct(fs)
                 } else {
-                    Vec::new()
+                    EnumPatternFields::Unit
                 };
 
                 return Ok(Pattern::Enum {
@@ -2105,7 +2199,7 @@ impl<'source> Parser<'source> {
                 return Ok(Pattern::Struct { name, fields });
             }
 
-            // Unqualified enum variant pattern: Variant(...)
+            // Unqualified enum variant pattern: Variant(...) or Variant { ... }
             if self.check(&Token::LParen) {
                 self.advance();
                 let mut fields = Vec::new();
@@ -2122,7 +2216,7 @@ impl<'source> Parser<'source> {
                 return Ok(Pattern::Enum {
                     name: String::new(), // No type qualifier
                     variant: name,
-                    fields,
+                    fields: EnumPatternFields::Tuple(fields),
                 });
             }
 
@@ -2130,7 +2224,7 @@ impl<'source> Parser<'source> {
             return Ok(Pattern::Enum {
                 name: String::new(),
                 variant: name,
-                fields: vec![],
+                fields: EnumPatternFields::Unit,
             });
         }
 
@@ -2898,6 +2992,96 @@ mod tests {
             }
         } else {
             panic!("expected enum");
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_variant_construction() {
+        let source = r#"
+            mod test {
+                enum Message {
+                    Move { x: int, y: int },
+                }
+
+                fn main() {
+                    let msg = Message::Move { x: 10, y: 20 };
+                    msg
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        // Find the function
+        let func = module.items.iter().find_map(|item| {
+            if let Item::Function(f) = item { Some(f) } else { None }
+        }).expect("expected function");
+
+        // Check the let statement
+        if let Some(Stmt::Let { pattern: _, ty: _, value: init }) = func.body.stmts.first() {
+            if let Expr::EnumVariant { type_name, variant, args } = init {
+                assert_eq!(type_name.as_deref(), Some("Message"));
+                assert_eq!(variant, "Move");
+                if let EnumVariantArgs::Struct(fields) = args {
+                    assert_eq!(fields.len(), 2);
+                    assert_eq!(fields[0].0, "x");
+                    assert_eq!(fields[1].0, "y");
+                } else {
+                    panic!("expected struct variant args");
+                }
+            } else {
+                panic!("expected EnumVariant expression");
+            }
+        } else {
+            panic!("expected let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_variant_pattern() {
+        let source = r#"
+            mod test {
+                enum Message {
+                    Move { x: int, y: int },
+                }
+
+                fn main(msg: Message) {
+                    match msg {
+                        Message::Move { x, y } => x + y,
+                    }
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        // Find the function
+        let func = module.items.iter().find_map(|item| {
+            if let Item::Function(f) = item { Some(f) } else { None }
+        }).expect("expected function");
+
+        // Check the match expression
+        if let Some(expr) = &func.body.expr {
+            if let Expr::Match { arms, .. } = expr.as_ref() {
+                let arm = &arms[0];
+                if let Pattern::Enum { name, variant, fields } = &arm.pattern {
+                    assert_eq!(name, "Message");
+                    assert_eq!(variant, "Move");
+                    if let EnumPatternFields::Struct(field_patterns) = fields {
+                        assert_eq!(field_patterns.len(), 2);
+                        assert_eq!(field_patterns[0].0, "x");
+                        assert_eq!(field_patterns[1].0, "y");
+                    } else {
+                        panic!("expected struct pattern fields");
+                    }
+                } else {
+                    panic!("expected Enum pattern");
+                }
+            } else {
+                panic!("expected match expression");
+            }
+        } else {
+            panic!("expected expression in body");
         }
     }
 
