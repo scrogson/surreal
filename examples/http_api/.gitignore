@@ -1,0 +1,4 @@
+/deps/
+/_build/
+/ebin/
+/*.beam

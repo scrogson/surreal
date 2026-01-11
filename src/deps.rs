@@ -323,6 +323,8 @@ impl DepsManager {
 
         println!("Compiling dependencies...");
 
+        // Collect all dep names
+        let mut pending: Vec<String> = Vec::new();
         for entry in fs::read_dir(&deps_dir).map_err(|e| {
             DepsError::new(format!("Failed to read deps directory: {}", e))
         })? {
@@ -337,24 +339,69 @@ impl DepsManager {
                 continue;
             }
 
-            self.compile_erlang_dep(&pkg_name)?;
-            self.compile_elixir_dep(&pkg_name)?;
+            pending.push(pkg_name);
+        }
+
+        // Multiple passes to handle dependencies
+        // Keep trying until no progress is made
+        let max_passes = pending.len() + 1;
+        for pass in 0..max_passes {
+            if pending.is_empty() {
+                break;
+            }
+
+            let mut still_pending = Vec::new();
+            let mut made_progress = false;
+
+            for pkg_name in pending {
+                // Try to compile - if it fails, we'll retry next pass
+                let erlang_result = self.compile_erlang_dep(&pkg_name);
+                let elixir_result = self.compile_elixir_dep(&pkg_name);
+
+                if erlang_result.is_err() || elixir_result.is_err() {
+                    // Only retry if this isn't the last pass
+                    if pass < max_passes - 1 {
+                        still_pending.push(pkg_name);
+                    } else {
+                        // Last pass - report the error
+                        if let Err(e) = erlang_result {
+                            return Err(e);
+                        }
+                        if let Err(e) = elixir_result {
+                            return Err(e);
+                        }
+                    }
+                } else {
+                    made_progress = true;
+                }
+            }
+
+            pending = still_pending;
+
+            // If no progress was made and we still have pending deps, we're stuck
+            if !made_progress && !pending.is_empty() {
+                return Err(DepsError::new(format!(
+                    "Unable to compile dependencies: {:?}",
+                    pending
+                )));
+            }
         }
 
         println!("Dependencies compiled.");
         Ok(())
     }
 
-    /// Compile an Erlang dependency.
+    /// Compile an Erlang dependency using rebar3.
+    /// Hex packages come precompiled, so we skip if .beam files already exist.
     fn compile_erlang_dep(&self, name: &str) -> DepsResult<()> {
         let deps_dir = self.deps_dir();
         let pkg_dir = deps_dir.join(name);
         let src_dir = pkg_dir.join("src");
         let ebin_dir = pkg_dir.join("ebin");
 
-        // Check if there are .erl files to compile
+        // Check if there are .erl files
         if !src_dir.exists() {
-            // Might be a Dream or Elixir package, skip for now
+            // Might be a Dream or Elixir package, skip
             return Ok(());
         }
 
@@ -368,36 +415,90 @@ impl DepsManager {
             return Ok(());
         }
 
-        println!("  Compiling {}...", name);
+        // Check if already compiled (hex packages come precompiled)
+        // Look for both .beam files AND .app file
+        if ebin_dir.exists() {
+            let has_beam = fs::read_dir(&ebin_dir)
+                .map(|entries| {
+                    entries
+                        .filter_map(|e| e.ok())
+                        .any(|e| e.path().extension().map_or(false, |ext| ext == "beam"))
+                })
+                .unwrap_or(false);
 
-        // Create ebin directory
-        fs::create_dir_all(&ebin_dir).map_err(|e| {
-            DepsError::new(format!("Failed to create ebin for {}: {}", name, e))
-        })?;
+            let has_app = ebin_dir.join(format!("{}.app", name)).exists();
 
-        // Compile each .erl file
-        for entry in erl_files {
-            let erl_path = entry.path();
-
-            let status = std::process::Command::new("erlc")
-                .arg("-o")
-                .arg(&ebin_dir)
-                .arg(&erl_path)
-                .status()
-                .map_err(|e| {
-                    DepsError::new(format!("Failed to run erlc for {}: {}", name, e))
-                })?;
-
-            if !status.success() {
-                return Err(DepsError::new(format!(
-                    "Failed to compile {} in {}",
-                    erl_path.display(),
-                    name
-                )));
+            if has_beam && has_app {
+                println!("  {} (precompiled)", name);
+                return Ok(());
             }
         }
 
+        // Need to compile - check if rebar3 is available
+        let rebar3_check = std::process::Command::new("rebar3")
+            .arg("--version")
+            .output();
+
+        if rebar3_check.is_err() {
+            return Err(DepsError::new(
+                "rebar3 not found. Please install rebar3 to compile Erlang dependencies.",
+            ));
+        }
+
+        println!("  Compiling {} (rebar3)...", name);
+
+        // Set ERL_LIBS so rebar3 can find other deps for include_lib
+        let abs_deps_dir = deps_dir.canonicalize().unwrap_or(deps_dir.clone());
+
+        // Run rebar3 compile in the package directory
+        let output = std::process::Command::new("rebar3")
+            .arg("compile")
+            .current_dir(&pkg_dir)
+            .env("ERL_LIBS", &abs_deps_dir)
+            .output()
+            .map_err(|e| DepsError::new(format!("Failed to run rebar3 for {}: {}", name, e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(DepsError::new(format!(
+                "Failed to compile {} with rebar3:\n{}",
+                name, stderr
+            )));
+        }
+
+        // rebar3 outputs to _build/default/lib/<name>/ebin
+        // We need to copy or symlink to deps/<name>/ebin for our runtime
+        let rebar3_ebin = pkg_dir.join("_build/default/lib").join(name).join("ebin");
+
+        if rebar3_ebin.exists() {
+            // Remove existing ebin if it exists
+            if ebin_dir.exists() {
+                let _ = fs::remove_dir_all(&ebin_dir);
+            }
+
+            // Copy the ebin directory (symlinks can cause issues across filesystems)
+            Self::copy_dir_recursive(&rebar3_ebin, &ebin_dir).map_err(|e| {
+                DepsError::new(format!("Failed to copy ebin for {}: {}", name, e))
+            })?;
+        }
+
         println!("  {} compiled", name);
+        Ok(())
+    }
+
+    /// Recursively copy a directory.
+    fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+        fs::create_dir_all(dst)?;
+        for entry in fs::read_dir(src)? {
+            let entry = entry?;
+            let src_path = entry.path();
+            let dst_path = dst.join(entry.file_name());
+            if src_path.is_dir() {
+                Self::copy_dir_recursive(&src_path, &dst_path)?;
+            } else {
+                fs::copy(&src_path, &dst_path)?;
+            }
+        }
         Ok(())
     }
 

@@ -1,0 +1,81 @@
+// HTTP API Example
+// Uses cowboy (Erlang) for HTTP server
+
+mod http_api {
+    /// Start the HTTP server on port 8080
+    pub fn main() -> atom {
+        // Start cowboy and its dependencies
+        :application::ensure_all_started(:cowboy);
+
+        let dispatch = compile_routes();
+
+        // Build the options map using maps::put
+        let env_map = :maps::put(:dispatch, dispatch, :maps::new());
+        let opts = :maps::put(:env, env_map, :maps::new());
+
+        // Start cowboy HTTP listener
+        let result = :cowboy::start_clear(
+            :http_listener,
+            [(:port, 8080)],
+            opts
+        );
+
+        // Check if start was successful using element/2
+        let status = :erlang::element(1, result);
+        if status == :ok {
+            :io::format("Server started on http://localhost:8080~n", []);
+            :io::format("Try: curl http://localhost:8080/api/hello~n", []);
+            :io::format("     curl http://localhost:8080/api/users~n", []);
+            // Keep the process alive
+            receive {
+                :stop => :ok
+            }
+        } else {
+            let reason = :erlang::element(2, result);
+            :io::format("Failed to start server: ~p~n", [reason]);
+            :error
+        }
+    }
+
+    /// Compile cowboy routes
+    fn compile_routes() -> any {
+        // Build route list using lists:append to avoid type checker issues
+        let r1 = ("/api/hello", :hello_handler, []);
+        let r2 = ("/api/users", :users_handler, []);
+        let r3 = (:_, :not_found_handler, []);
+        let routes = :lists::append([r1], :lists::append([r2], [r3]));
+        let host_routes = (:_, routes);
+        :cowboy_router::compile([host_routes])
+    }
+}
+
+/// Handler for GET /api/hello
+mod hello_handler {
+    pub fn init(req: any, state: any) -> (atom, any, any) {
+        let body = "Hello from Dream!";
+        let headers = :maps::put("content-type", "text/plain", :maps::new());
+        let req2 = :cowboy_req::reply(200, headers, body, req);
+        (:ok, req2, state)
+    }
+}
+
+/// Handler for GET /api/users
+mod users_handler {
+    pub fn init(req: any, state: any) -> (atom, any, any) {
+        let body = "Users: Alice, Bob, Charlie";
+        let headers = :maps::put("content-type", "text/plain", :maps::new());
+        let req2 = :cowboy_req::reply(200, headers, body, req);
+        (:ok, req2, state)
+    }
+}
+
+/// Handler for 404 Not Found
+mod not_found_handler {
+    pub fn init(req: any, state: any) -> (atom, any, any) {
+        let path = :cowboy_req::path(req);
+        let body = :io_lib::format("Not Found: ~s", [path]);
+        let headers = :maps::put("content-type", "text/plain", :maps::new());
+        let req2 = :cowboy_req::reply(404, headers, body, req);
+        (:ok, req2, state)
+    }
+}
