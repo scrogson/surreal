@@ -140,14 +140,13 @@ pub fn xor<T>(opt: Option<T>, other: Option<T>) -> Option<T> {
     }
 }
 
-// TODO: flatten requires nested generics (Option<Option<T>>) which needs parser work
-// /// Convert Option<Option<T>> to Option<T>.
-// pub fn flatten<T>(opt: Option<Option<T>>) -> Option<T> {
-//     match opt {
-//         Some(inner) => inner,
-//         None => None,
-//     }
-// }
+/// Convert Option<Option<T>> to Option<T>.
+pub fn flatten<T>(opt: Option<Option<T>>) -> Option<T> {
+    match opt {
+        Some(inner) => inner,
+        None => None,
+    }
+}
 
 /// Zip two options together into an option of a tuple.
 /// Returns Some((a, b)) only if both options are Some.

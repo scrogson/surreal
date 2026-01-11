@@ -13,6 +13,9 @@ pub struct Parser<'source> {
     tokens: Vec<SpannedToken>,
     pos: usize,
     source: &'source str,
+    /// Tracks if we have a pending `>` from splitting a `>>` token.
+    /// This enables parsing nested generics like `Option<Option<T>>`.
+    pending_gt: bool,
 }
 
 impl<'source> Parser<'source> {
@@ -24,6 +27,7 @@ impl<'source> Parser<'source> {
             tokens,
             pos: 0,
             source,
+            pending_gt: false,
         }
     }
 
@@ -2424,6 +2428,7 @@ impl<'source> Parser<'source> {
 
     /// Parse optional type arguments: `<int, String>`.
     /// Returns empty Vec if no type arguments present.
+    /// Uses `expect_gt()` to handle nested generics like `Option<Option<T>>`.
     fn parse_type_args(&mut self) -> ParseResult<Vec<Type>> {
         if !self.check(&Token::Lt) {
             return Ok(Vec::new());
@@ -2440,7 +2445,7 @@ impl<'source> Parser<'source> {
             self.advance(); // consume ','
         }
 
-        self.expect(&Token::Gt)?;
+        self.expect_gt()?; // Use expect_gt to handle >> as two > tokens
         Ok(args)
     }
 
@@ -2647,6 +2652,42 @@ impl<'source> Parser<'source> {
 
     fn check(&self, expected: &Token) -> bool {
         self.peek() == Some(expected)
+    }
+
+    /// Check if the next token is `>`, handling the case where `>>` needs to be split.
+    /// Used for parsing generic type arguments like `Option<T>` and nested `Option<Option<T>>`.
+    fn check_gt(&self) -> bool {
+        if self.pending_gt {
+            return true;
+        }
+        matches!(self.peek(), Some(Token::Gt) | Some(Token::GtGt))
+    }
+
+    /// Expect a `>` token, handling the case where `>>` needs to be split.
+    /// When we see `>>` and expect `>`, we consume it but set `pending_gt`
+    /// so the next `>` expectation is satisfied without consuming another token.
+    fn expect_gt(&mut self) -> ParseResult<()> {
+        if self.pending_gt {
+            self.pending_gt = false;
+            return Ok(());
+        }
+        if self.check(&Token::Gt) {
+            self.advance();
+            Ok(())
+        } else if self.check(&Token::GtGt) {
+            self.advance();
+            self.pending_gt = true; // We've used one `>`, save the other
+            Ok(())
+        } else if self.is_at_end() {
+            Err(ParseError::unexpected_eof(">"))
+        } else {
+            let span = self.current_span();
+            Err(ParseError::unexpected_token(
+                self.peek().unwrap(),
+                ">",
+                span,
+            ))
+        }
     }
 
     // TODO: Use these for parsing contextual keywords like `type` in type aliases

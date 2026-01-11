@@ -165,8 +165,19 @@ pub fn and<T, U, E>(res: Result<T, E>, other: Result<U, E>) -> Result<U, E> {
     }
 }
 
-// TODO: flatten and transpose require nested generics which needs parser work
-// /// Convert Result<Result<T, E>, E> to Result<T, E>.
-// pub fn flatten<T, E>(res: Result<Result<T, E>, E>) -> Result<T, E>
-// /// Convert Result<Option<T>, E> to Option<Result<T, E>>.
-// pub fn transpose<T, E>(res: Result<Option<T>, E>) -> Option<Result<T, E>>
+/// Convert Result<Result<T, E>, E> to Result<T, E>.
+pub fn flatten<T, E>(res: Result<Result<T, E>, E>) -> Result<T, E> {
+    match res {
+        Ok(inner) => inner,
+        Err(e) => Err(e),
+    }
+}
+
+/// Convert Result<Option<T>, E> to Option<Result<T, E>>.
+pub fn transpose<T, E>(res: Result<Option<T>, E>) -> Option<Result<T, E>> {
+    match res {
+        Ok(Some(x)) => Some(Ok(x)),
+        Ok(None) => None,
+        Err(e) => Some(Err(e)),
+    }
+}
