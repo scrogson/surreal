@@ -4985,4 +4985,43 @@ mod tests {
             panic!("expected impl block");
         }
     }
+
+    #[test]
+    fn test_parse_wrapped_module_with_leading_comments() {
+        let source = r#"// Define modules here. All code must be inside mod blocks.
+// After saving, call functions from the REPL prompt.
+
+mod repl_edit {
+    pub fn add(a: int, b: int) -> int {
+        a + b
+    }
+}
+"#;
+        let mut parser = Parser::new(source);
+        let modules = parser
+            .parse_file_modules("repl_edit")
+            .expect("should parse wrapped module with leading comments");
+
+        assert_eq!(modules.len(), 1);
+        assert_eq!(modules[0].name, "repl_edit");
+        // Should have Option, Result (prelude) + add function
+        assert!(user_items(&modules[0]).len() >= 1);
+    }
+
+    #[test]
+    fn test_parse_wrapped_module_no_comments() {
+        let source = r#"mod repl_edit {
+    struct User {
+        name: String,
+    }
+}
+"#;
+        let mut parser = Parser::new(source);
+        let modules = parser
+            .parse_file_modules("repl_edit")
+            .expect("should parse wrapped module without comments");
+
+        assert_eq!(modules.len(), 1);
+        assert_eq!(modules[0].name, "repl_edit");
+    }
 }
