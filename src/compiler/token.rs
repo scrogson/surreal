@@ -253,6 +253,12 @@ pub enum Token {
         // Extract content between :' and '
         Some(s[2..s.len()-1].to_string())
     })]
+    // Also support double-quote syntax: :"Elixir.Enum"
+    #[regex(r#":"[^"]*""#, |lex| {
+        let s = lex.slice();
+        // Extract content between :" and "
+        Some(s[2..s.len()-1].to_string())
+    })]
     QuotedAtom(String),
 
     #[regex(r"[a-z_][a-z0-9_]*", |lex| Some(lex.slice().to_string()), priority = 1)]
@@ -547,5 +553,30 @@ mod tests {
         let mut lex = Token::lexer("extern type");
         assert_eq!(lex.next(), Some(Ok(Token::Extern)));
         assert_eq!(lex.next(), Some(Ok(Token::Type)));
+    }
+
+    #[test]
+    fn test_quoted_atoms() {
+        // Single-quoted atoms
+        let mut lex = Token::lexer(":'Elixir.Enum' :'my-atom'");
+        assert_eq!(
+            lex.next(),
+            Some(Ok(Token::QuotedAtom("Elixir.Enum".to_string())))
+        );
+        assert_eq!(
+            lex.next(),
+            Some(Ok(Token::QuotedAtom("my-atom".to_string())))
+        );
+
+        // Double-quoted atoms
+        let mut lex = Token::lexer(r#":"Elixir.Jason" :"with.dots""#);
+        assert_eq!(
+            lex.next(),
+            Some(Ok(Token::QuotedAtom("Elixir.Jason".to_string())))
+        );
+        assert_eq!(
+            lex.next(),
+            Some(Ok(Token::QuotedAtom("with.dots".to_string())))
+        );
     }
 }
