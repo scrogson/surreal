@@ -1,8 +1,9 @@
 //! Dream CLI - Build and run Dream programs.
 
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 
 use clap::{Parser, Subcommand};
 
@@ -1545,6 +1546,9 @@ fn run_application(
 
     let status = cmd.status();
 
+    // Reset terminal in case erl left it in raw mode (e.g., after Ctrl+C)
+    reset_terminal();
+
     match status {
         Ok(s) if s.success() => ExitCode::SUCCESS,
         Ok(s) => ExitCode::from(s.code().unwrap_or(1) as u8),
@@ -1609,6 +1613,9 @@ fn run_function(
 
     let status = cmd.status();
 
+    // Reset terminal in case erl left it in raw mode (e.g., after Ctrl+C)
+    reset_terminal();
+
     match status {
         Ok(s) if s.success() => ExitCode::SUCCESS,
         Ok(s) => ExitCode::from(s.code().unwrap_or(1) as u8),
@@ -1617,6 +1624,25 @@ fn run_function(
             ExitCode::from(1)
         }
     }
+}
+
+/// Reset the terminal to a sane state.
+/// This is necessary after running erl because it may leave the terminal in raw mode
+/// if interrupted with Ctrl+C, causing arrow keys and other control sequences to
+/// print garbage instead of working properly.
+fn reset_terminal() {
+    // On Unix, use stty sane to reset terminal settings
+    #[cfg(unix)]
+    {
+        let _ = Command::new("stty")
+            .arg("sane")
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    // Flush stdout to ensure any pending output is written
+    let _ = io::stdout().flush();
 }
 
 /// Convert a TOML value to an Erlang term string.
