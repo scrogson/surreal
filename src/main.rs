@@ -75,6 +75,9 @@ enum Commands {
         /// Keep the BEAM running after function returns (for non-application mode)
         #[arg(long)]
         no_halt: bool,
+        /// Start with interactive Erlang shell (like iex -S mix)
+        #[arg(short = 'S', long)]
+        shell: bool,
         /// Environment: dev, test, prod (default: dev)
         #[arg(short, long, default_value = "dev")]
         env: String,
@@ -141,10 +144,11 @@ fn main() -> ExitCode {
             function,
             eval,
             no_halt,
+            shell,
             env,
             features,
             args,
-        } => cmd_run(file.as_deref(), function.as_deref(), eval, no_halt, &env, &features, &args),
+        } => cmd_run(file.as_deref(), function.as_deref(), eval, no_halt, shell, &env, &features, &args),
         Commands::Test { filter, features } => cmd_test(filter.as_deref(), &features),
         Commands::Bindgen {
             files,
@@ -1337,6 +1341,7 @@ fn cmd_run(
     function: Option<&str>,
     eval_mode: bool,
     no_halt: bool,
+    shell_mode: bool,
     env: &str,
     features: &[String],
     args: &[String],
@@ -1456,7 +1461,7 @@ fn cmd_run(
     deps_dirs.extend(find_elixir_ebin_dirs());
 
     if use_app_mode {
-        run_application(&beam_dir, &module_name, &app_config.unwrap(), stdlib_dir.as_ref(), &deps_dirs)
+        run_application(&beam_dir, &module_name, &app_config.unwrap(), stdlib_dir.as_ref(), &deps_dirs, shell_mode)
     } else if has_script_module && function.is_none() && !eval_mode {
         // Run script mode: execute __script__:__main__()
         run_function(
@@ -1481,6 +1486,7 @@ fn run_application(
     app_config: &ApplicationConfig,
     stdlib_dir: Option<&PathBuf>,
     deps_dirs: &[PathBuf],
+    shell_mode: bool,
 ) -> ExitCode {
     // Get the OTP application name from config (not the module name)
     let app_name = if let Ok((_, config)) = ProjectConfig::from_project_root() {
@@ -1490,13 +1496,17 @@ fn run_application(
     };
 
     println!();
-    println!("Starting application '{}'...", app_name);
+    if shell_mode {
+        println!("Starting application '{}' with interactive shell...", app_name);
+    } else {
+        println!("Starting application '{}'...", app_name);
+    }
     println!();
 
     // Build the eval expression for application mode:
     // 1. Set environment variables from config
     // 2. Use application:ensure_all_started/1 to start deps and our app
-    // 3. Block forever (receive loop)
+    // 3. Block forever (receive loop) - unless in shell mode
     let mut eval_parts = Vec::new();
 
     // Set application environment from config
@@ -1519,13 +1529,19 @@ fn run_application(
     ));
 
     // Print startup message
-    eval_parts.push(format!(
-        "io:format(\"Application '{}' started. Press Ctrl+C to stop.~n\", [])",
-        app_name
-    ));
-
-    // Block forever - the supervision tree handles everything
-    eval_parts.push("receive stop -> ok end".to_string());
+    if shell_mode {
+        eval_parts.push(format!(
+            "io:format(\"Application '{}' started. Type Ctrl+G then 'q' to quit.~n~n\", [])",
+            app_name
+        ));
+    } else {
+        eval_parts.push(format!(
+            "io:format(\"Application '{}' started. Press Ctrl+C to stop.~n\", [])",
+            app_name
+        ));
+        // Block forever - the supervision tree handles everything
+        eval_parts.push("receive stop -> ok end".to_string());
+    }
 
     let eval_expr = eval_parts.join(", ") + ".";
 
@@ -1542,7 +1558,13 @@ fn run_application(
         cmd.arg("-pa").arg(dep_dir);
     }
 
-    cmd.arg("-noshell").arg("-eval").arg(&eval_expr);
+    if shell_mode {
+        // Interactive shell mode - start app then give user a shell
+        cmd.arg("-eval").arg(&eval_expr);
+    } else {
+        // Non-interactive mode
+        cmd.arg("-noshell").arg("-eval").arg(&eval_expr);
+    }
 
     let status = cmd.status();
 
