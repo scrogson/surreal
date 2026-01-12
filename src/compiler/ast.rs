@@ -104,6 +104,9 @@ pub struct ModuleContext {
     pub package_name: Option<String>,
     /// Current module's path relative to src/ (e.g., ["users", "auth"] for src/users/auth.dream)
     pub current_path: Vec<String>,
+    /// Set of local module names (short names only, e.g., "hello_handler")
+    /// Used to resolve atom literals that reference local modules
+    pub local_modules: std::collections::HashSet<String>,
 }
 
 impl ModuleContext {
@@ -115,6 +118,7 @@ impl ModuleContext {
         ModuleContext {
             package_name: Some(package_name),
             current_path: vec![],
+            local_modules: std::collections::HashSet::new(),
         }
     }
 
@@ -136,7 +140,27 @@ impl ModuleContext {
         ModuleContext {
             package_name: Some(package_name.to_string()),
             current_path,
+            local_modules: std::collections::HashSet::new(),
         }
+    }
+
+    /// Set the local modules for this context.
+    pub fn with_local_modules(mut self, modules: std::collections::HashSet<String>) -> Self {
+        self.local_modules = modules;
+        self
+    }
+
+    /// Resolve an atom to its fully qualified module name if it's a local module.
+    /// Returns None if the atom is not a local module.
+    /// For example, if package is "http_api" and atom is "hello_handler",
+    /// returns Some("dream::http_api::hello_handler").
+    pub fn resolve_local_module(&self, atom: &str) -> Option<String> {
+        if let Some(ref pkg) = self.package_name {
+            if self.local_modules.contains(atom) {
+                return Some(format!("dream::{}::{}", pkg, atom));
+            }
+        }
+        None
     }
 
     /// Resolve a module path to its fully qualified name.

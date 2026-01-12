@@ -258,13 +258,26 @@ fn cmd_build(file: Option<&Path>, target: &str, output: Option<&Path>) -> ExitCo
         return ExitCode::from(1);
     }
 
+    // Collect module names before compilation
+    let modules = loader.into_modules();
+    let module_names: Vec<String> = modules.iter().map(|m| m.name.clone()).collect();
+
     // Compile all loaded modules with package name for module resolution
-    compile_modules(
-        loader.into_modules(),
+    let result = compile_modules(
+        modules,
         &build_dir,
         target,
         Some(&config.package.name),
-    )
+    );
+
+    // Generate .app file if compilation succeeded
+    if result == ExitCode::SUCCESS && target == "beam" {
+        if let Err(e) = generate_app_file(&build_dir, &config, &module_names) {
+            eprintln!("Warning: Failed to generate .app file: {}", e);
+        }
+    }
+
+    result
 }
 
 /// Build a standalone .dream file.
@@ -468,12 +481,39 @@ fn compile_modules_with_registry(
     let generic_registry: SharedGenericRegistry = external_registry
         .unwrap_or_else(|| Arc::new(RwLock::new(GenericFunctionRegistry::new())));
 
+    // Collect local module short names for module resolution
+    // These are the short names (e.g., "hello_handler") that can be referenced
+    // as atoms like :hello_handler and should resolve to dream::package::hello_handler
+    let local_module_names: std::collections::HashSet<String> = if let Some(pkg) = package_name {
+        modules
+            .iter()
+            .filter_map(|m| {
+                // Extract the short name from the full module name
+                // e.g., "http_api::hello_handler" -> "hello_handler"
+                let prefix = format!("{}::", pkg);
+                if let Some(suffix) = m.name.strip_prefix(&prefix) {
+                    // Get the last segment (the actual module name)
+                    suffix.split("::").last().map(|s| s.to_string())
+                } else if m.name == pkg {
+                    // Root module - use package name
+                    Some(pkg.to_string())
+                } else {
+                    // Module name doesn't have package prefix, use as-is
+                    Some(m.name.clone())
+                }
+            })
+            .collect()
+    } else {
+        std::collections::HashSet::new()
+    };
+
     // Compile each module to Core Erlang
     let mut core_files = Vec::new();
     for module in &modules {
         // Create module-specific context for path resolution (crate::/super::/self::)
         let module_context = match package_name {
-            Some(pkg) => ModuleContext::for_module(pkg, &module.name),
+            Some(pkg) => ModuleContext::for_module(pkg, &module.name)
+                .with_local_modules(local_module_names.clone()),
             None => ModuleContext::default(),
         };
 
@@ -495,14 +535,20 @@ fn compile_modules_with_registry(
             emitter.register_generics(&mut registry);
         }
 
-        // Use module name directly for output files (explicit module names)
-        let core_file = build_dir.join(format!("{}.core", &module.name));
+        // All Dream modules are prefixed with dream:: (like Elixir uses Elixir.)
+        let beam_module_name = if module.name.starts_with("dream::") {
+            module.name.clone()
+        } else {
+            format!("dream::{}", module.name)
+        };
+
+        let core_file = build_dir.join(format!("{}.core", &beam_module_name));
         if let Err(e) = fs::write(&core_file, &core_erlang) {
             eprintln!("Error writing {}: {}", core_file.display(), e);
             return ExitCode::from(1);
         }
 
-        println!("  Compiled {}.core", &module.name);
+        println!("  Compiled {}.core", &beam_module_name);
         core_files.push(core_file);
     }
 
@@ -557,6 +603,74 @@ fn compile_modules_with_registry(
     println!("Build complete.");
 
     ExitCode::SUCCESS
+}
+
+/// Generate an OTP .app file for the Dream application.
+fn generate_app_file(
+    build_dir: &Path,
+    config: &ProjectConfig,
+    module_names: &[String],
+) -> Result<(), String> {
+    // OTP application name is just the package name (no dream:: prefix)
+    let app_name = &config.package.name;
+    let version = &config.package.version;
+
+    // Format module list as Erlang atoms with dream:: prefix
+    // Module names are fully qualified (e.g., dream::http_api::hello_handler)
+    let modules_str = module_names
+        .iter()
+        .map(|m| {
+            if m.starts_with("dream::") {
+                format!("'{}'", m)
+            } else {
+                format!("'dream::{}'", m)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    // Get dependency application names
+    let deps: Vec<String> = config
+        .dependencies
+        .keys()
+        .map(|k| k.clone())
+        .collect();
+
+    let deps_str = deps
+        .iter()
+        .map(|d| d.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    // Build the .app file content
+    // Standard OTP applications: kernel and stdlib
+    let applications = if deps_str.is_empty() {
+        "kernel, stdlib".to_string()
+    } else {
+        format!("kernel, stdlib, {}", deps_str)
+    };
+
+    let app_content = format!(
+        r#"{{application, {app_name}, [
+  {{description, "A Dream application"}},
+  {{vsn, "{version}"}},
+  {{modules, [{modules}]}},
+  {{registered, []}},
+  {{applications, [{applications}]}}
+]}}.
+"#,
+        app_name = app_name,
+        version = version,
+        modules = modules_str,
+        applications = applications,
+    );
+
+    let app_file = build_dir.join(format!("{}.app", app_name));
+    fs::write(&app_file, app_content)
+        .map_err(|e| format!("Failed to write {}: {}", app_file.display(), e))?;
+
+    println!("  Generated {}.app", app_name);
+    Ok(())
 }
 
 /// Find the stdlib directory relative to the executable or current directory.
@@ -885,12 +999,22 @@ fn cmd_run(
         let app_config = config.application.clone();
 
         // Determine module name: use application module or package name
-        // Module names should be explicit in source (e.g., "dream::io", "my_app::main")
-        let module_name = if let Some(ref app) = app_config {
+        // Module names are prefixed with dream:: and package:: (e.g., "dream::http_api::http_api")
+        let base_module = if let Some(ref app) = app_config {
             app.module.clone().unwrap_or_else(|| config.package.name.clone())
         } else {
             // Use package name as the default module (corresponds to lib.dream)
             config.package.name.clone()
+        };
+
+        // Build the full module path: dream::package::module
+        let package_name = &config.package.name;
+        let module_name = if base_module.starts_with("dream::") {
+            base_module
+        } else if base_module.starts_with(&format!("{}::", package_name)) {
+            format!("dream::{}", base_module)
+        } else {
+            format!("dream::{}::{}", package_name, base_module)
         };
 
         (beam_dir, module_name, app_config)

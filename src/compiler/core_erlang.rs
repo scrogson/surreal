@@ -1132,8 +1132,13 @@ impl CoreErlangEmitter {
 
     /// Emit a complete Core Erlang module.
     pub fn emit_module(&mut self, module: &Module) -> CoreErlangResult<String> {
-        // Use module name directly - explicit fully qualified names in source
-        self.module_name = module.name.clone();
+        // All Dream modules are prefixed with dream:: (like Elixir uses Elixir.)
+        // This ensures Dream modules are properly namespaced on the BEAM
+        self.module_name = if module.name.starts_with(Self::STDLIB_PREFIX) {
+            module.name.clone()
+        } else {
+            format!("{}{}", Self::STDLIB_PREFIX, module.name)
+        };
 
         // First pass: collect imports, traits, local functions, and register impl methods
         for item in &module.items {
@@ -2223,7 +2228,12 @@ impl CoreErlangEmitter {
             }
 
             Expr::Atom(a) => {
-                self.emit(&format!("'{}'", a));
+                // Check if this atom references a local module
+                if let Some(resolved) = self.module_context.resolve_local_module(a) {
+                    self.emit(&format!("'{}'", resolved));
+                } else {
+                    self.emit(&format!("'{}'", a));
+                }
             }
 
             Expr::Bool(b) => {
@@ -3627,8 +3637,8 @@ mod tests {
         "#;
 
         let result = emit_core_erlang(source).unwrap();
-        // With explicit module names, 'mod test' compiles to 'test' (no auto prefix)
-        assert!(result.contains("module 'test'"));
+        // All Dream modules are prefixed with dream:: (like Elixir uses Elixir.)
+        assert!(result.contains("module 'dream::test'"));
         assert!(result.contains("'add'/2"));
         assert!(result.contains("call 'erlang':'+'"));
     }

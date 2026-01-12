@@ -372,6 +372,8 @@ impl DepsManager {
                         }
                     }
                 } else {
+                    // Successfully compiled/detected - install to _build
+                    self.install_dep_to_build(&pkg_name)?;
                     made_progress = true;
                 }
             }
@@ -502,6 +504,31 @@ impl DepsManager {
         Ok(())
     }
 
+    /// Install a dependency's ebin to _build/{env}/lib/{dep}/ebin/
+    fn install_dep_to_build(&self, name: &str) -> DepsResult<()> {
+        let deps_dir = self.deps_dir();
+        let src_ebin = deps_dir.join(name).join("ebin");
+
+        if !src_ebin.exists() {
+            // No ebin to install
+            return Ok(());
+        }
+
+        let dst_ebin = self.deps_build_dir().join(name).join("ebin");
+
+        // Create target directory
+        fs::create_dir_all(&dst_ebin).map_err(|e| {
+            DepsError::new(format!("Failed to create build dir for {}: {}", name, e))
+        })?;
+
+        // Copy all files from source ebin to target ebin
+        Self::copy_dir_recursive(&src_ebin, &dst_ebin).map_err(|e| {
+            DepsError::new(format!("Failed to install {} to build: {}", name, e))
+        })?;
+
+        Ok(())
+    }
+
     /// Compile an Elixir dependency.
     fn compile_elixir_dep(&self, name: &str) -> DepsResult<()> {
         let deps_dir = self.deps_dir();
@@ -588,12 +615,12 @@ impl DepsManager {
         files
     }
 
-    /// Get all ebin paths for dependencies.
+    /// Get ebin paths for all dependencies from _build directory.
     pub fn dep_ebin_paths(&self) -> Vec<PathBuf> {
-        let deps_dir = self.deps_dir();
+        let build_lib = self.deps_build_dir();
         let mut paths = Vec::new();
 
-        if let Ok(entries) = fs::read_dir(&deps_dir) {
+        if let Ok(entries) = fs::read_dir(&build_lib) {
             for entry in entries.flatten() {
                 let ebin = entry.path().join("ebin");
                 if ebin.exists() {

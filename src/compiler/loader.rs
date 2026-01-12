@@ -292,9 +292,20 @@ impl ModuleLoader {
 
         // Store all modules with a synthetic key (canonical path + module name)
         // Use unique keys to avoid duplicate entries in into_modules()
+        // Prefix module names with package name if we have a package context
         for module in &modules {
+            let mut module = module.clone();
+
+            // Add package prefix if we have a package context and the module
+            // doesn't already have the prefix (e.g., wasn't already qualified)
+            if let Some(ref package) = self.package_name {
+                if !module.name.starts_with(&format!("{}::", package)) {
+                    module.name = format!("{}::{}", package, module.name);
+                }
+            }
+
             let key = canonical.join(format!("#{}", module.name));
-            self.loaded.insert(key, module.clone());
+            self.loaded.insert(key, module);
         }
 
         Ok(modules)
