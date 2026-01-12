@@ -1971,37 +1971,55 @@ fn generate_dreamt(modules: &HashMap<String, ModuleInfo>) -> String {
 }
 
 /// Convert Erlang type to Dream type syntax.
+///
+/// Type naming convention:
+/// - Primitives (lowercase): int, bool, float
+/// - Compound/BEAM types (CamelCase): String, Binary, Atom, Pid, Ref, Map, Any
 fn erlang_type_to_dream(ty: &ErlangType) -> String {
     match ty {
         ErlangType::Named(name) => {
             match name.as_str() {
+                // Primitives stay lowercase
                 "integer" | "non_neg_integer" | "pos_integer" | "neg_integer" | "number" => "int".to_string(),
                 "boolean" => "bool".to_string(),
-                "atom" => "atom".to_string(),
-                "binary" | "bitstring" => "binary".to_string(),
                 "float" => "float".to_string(),
-                "string" => "string".to_string(),
-                "pid" => "pid".to_string(),
-                "reference" | "ref" => "ref".to_string(),
-                "map" => "map".to_string(),
-                "term" => "any".to_string(),
                 "byte" | "char" | "arity" => "int".to_string(),
-                "no_return" | "none" => "any".to_string(),
+                // Compound/BEAM types use CamelCase
+                "atom" => "Atom".to_string(),
+                "binary" | "bitstring" => "Binary".to_string(),
+                "string" => "String".to_string(),
+                "pid" => "Pid".to_string(),
+                "reference" | "ref" => "Ref".to_string(),
+                "map" => "Map".to_string(),
+                "term" => "Any".to_string(),
+                "iolist" | "iodata" => "IoList".to_string(),
+                "no_return" | "none" => "Any".to_string(),
+                // Handle already-CamelCased types
+                "int" => "int".to_string(),
+                "bool" => "bool".to_string(),
+                "Atom" => "Atom".to_string(),
+                "Binary" => "Binary".to_string(),
+                "String" => "String".to_string(),
+                "Pid" => "Pid".to_string(),
+                "Ref" => "Ref".to_string(),
+                "Map" => "Map".to_string(),
+                "Any" => "Any".to_string(),
+                "IoList" => "IoList".to_string(),
                 _ => {
                     if name.is_empty() || name.contains(':') || name.contains('(') {
-                        "any".to_string()
+                        "Any".to_string()
                     } else if is_known_dream_type(name) {
                         name.clone()
                     } else {
-                        "any".to_string()
+                        "Any".to_string()
                     }
                 }
             }
         }
-        ErlangType::AtomLiteral(_) => "atom".to_string(),
-        ErlangType::Var(_) => "any".to_string(),
-        ErlangType::Any => "any".to_string(),
-        ErlangType::Remote(_, _) => "any".to_string(),
+        ErlangType::AtomLiteral(_) => "Atom".to_string(),
+        ErlangType::Var(_) => "Any".to_string(),
+        ErlangType::Any => "Any".to_string(),
+        ErlangType::Remote(_, _) => "Any".to_string(),
         ErlangType::List(inner) => {
             let inner_ty = erlang_type_to_dream(inner);
             format!("[{}]", inner_ty)
@@ -2037,7 +2055,7 @@ fn erlang_type_to_dream(ty: &ErlangType) -> String {
             if non_undefined.len() == 1 {
                 erlang_type_to_dream(non_undefined[0])
             } else {
-                "any".to_string()
+                "Any".to_string()
             }
         }
         ErlangType::Result(ok_ty, err_ty) => {
@@ -2047,9 +2065,9 @@ fn erlang_type_to_dream(ty: &ErlangType) -> String {
             format!("Option<{}>", erlang_type_to_dream(inner))
         }
         ErlangType::Struct { module, fields: _ } => {
-            // For now, emit the struct type name if known, otherwise map
+            // For now, emit the struct type name if known, otherwise Map
             if module.is_empty() {
-                "map".to_string()
+                "Map".to_string()
             } else {
                 // Use a type reference that will match the extern type
                 sanitize_module_name(module)
@@ -2154,13 +2172,15 @@ mod tests {
             Box::new(ErlangType::Named("binary".into())),
             Box::new(ErlangType::Named("atom".into())),
         );
-        assert_eq!(erlang_type_to_dream(&ty), "Result<binary, atom>");
+        // CamelCase for compound types: Binary, Atom
+        assert_eq!(erlang_type_to_dream(&ty), "Result<Binary, Atom>");
     }
 
     #[test]
     fn test_option_type_to_dream() {
         let ty = ErlangType::Option(Box::new(ErlangType::Named("string".into())));
-        assert_eq!(erlang_type_to_dream(&ty), "Option<string>");
+        // CamelCase for compound types: String
+        assert_eq!(erlang_type_to_dream(&ty), "Option<String>");
     }
 
     #[test]
@@ -2392,10 +2412,10 @@ mod tests {
         // Types are generated as comments since extern type isn't supported yet
         assert!(output.contains("// extern type person = struct {"),
             "Expected commented extern type declaration, got:\n{}", output);
-        assert!(output.contains("//     name: string,"),
+        assert!(output.contains("//     name: String,"),
             "Expected name field, got:\n{}", output);
         assert!(output.contains("//     age: int,"),
-            "Expected age field, got:\n{}", output);
+            "Expected age field (int stays lowercase), got:\n{}", output);
     }
 
     #[test]
@@ -2417,7 +2437,7 @@ mod tests {
         // Types are generated as comments since extern type isn't supported yet
         assert!(output.contains("// extern type jason_error = struct {"),
             "Expected commented extern type declaration, got:\n{}", output);
-        assert!(output.contains("//     message: string,"),
+        assert!(output.contains("//     message: String,"),
             "Expected message field, got:\n{}", output);
     }
 }

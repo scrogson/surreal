@@ -1063,15 +1063,26 @@ impl TypeChecker {
             ast::Type::TypeVar(name) => Ty::Var(name.clone()),
             ast::Type::Named { name, type_args } => {
                 // Check if it's a primitive type name
+                // Primitives (lowercase): int, bool, float
+                // Compound/BEAM types (CamelCase): String, Binary, Atom, Pid, Ref, Map, Any
+                // Also accept lowercase for backward compatibility
                 match name.as_str() {
                     "int" => Ty::Int,
                     "float" => Ty::Float,
-                    "string" => Ty::String,
-                    "atom" => Ty::Atom,
                     "bool" => Ty::Bool,
-                    "pid" => Ty::Pid,
-                    "ref" => Ty::Ref,
-                    "binary" => Ty::Binary,
+                    // CamelCase compound types (preferred)
+                    "String" | "string" => Ty::String,
+                    "Atom" | "atom" => Ty::Atom,
+                    "Pid" | "pid" => Ty::Pid,
+                    "Ref" | "ref" => Ty::Ref,
+                    "Binary" | "binary" => Ty::Binary,
+                    "Map" | "map" => Ty::RawMap,
+                    "Any" | "any" => Ty::Any,
+                    "IoList" => Ty::List(Box::new(Ty::Union(vec![
+                        Ty::Int,      // byte
+                        Ty::Binary,   // binary
+                        Ty::List(Box::new(Ty::Any)),  // nested iolist
+                    ]))),
                     _ => {
                         // Check if it's a type alias
                         if let Some(alias_info) = self.env.type_aliases.get(name).cloned() {
@@ -4146,15 +4157,24 @@ impl MethodResolver {
             }
             ast::Type::List(t) => Ty::List(Box::new(self.ast_type_to_ty(t))),
             ast::Type::Named { name, type_args } => {
+                // Primitives (lowercase): int, bool, float
+                // Compound/BEAM types (CamelCase): String, Binary, Atom, Pid, Ref, Map, Any
                 match name.as_str() {
                     "int" => Ty::Int,
                     "float" => Ty::Float,
-                    "string" => Ty::String,
-                    "atom" => Ty::Atom,
                     "bool" => Ty::Bool,
-                    "pid" => Ty::Pid,
-                    "ref" => Ty::Ref,
-                    "binary" => Ty::Binary,
+                    "String" | "string" => Ty::String,
+                    "Atom" | "atom" => Ty::Atom,
+                    "Pid" | "pid" => Ty::Pid,
+                    "Ref" | "ref" => Ty::Ref,
+                    "Binary" | "binary" => Ty::Binary,
+                    "Map" | "map" => Ty::RawMap,
+                    "Any" | "any" => Ty::Any,
+                    "IoList" => Ty::List(Box::new(Ty::Union(vec![
+                        Ty::Int,
+                        Ty::Binary,
+                        Ty::List(Box::new(Ty::Any)),
+                    ]))),
                     _ => Ty::Named {
                         name: name.clone(),
                         module: None,
