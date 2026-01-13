@@ -1927,6 +1927,24 @@ impl<'source> Parser<'source> {
             return self.parse_spawn_expr();
         }
 
+        // Quote expression: quote { ... }
+        if self.check(&Token::Quote) {
+            return self.parse_quote_expr();
+        }
+
+        // Unquote expression: #expr (for use inside quote blocks)
+        if self.check(&Token::Hash) {
+            self.advance();
+            // Check for unquote-splicing: #...expr
+            if self.check(&Token::DotDot) {
+                self.advance();
+                let expr = self.parse_primary()?;
+                return Ok(Expr::UnquoteSplice(Box::new(expr)));
+            }
+            let expr = self.parse_primary()?;
+            return Ok(Expr::Unquote(Box::new(expr)));
+        }
+
         // Return expression
         if self.check(&Token::Return) {
             self.advance();
@@ -2079,6 +2097,14 @@ impl<'source> Parser<'source> {
             }
         }
         Ok(())
+    }
+
+    /// Parse a quote expression: `quote { ... }`.
+    /// The contents are captured as AST for macro processing.
+    fn parse_quote_expr(&mut self) -> ParseResult<Expr> {
+        self.expect(&Token::Quote)?;
+        let block = self.parse_block()?;
+        Ok(Expr::Quote(Box::new(Expr::Block(block))))
     }
 
     /// Parse an if expression.
@@ -5024,5 +5050,63 @@ mod repl_edit {
 
         assert_eq!(modules.len(), 1);
         assert_eq!(modules[0].name, "repl_edit");
+    }
+
+    #[test]
+    fn test_parse_quote_unquote() {
+        let source = r#"
+            mod test {
+                fn make_add(x: int) {
+                    quote {
+                        let val = #x;
+                        val + 1
+                    }
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = first_user_item(&module) {
+            if let Some(Expr::Quote(inner)) = f.body.expr.as_deref() {
+                // The quote contains a block
+                if let Expr::Block(block) = inner.as_ref() {
+                    assert_eq!(block.stmts.len(), 1); // let val = #x
+                    // The block expression should be the addition
+                    assert!(block.expr.is_some());
+                } else {
+                    panic!("expected block inside quote");
+                }
+            } else {
+                panic!("expected quote expr, got {:?}", f.body.expr);
+            }
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_unquote_splice() {
+        let source = r#"
+            mod test {
+                fn make_list(items: [Ast]) {
+                    quote {
+                        [1, #..items, 2]
+                    }
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = first_user_item(&module) {
+            if let Some(Expr::Quote(_)) = f.body.expr.as_deref() {
+                // Just verify it parses - the inner structure is complex
+            } else {
+                panic!("expected quote expr");
+            }
+        } else {
+            panic!("expected function");
+        }
     }
 }

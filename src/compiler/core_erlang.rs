@@ -3235,6 +3235,13 @@ impl CoreErlangEmitter {
                     }
                 }
             }
+
+            // Quote/Unquote should be expanded before codegen
+            Expr::Quote(_) | Expr::Unquote(_) | Expr::UnquoteSplice(_) => {
+                return Err(CoreErlangError::new(
+                    "quote/unquote expressions should be expanded before codegen",
+                ));
+            }
         }
 
         Ok(())

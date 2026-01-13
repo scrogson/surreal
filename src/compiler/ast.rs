@@ -646,6 +646,15 @@ pub enum Expr {
         /// Arguments to the function
         args: Vec<Expr>,
     },
+    /// Quote expression: `quote { expr }`.
+    /// Captures the inner expression as AST data for macro processing.
+    Quote(Box<Expr>),
+    /// Unquote expression: `#ident` inside a quote block.
+    /// Interpolates the value of the expression into the quoted AST.
+    Unquote(Box<Expr>),
+    /// Unquote-splicing: `#...list` inside a quote block.
+    /// Splices a list of AST nodes into the quoted AST.
+    UnquoteSplice(Box<Expr>),
 }
 
 /// A match arm.

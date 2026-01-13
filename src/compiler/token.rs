@@ -226,6 +226,8 @@ pub enum Token {
     Extern,
     #[token("type")]
     Type,
+    #[token("quote")]
+    Quote,
 
     // Literals
     #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().ok())]
@@ -324,6 +326,8 @@ pub enum Token {
     ColonColon,
     #[token("#[")]
     HashBracket,
+    #[token("#")]
+    Hash,
 
     #[token("+")]
     Plus,
@@ -432,6 +436,8 @@ impl std::fmt::Display for Token {
             Token::PipeRight => write!(f, "|>"),
             Token::ColonColon => write!(f, "::"),
             Token::HashBracket => write!(f, "#["),
+            Token::Hash => write!(f, "#"),
+            Token::Quote => write!(f, "quote"),
             Token::Plus => write!(f, "+"),
             Token::Minus => write!(f, "-"),
             Token::Star => write!(f, "*"),

@@ -2248,6 +2248,11 @@ impl TypeChecker {
 
             // Bit strings
             Expr::BitString(_) => Ok(Ty::Binary),
+
+            // Quote expressions return an AST type (for now, use Any)
+            Expr::Quote(_) => Ok(Ty::Any),
+            Expr::Unquote(_) => Ok(Ty::Any),
+            Expr::UnquoteSplice(_) => Ok(Ty::Any),
         }
     }
 
@@ -3465,6 +3470,11 @@ impl TypeChecker {
                 }).collect();
                 Expr::StringInterpolation(annotated_parts)
             }
+
+            // Quote/Unquote - annotate inner expressions
+            Expr::Quote(inner) => Expr::Quote(Box::new(self.annotate_expr(inner))),
+            Expr::Unquote(inner) => Expr::Unquote(Box::new(self.annotate_expr(inner))),
+            Expr::UnquoteSplice(inner) => Expr::UnquoteSplice(Box::new(self.annotate_expr(inner))),
         }
     }
 
@@ -4058,6 +4068,11 @@ impl MethodResolver {
             | Expr::Path { .. }
             | Expr::Unit
             | Expr::Return(None) => {}
+
+            // Quote/Unquote - resolve inner expressions
+            Expr::Quote(inner) | Expr::Unquote(inner) | Expr::UnquoteSplice(inner) => {
+                self.resolve_expr(inner);
+            }
         }
     }
 

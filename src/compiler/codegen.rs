@@ -1425,6 +1425,13 @@ impl Codegen {
                 self.regs.next_reg = saved_next.max(1);
                 Ok(Register(0))
             }
+
+            // Quote/Unquote should be expanded before codegen
+            Expr::Quote(_) | Expr::Unquote(_) | Expr::UnquoteSplice(_) => {
+                Err(CodegenError::new(
+                    "quote/unquote expressions should be expanded before codegen",
+                ))
+            }
         }
     }
 
