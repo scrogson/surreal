@@ -1020,20 +1020,12 @@ impl CoreErlangEmitter {
         self.newline();
         self.emit("in ");
 
-        // Build BEAM module: "dream::" ++ ModStr -> list_to_atom
-        // [100,114,101,97,109,58,58] = "dream::"
-        let beam_mod_str_var = self.fresh_var();
-        self.emit(&format!(
-            "let <{}> = call 'erlang':'++'([100, 114, 101, 97, 109, 58, 58], {})",
-            beam_mod_str_var, mod_str_var
-        ));
-        self.newline();
-        self.emit("in ");
-
+        // The __struct__ tag now stores the full BEAM module name directly
+        // So we just convert the module string to an atom
         let beam_mod_var = self.fresh_var();
         self.emit(&format!(
             "let <{}> = call 'erlang':'list_to_atom'({})",
-            beam_mod_var, beam_mod_str_var
+            beam_mod_var, mod_str_var
         ));
         self.newline();
         self.emit("in ");
@@ -3009,13 +3001,13 @@ impl CoreErlangEmitter {
 
             Expr::StructInit { name, fields, base } => {
                 // Structs become maps in Erlang with a __struct__ tag
-                // The tag is a fully qualified atom like 'module::Type'
-                let (module_name, type_name) = if let Some((module, original_name)) = self.imports.get(name) {
-                    (module.to_lowercase(), original_name.clone())
+                // The tag stores the actual BEAM module name for method dispatch
+                let (beam_module, type_name) = if let Some((module, original_name)) = self.imports.get(name) {
+                    // Imported struct - use the imported module's BEAM name
+                    (Self::beam_module_name(&module.to_lowercase()), original_name.clone())
                 } else {
-                    // Local struct - use current module name (strip dream:: prefix for stdlib)
-                    let module_prefix = self.module_name.strip_prefix(Self::STDLIB_PREFIX).unwrap_or(&self.module_name);
-                    (module_prefix.to_string(), name.clone())
+                    // Local struct - use current module's BEAM name (already has correct prefix)
+                    (self.module_name.clone(), name.clone())
                 };
 
                 if let Some(base_expr) = base {
@@ -3034,8 +3026,8 @@ impl CoreErlangEmitter {
                 } else {
                     // Full struct init
                     self.emit("~{");
-                    // Add __struct__ tag as fully qualified atom 'module::Type'
-                    self.emit(&format!("'__struct__' => '{}::{}'", module_name, type_name));
+                    // Add __struct__ tag with BEAM module name for method dispatch
+                    self.emit(&format!("'__struct__' => '{}::{}'", beam_module, type_name));
                     for (field_name, value) in fields.iter() {
                         self.emit(", ");
                         self.emit(&format!("'{}' => ", field_name));
