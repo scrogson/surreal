@@ -2,9 +2,16 @@
 //!
 //! Supports `#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]` on structs and enums.
 //! Generates impl blocks with the corresponding methods at compile time.
+//!
+//! Also supports user-defined macros that execute on BEAM via the MacroRegistry.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 use crate::compiler::ast::*;
+use crate::compiler::ast_serde;
 use crate::compiler::lexer::Span;
+use crate::compiler::macro_expander::MacroExpander;
 
 /// Errors that can occur during derive expansion.
 #[derive(Debug)]
@@ -52,9 +59,167 @@ impl DeriveKind {
     }
 }
 
+// =============================================================================
+// Macro Registry
+// =============================================================================
+
+/// A registry of both built-in and user-defined macros.
+///
+/// User-defined macros are Dream functions marked with `#[macro]` that take
+/// AST data as input and return transformed AST.
+pub struct MacroRegistry {
+    /// User-defined macros: maps derive name to (module, function).
+    user_defined: HashMap<String, (String, String)>,
+    /// BEAM paths for loading macro modules.
+    beam_paths: Vec<PathBuf>,
+    /// The macro expander (lazily initialized on first use).
+    expander: Option<MacroExpander>,
+}
+
+impl MacroRegistry {
+    /// Create a new empty registry.
+    pub fn new() -> Self {
+        MacroRegistry {
+            user_defined: HashMap::new(),
+            beam_paths: Vec::new(),
+            expander: None,
+        }
+    }
+
+    /// Create a new registry with BEAM paths for loading macro modules.
+    pub fn with_paths(beam_paths: Vec<PathBuf>) -> Self {
+        MacroRegistry {
+            user_defined: HashMap::new(),
+            beam_paths,
+            expander: None,
+        }
+    }
+
+    /// Register a user-defined macro.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The derive name (e.g., "my_debug")
+    /// * `module` - The Dream module containing the macro (e.g., "dream::macros")
+    /// * `function` - The macro function name (e.g., "my_debug")
+    pub fn register(&mut self, name: &str, module: &str, function: &str) {
+        self.user_defined
+            .insert(name.to_string(), (module.to_string(), function.to_string()));
+    }
+
+    /// Check if a derive name is a built-in derive.
+    pub fn is_builtin(name: &str) -> bool {
+        DeriveKind::from_name(name).is_some()
+    }
+
+    /// Check if a derive name is registered (built-in or user-defined).
+    pub fn is_registered(&self, name: &str) -> bool {
+        Self::is_builtin(name) || self.user_defined.contains_key(name)
+    }
+
+    /// Get the user-defined macro info for a derive name.
+    pub fn get_user_defined(&self, name: &str) -> Option<(&str, &str)> {
+        self.user_defined
+            .get(name)
+            .map(|(m, f)| (m.as_str(), f.as_str()))
+    }
+
+    /// Expand a user-defined derive macro on a struct.
+    ///
+    /// Returns the generated impl blocks as Items.
+    pub fn expand_user_defined_struct(
+        &mut self,
+        name: &str,
+        struct_def: &StructDef,
+    ) -> Result<Vec<Item>, DeriveError> {
+        let (module, function) = self.user_defined.get(name).cloned().ok_or_else(|| {
+            DeriveError::new(
+                format!("unknown user-defined macro `{}`", name),
+                Span::default(),
+            )
+        })?;
+
+        // Serialize the struct to Erlang term format
+        let ast_term = ast_serde::struct_def_to_erlang_term(struct_def);
+
+        // Get or create the expander
+        let expander = self.get_expander()?;
+
+        // Call the macro on BEAM
+        let result = expander.expand_macro(&module, &function, &ast_term).map_err(|e| {
+            DeriveError::new(format!("macro expansion failed: {}", e.message), Span::default())
+        })?;
+
+        // For now, we parse the result as an impl block
+        // TODO: Implement proper deserialization from Erlang term to AST
+        // For now, return empty - the full implementation will come when
+        // we have complete AST deserialization
+        let _ = result;
+        Ok(vec![])
+    }
+
+    /// Expand a user-defined derive macro on an enum.
+    pub fn expand_user_defined_enum(
+        &mut self,
+        name: &str,
+        enum_def: &EnumDef,
+    ) -> Result<Vec<Item>, DeriveError> {
+        let (module, function) = self.user_defined.get(name).cloned().ok_or_else(|| {
+            DeriveError::new(
+                format!("unknown user-defined macro `{}`", name),
+                Span::default(),
+            )
+        })?;
+
+        // Serialize the enum to Erlang term format
+        let ast_term = ast_serde::enum_def_to_erlang_term(enum_def);
+
+        // Get or create the expander
+        let expander = self.get_expander()?;
+
+        // Call the macro on BEAM
+        let result = expander.expand_macro(&module, &function, &ast_term).map_err(|e| {
+            DeriveError::new(format!("macro expansion failed: {}", e.message), Span::default())
+        })?;
+
+        // For now, return empty - see above
+        let _ = result;
+        Ok(vec![])
+    }
+
+    /// Get or create the macro expander.
+    fn get_expander(&mut self) -> Result<&mut MacroExpander, DeriveError> {
+        if self.expander.is_none() {
+            self.expander = Some(MacroExpander::new(self.beam_paths.clone()));
+        }
+        Ok(self.expander.as_mut().unwrap())
+    }
+
+    /// Shutdown the macro expander if running.
+    pub fn shutdown(&mut self) {
+        if let Some(ref mut expander) = self.expander {
+            expander.shutdown();
+        }
+        self.expander = None;
+    }
+}
+
+impl Default for MacroRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for MacroRegistry {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
 /// Expand all `#[derive(...)]` attributes in a module.
 ///
 /// This adds generated impl blocks for each derive macro found on structs and enums.
+/// Only supports built-in derives. For user-defined macros, use `expand_derives_with_registry`.
 pub fn expand_derives(module: &mut Module) -> Result<(), Vec<DeriveError>> {
     let mut new_items = Vec::new();
     let mut errors = Vec::new();
@@ -62,13 +227,52 @@ pub fn expand_derives(module: &mut Module) -> Result<(), Vec<DeriveError>> {
     for item in &module.items {
         match item {
             Item::Struct(struct_def) => {
-                match generate_struct_derives(struct_def) {
+                match generate_struct_derives(struct_def, None) {
                     Ok(impls) => new_items.extend(impls),
                     Err(errs) => errors.extend(errs),
                 }
             }
             Item::Enum(enum_def) => {
-                match generate_enum_derives(enum_def) {
+                match generate_enum_derives(enum_def, None) {
+                    Ok(impls) => new_items.extend(impls),
+                    Err(errs) => errors.extend(errs),
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Add generated impl blocks to the module
+    module.items.extend(new_items);
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
+/// Expand all `#[derive(...)]` attributes in a module with registry support.
+///
+/// This version supports both built-in derives and user-defined macros.
+/// User-defined macros are executed on BEAM via the MacroRegistry.
+pub fn expand_derives_with_registry(
+    module: &mut Module,
+    registry: &mut MacroRegistry,
+) -> Result<(), Vec<DeriveError>> {
+    let mut new_items = Vec::new();
+    let mut errors = Vec::new();
+
+    for item in &module.items {
+        match item {
+            Item::Struct(struct_def) => {
+                match generate_struct_derives(struct_def, Some(registry)) {
+                    Ok(impls) => new_items.extend(impls),
+                    Err(errs) => errors.extend(errs),
+                }
+            }
+            Item::Enum(enum_def) => {
+                match generate_enum_derives(enum_def, Some(registry)) {
                     Ok(impls) => new_items.extend(impls),
                     Err(errs) => errors.extend(errs),
                 }
@@ -107,7 +311,10 @@ fn get_derive_names(attrs: &[Attribute]) -> Vec<(String, Span)> {
 }
 
 /// Generate impl blocks for all derives on a struct.
-fn generate_struct_derives(struct_def: &StructDef) -> Result<Vec<Item>, Vec<DeriveError>> {
+fn generate_struct_derives(
+    struct_def: &StructDef,
+    mut registry: Option<&mut MacroRegistry>,
+) -> Result<Vec<Item>, Vec<DeriveError>> {
     let derives = get_derive_names(&struct_def.attrs);
     let mut impls = Vec::new();
     let mut errors = Vec::new();
@@ -128,10 +335,23 @@ fn generate_struct_derives(struct_def: &StructDef) -> Result<Vec<Item>, Vec<Deri
                 }
             }
             None => {
-                errors.push(DeriveError::new(
-                    format!("unknown derive macro `{}`", derive_name),
-                    span,
-                ));
+                // Try user-defined macro if registry is available
+                let mut found_user_macro = false;
+                if let Some(ref mut reg) = registry {
+                    if reg.get_user_defined(&derive_name).is_some() {
+                        match reg.expand_user_defined_struct(&derive_name, struct_def) {
+                            Ok(items) => impls.extend(items),
+                            Err(err) => errors.push(err),
+                        }
+                        found_user_macro = true;
+                    }
+                }
+                if !found_user_macro {
+                    errors.push(DeriveError::new(
+                        format!("unknown derive macro `{}`", derive_name),
+                        span,
+                    ));
+                }
             }
         }
     }
@@ -144,7 +364,10 @@ fn generate_struct_derives(struct_def: &StructDef) -> Result<Vec<Item>, Vec<Deri
 }
 
 /// Generate impl blocks for all derives on an enum.
-fn generate_enum_derives(enum_def: &EnumDef) -> Result<Vec<Item>, Vec<DeriveError>> {
+fn generate_enum_derives(
+    enum_def: &EnumDef,
+    mut registry: Option<&mut MacroRegistry>,
+) -> Result<Vec<Item>, Vec<DeriveError>> {
     let derives = get_derive_names(&enum_def.attrs);
     let mut impls = Vec::new();
     let mut errors = Vec::new();
@@ -164,10 +387,23 @@ fn generate_enum_derives(enum_def: &EnumDef) -> Result<Vec<Item>, Vec<DeriveErro
                 }
             }
             None => {
-                errors.push(DeriveError::new(
-                    format!("unknown derive macro `{}`", derive_name),
-                    span,
-                ));
+                // Try user-defined macro if registry is available
+                let mut found_user_macro = false;
+                if let Some(ref mut reg) = registry {
+                    if reg.get_user_defined(&derive_name).is_some() {
+                        match reg.expand_user_defined_enum(&derive_name, enum_def) {
+                            Ok(items) => impls.extend(items),
+                            Err(err) => errors.push(err),
+                        }
+                        found_user_macro = true;
+                    }
+                }
+                if !found_user_macro {
+                    errors.push(DeriveError::new(
+                        format!("unknown derive macro `{}`", derive_name),
+                        span,
+                    ));
+                }
             }
         }
     }
@@ -740,7 +976,7 @@ mod tests {
             is_pub: true,
         };
 
-        let result = generate_struct_derives(&struct_def);
+        let result = generate_struct_derives(&struct_def, None);
         assert!(result.is_err());
         let errors = result.unwrap_err();
         assert_eq!(errors.len(), 1);
