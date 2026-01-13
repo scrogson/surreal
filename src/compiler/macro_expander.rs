@@ -52,8 +52,8 @@ const RESULT_MARKER: &str = "\x00MACRO_RESULT\x00";
 
 /// Erlang macro server for executing macro functions.
 ///
-/// Protocol:
-///   expand:<module>:<function>:<ast_term> - call macro function with AST
+/// Protocol (pipe-delimited to avoid conflicts with :: in module names):
+///   expand|<module>|<function>|<ast_term> - call macro function with AST
 ///   quit - shutdown the server
 const MACRO_SERVER: &str = r#"
 Loop = fun Loop() ->
@@ -66,17 +66,17 @@ Loop = fun Loop() ->
                 "" -> Loop();
                 "quit" -> ok;
                 _ ->
-                    case string:prefix(Cmd, "expand:") of
+                    case string:prefix(Cmd, "expand|") of
                         nomatch ->
                             io:format("~s~nerr:unknown command~n", [<<0, "MACRO_RESULT", 0>>]),
                             Loop();
                         Rest ->
-                            case string:split(Rest, ":", all) of
+                            case string:split(Rest, "|", all) of
                                 [ModStr, FunStr | AstParts] ->
                                     try
                                         Mod = list_to_atom(ModStr),
                                         Fun = list_to_atom(FunStr),
-                                        AstStr = lists:flatten(lists:join(":", AstParts)),
+                                        AstStr = lists:flatten(lists:join("|", AstParts)),
                                         {ok, Tokens, _} = erl_scan:string(AstStr ++ "."),
                                         {ok, Ast} = erl_parse:parse_term(Tokens),
                                         Result = Mod:Fun(Ast),
@@ -248,8 +248,8 @@ impl MacroExpander {
     ) -> MacroResult<String> {
         self.ensure_running()?;
 
-        // Format: expand:module:function:ast_term
-        let cmd = format!("expand:{}:{}:{}", module, function, ast_term);
+        // Format: expand|module|function|ast_term (pipe-delimited)
+        let cmd = format!("expand|{}|{}|{}", module, function, ast_term);
         self.send_command(&cmd)
     }
 
