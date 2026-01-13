@@ -312,7 +312,8 @@ impl<'source> Parser<'source> {
 
     /// Parse a single attribute argument: `ident`, `key = "value"`, or `func(args)`
     fn parse_attribute_arg(&mut self) -> ParseResult<AttributeArg> {
-        let name = self.expect_ident()?;
+        // Accept both lowercase identifiers and type identifiers (for derives like Debug, Clone)
+        let name = self.expect_ident_or_type_ident()?;
 
         if self.check(&Token::Eq) {
             // Key-value: `feature = "json"`

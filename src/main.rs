@@ -9,9 +9,9 @@ use clap::{Parser, Subcommand};
 
 use dream::{
     compiler::{
-        cfg, check_modules_with_metadata, resolve_stdlib_methods, CompilerError, CoreErlangEmitter,
-        GenericFunctionRegistry, Item, Module, ModuleContext, ModuleLoader, Parser as DreamParser,
-        SharedGenericRegistry,
+        cfg, check_modules_with_metadata, expand_derives, resolve_stdlib_methods, CompilerError,
+        CoreErlangEmitter, GenericFunctionRegistry, Item, Module, ModuleContext, ModuleLoader,
+        Parser as DreamParser, SharedGenericRegistry,
     },
     config::{generate_dream_toml, generate_main_dream, ApplicationConfig, CompileOptions, ProjectConfig},
     deps::DepsManager,
@@ -557,6 +557,16 @@ fn compile_modules_with_registry(
     // Use annotated modules for code generation
     let mut modules = annotated_modules;
 
+    // Expand derive macros (e.g., #[derive(Debug, Clone)])
+    for module in &mut modules {
+        if let Err(errors) = expand_derives(module) {
+            for err in errors {
+                eprintln!("Derive error: {}", err.message);
+            }
+            return ExitCode::from(1);
+        }
+    }
+
     // Resolve stdlib method calls (e.g., s.trim() -> string::trim(s))
     for module in &mut modules {
         resolve_stdlib_methods(module);
@@ -792,6 +802,16 @@ fn compile_modules_with_registry_and_options(
 
     // Use annotated modules for code generation
     let mut modules = annotated_modules;
+
+    // Expand derive macros (e.g., #[derive(Debug, Clone)])
+    for module in &mut modules {
+        if let Err(errors) = expand_derives(module) {
+            for err in errors {
+                eprintln!("Derive error: {}", err.message);
+            }
+            return ExitCode::from(1);
+        }
+    }
 
     // Resolve stdlib method calls (e.g., s.trim() -> string::trim(s))
     for module in &mut modules {

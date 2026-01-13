@@ -1,0 +1,68 @@
+// Test derive macros on structs and enums
+
+mod derive_test {
+    #[derive(Debug, Clone)]
+    pub struct Point {
+        x: int,
+        y: int,
+    }
+
+    #[derive(Default)]
+    pub struct Config {
+        timeout: int,
+        retries: int,
+    }
+
+    #[derive(PartialEq)]
+    pub struct User {
+        name: String,
+        age: int,
+    }
+
+    #[derive(Hash)]
+    pub struct Id {
+        value: int,
+    }
+
+    #[derive(Clone)]
+    pub enum Status {
+        Active,
+        Inactive,
+        Pending,
+    }
+
+    #[derive(Default)]
+    pub enum Priority {
+        Low,
+        Medium,
+        High,
+    }
+
+    pub fn main() {
+        // Test Debug
+        let p = Point { x: 1, y: 2 };
+        let s = p.debug();
+
+        // Test Clone
+        let p2 = p.clone();
+
+        // Test Default
+        let config = Config::default();
+
+        // Test PartialEq
+        let u1 = User { name: "Alice", age: 30 };
+        let u2 = User { name: "Alice", age: 30 };
+        let eq = u1.eq(u2);
+
+        // Test Hash
+        let id = Id { value: 42 };
+        let h = id.hash();
+
+        // Test enum Clone
+        let status = Status::Active;
+        let status2 = status.clone();
+
+        // Test enum Default
+        let priority = Priority::default();
+    }
+}

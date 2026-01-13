@@ -1,0 +1,5 @@
+---
+source: tests/compile_snapshots.rs
+expression: result
+---
+success
