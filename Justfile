@@ -68,6 +68,10 @@ lint:
 watch:
     cargo watch -x test
 
-# Build and run an example
+# Build a project-style example (debug mode for fast iteration)
 example name:
+    cargo run -- build examples/{{name}}/src
+
+# Run a single-file example
+example-run name:
     cargo run --release -- run examples/{{name}}.dream
