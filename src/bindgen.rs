@@ -2029,6 +2029,7 @@ fn is_dream_function_keyword(name: &str) -> bool {
             | "false"
             | "extern"
             | "type"
+            | "struct"
     )
 }
 
@@ -2513,9 +2514,10 @@ mod tests {
         assert_eq!(name, "list");
         assert!(!needs_attr);
 
+        // struct is a keyword, so it needs to be renamed to struct_
         let (name, needs_attr) = sanitize_function_name("struct");
-        assert_eq!(name, "struct");
-        assert!(!needs_attr);
+        assert_eq!(name, "struct_");
+        assert!(needs_attr);
     }
 
     #[test]
