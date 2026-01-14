@@ -399,9 +399,16 @@ fn build_standalone_file(source_file: &Path, target: &str, output: Option<&Path>
     compile_and_emit(source_file, &build_dir, target, features)
 }
 
-/// Find the project root by looking for dream.toml in parent directories.
+/// Find the project root by looking for dream.toml in current and parent directories.
 fn find_project_root(start: &Path) -> Option<PathBuf> {
     let mut current = start.canonicalize().ok()?;
+
+    // If start is a directory, check it first
+    if current.is_dir() && current.join("dream.toml").exists() {
+        return Some(current);
+    }
+
+    // Then check parent directories
     while let Some(parent) = current.parent() {
         current = parent.to_path_buf();
         if current.join("dream.toml").exists() {
