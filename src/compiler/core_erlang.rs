@@ -3670,14 +3670,20 @@ impl CoreErlangEmitter {
             Type::Map => self.emit("{'type', 'map'}"),
             Type::Ref => self.emit("{'type', 'ref'}"),
             Type::Named { name, type_args } => {
-                self.emit(&format!("{{'named', '{}', [", self.escape_erlang_atom(name)));
-                for (i, arg) in type_args.iter().enumerate() {
-                    if i > 0 {
-                        self.emit(", ");
+                // Check if type name is an unquote marker: $UNQUOTE:varname
+                if let Some(unquote_var) = name.strip_prefix("$UNQUOTE:") {
+                    // Emit the variable reference directly (the variable holds the type AST)
+                    self.emit(&Self::var_name(unquote_var));
+                } else {
+                    self.emit(&format!("{{'named', '{}', [", self.escape_erlang_atom(name)));
+                    for (i, arg) in type_args.iter().enumerate() {
+                        if i > 0 {
+                            self.emit(", ");
+                        }
+                        self.emit_quoted_type(arg)?;
                     }
-                    self.emit_quoted_type(arg)?;
+                    self.emit("]}");
                 }
-                self.emit("]}");
             }
             Type::List(inner) => {
                 self.emit("{'list', ");
@@ -3759,12 +3765,26 @@ impl CoreErlangEmitter {
                 self.emit_quoted_function(func)?;
             }
             Item::Struct(s) => {
-                self.emit(&format!("{{'struct', '{}', [", self.escape_erlang_atom(&s.name)));
+                // Check if struct name is an unquote marker: $UNQUOTE:varname
+                if let Some(unquote_var) = s.name.strip_prefix("$UNQUOTE:") {
+                    self.emit("{'struct', ");
+                    self.emit(&Self::var_name(unquote_var));
+                    self.emit(", [");
+                } else {
+                    self.emit(&format!("{{'struct', '{}', [", self.escape_erlang_atom(&s.name)));
+                }
                 for (i, (field_name, field_type)) in s.fields.iter().enumerate() {
                     if i > 0 {
                         self.emit(", ");
                     }
-                    self.emit(&format!("{{'{}', ", self.escape_erlang_atom(field_name)));
+                    // Check if field name is an unquote marker: $UNQUOTE:varname
+                    if let Some(unquote_var) = field_name.strip_prefix("$UNQUOTE:") {
+                        self.emit("{");
+                        self.emit(&Self::var_name(unquote_var));
+                        self.emit(", ");
+                    } else {
+                        self.emit(&format!("{{'{}', ", self.escape_erlang_atom(field_name)));
+                    }
                     self.emit_quoted_type(field_type)?;
                     self.emit("}");
                 }
@@ -3798,7 +3818,14 @@ impl CoreErlangEmitter {
     /// Emit a quoted function as Erlang tuple.
     fn emit_quoted_function(&mut self, func: &Function) -> CoreErlangResult<()> {
         // Format: {function, Name, TypeParams, Params, ReturnType, Body}
-        self.emit(&format!("{{'function', '{}', [", self.escape_erlang_atom(&func.name)));
+        // Check if function name is an unquote marker: $UNQUOTE:varname
+        if let Some(unquote_var) = func.name.strip_prefix("$UNQUOTE:") {
+            self.emit("{'function', ");
+            self.emit(&Self::var_name(unquote_var));
+            self.emit(", [");
+        } else {
+            self.emit(&format!("{{'function', '{}', [", self.escape_erlang_atom(&func.name)));
+        }
 
         // Type params
         for (i, tp) in func.type_params.iter().enumerate() {
@@ -4886,6 +4913,193 @@ mod tests {
         assert!(
             result.contains("call 'Elixir.Jason':'encode'"),
             "Expected call 'Elixir.Jason':'encode', but got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_quote_unquote_function_name() {
+        // Test that #func_name in quoted function emits variable reference
+        let source = r#"
+            mod test {
+                pub fn make_getter(func_name: atom) -> any {
+                    quote {
+                        fn #func_name(self) -> int { 42 }
+                    }
+                }
+            }
+        "#;
+
+        let result = emit_core_erlang(source).unwrap();
+
+        // The quoted function should emit the func_name variable (Func_name)
+        // in the function name position, not a literal atom
+        assert!(
+            result.contains("'function', Func_name"),
+            "Expected function name to be variable Func_name, got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_quote_unquote_struct_name() {
+        // Test that #name in quoted struct emits variable reference
+        let source = r#"
+            mod test {
+                pub fn make_struct(name: atom) -> any {
+                    quote {
+                        struct #name {
+                            value: int,
+                        }
+                    }
+                }
+            }
+        "#;
+
+        let result = emit_core_erlang(source).unwrap();
+
+        // The quoted struct should emit the name variable (Name)
+        // in the struct name position, not a literal atom
+        assert!(
+            result.contains("'struct', Name"),
+            "Expected struct name to be variable Name, got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_quote_unquote_struct_field_name() {
+        // Test that #field_name in quoted struct emits variable reference
+        let source = r#"
+            mod test {
+                pub fn make_struct(field_name: atom) -> any {
+                    quote {
+                        struct Foo {
+                            #field_name: int,
+                        }
+                    }
+                }
+            }
+        "#;
+
+        let result = emit_core_erlang(source).unwrap();
+
+        // The quoted struct field should emit the field_name variable (Field_name)
+        // in the field name position, not a literal atom
+        assert!(
+            result.contains("{Field_name, {'type', 'int'}}"),
+            "Expected field name to be variable Field_name, got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_quote_unquote_return_type() {
+        // Test that #ret_type in quoted function return type emits variable reference
+        let source = r#"
+            mod test {
+                pub fn make_fn(ret_type: any) -> any {
+                    quote {
+                        fn foo() -> #ret_type { }
+                    }
+                }
+            }
+        "#;
+
+        let result = emit_core_erlang(source).unwrap();
+
+        // The quoted function should emit the ret_type variable (Ret_type)
+        // in the return type position, not a literal type
+        // The return type should use the variable directly (since it's unquoted)
+        assert!(
+            result.contains("Ret_type"),
+            "Expected return type to be variable Ret_type, got:\n{}",
+            result
+        );
+        // Should NOT contain the literal marker
+        assert!(
+            !result.contains("'$UNQUOTE:ret_type'"),
+            "Should not have literal marker, got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_quote_unquote_splice_in_list() {
+        // Test that #..items splices a list into a quoted list
+        let source = r#"
+            mod test {
+                pub fn make_list(items: [any]) -> any {
+                    quote {
+                        [1, #..items, 2]
+                    }
+                }
+            }
+        "#;
+
+        let result = emit_core_erlang(source).unwrap();
+
+        // The quoted list with splice should use lists:append
+        assert!(
+            result.contains("call 'lists':'append'"),
+            "Expected lists:append call for splicing, got:\n{}",
+            result
+        );
+        // Should include the Items variable for the spliced content
+        assert!(
+            result.contains("Items"),
+            "Expected Items variable for spliced content, got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_quote_unquote_splice_only_element() {
+        // Test that #..items works as the only element in a list
+        let source = r#"
+            mod test {
+                pub fn make_list(items: [any]) -> any {
+                    quote {
+                        [#..items]
+                    }
+                }
+            }
+        "#;
+
+        let result = emit_core_erlang(source).unwrap();
+
+        // The quoted list with splice should use lists:append even with single splice
+        assert!(
+            result.contains("call 'lists':'append'"),
+            "Expected lists:append call for splicing, got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_quote_unquote_splice_multiple() {
+        // Test that multiple #..items works in a list
+        let source = r#"
+            mod test {
+                pub fn make_list(a: [any], b: [any]) -> any {
+                    quote {
+                        [#..a, 0, #..b]
+                    }
+                }
+            }
+        "#;
+
+        let result = emit_core_erlang(source).unwrap();
+
+        // The quoted list should include both A and B variables
+        assert!(
+            result.contains("call 'lists':'append'"),
+            "Expected lists:append call for splicing, got:\n{}",
+            result
+        );
+        assert!(
+            result.contains("A") && result.contains("B"),
+            "Expected both A and B variables, got:\n{}",
             result
         );
     }

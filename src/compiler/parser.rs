@@ -944,7 +944,15 @@ impl<'source> Parser<'source> {
     fn parse_function(&mut self, is_pub: bool, attrs: Vec<Attribute>) -> ParseResult<Function> {
         let start = self.current_span().start;
         self.expect(&Token::Fn)?;
-        let name = self.expect_ident()?;
+
+        // In quote mode, allow #ident for unquote in function name position
+        let name = if self.in_quote && self.check(&Token::Hash) {
+            self.advance(); // consume #
+            let var_name = self.expect_ident()?;
+            format!("$UNQUOTE:{}", var_name)
+        } else {
+            self.expect_ident()?
+        };
 
         // Parse optional type parameters: <T, U>
         let type_params = self.parse_type_params()?;
@@ -1072,7 +1080,15 @@ impl<'source> Parser<'source> {
     /// Parse a struct definition.
     fn parse_struct(&mut self, is_pub: bool, attrs: Vec<Attribute>) -> ParseResult<StructDef> {
         self.expect(&Token::Struct)?;
-        let name = self.expect_type_ident()?;
+
+        // In quote mode, allow #ident for unquote in struct name position
+        let name = if self.in_quote && self.check(&Token::Hash) {
+            self.advance(); // consume #
+            let var_name = self.expect_ident()?;
+            format!("$UNQUOTE:{}", var_name)
+        } else {
+            self.expect_type_ident()?
+        };
 
         // Parse optional type parameters: <T, U>
         let type_params = self.parse_type_params()?;
@@ -1081,7 +1097,14 @@ impl<'source> Parser<'source> {
 
         let mut fields = Vec::new();
         while !self.check(&Token::RBrace) && !self.is_at_end() {
-            let field_name = self.expect_ident()?;
+            // In quote mode, allow #ident for unquote in field name position
+            let field_name = if self.in_quote && self.check(&Token::Hash) {
+                self.advance(); // consume #
+                let var_name = self.expect_ident()?;
+                format!("$UNQUOTE:{}", var_name)
+            } else {
+                self.expect_ident()?
+            };
             self.expect(&Token::Colon)?;
             let field_type = self.parse_type()?;
             fields.push((field_name, field_type));
@@ -2763,6 +2786,16 @@ impl<'source> Parser<'source> {
 
     /// Parse a single (non-union) type.
     fn parse_primary_type(&mut self) -> ParseResult<Type> {
+        // In quote mode, allow #ident for unquote in type position
+        if self.in_quote && self.check(&Token::Hash) {
+            self.advance(); // consume #
+            let var_name = self.expect_ident()?;
+            return Ok(Type::Named {
+                name: format!("$UNQUOTE:{}", var_name),
+                type_args: vec![],
+            });
+        }
+
         // Atom literal type: :ok, :error
         if let Some(Token::Atom(name)) = self.peek().cloned() {
             self.advance();
@@ -5149,6 +5182,139 @@ mod repl_edit {
                 // Just verify it parses - the inner structure is complex
             } else {
                 panic!("expected quote expr");
+            }
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_quote_unquote_function_name() {
+        // TDD: Test that #func_name works in quoted function definitions
+        let source = r#"
+            mod test {
+                fn make_getter(func_name: Atom) {
+                    quote {
+                        fn #func_name(self) -> int { 42 }
+                    }
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = first_user_item(&module) {
+            if let Some(Expr::QuoteItem(item)) = f.body.expr.as_deref() {
+                if let Item::Function(quoted_func) = item.as_ref() {
+                    // The function name should be the unquote marker
+                    assert_eq!(quoted_func.name, "$UNQUOTE:func_name");
+                } else {
+                    panic!("expected quoted function, got {:?}", item);
+                }
+            } else {
+                panic!("expected quote item expr, got {:?}", f.body.expr);
+            }
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_quote_unquote_struct_name() {
+        // TDD: Test that #name works in quoted struct definitions
+        let source = r#"
+            mod test {
+                fn make_struct(name: atom) {
+                    quote {
+                        struct #name {
+                            value: int,
+                        }
+                    }
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = first_user_item(&module) {
+            if let Some(Expr::QuoteItem(item)) = f.body.expr.as_deref() {
+                if let Item::Struct(s) = item.as_ref() {
+                    // The struct name should be the unquote marker
+                    assert_eq!(s.name, "$UNQUOTE:name");
+                } else {
+                    panic!("expected quoted struct, got {:?}", item);
+                }
+            } else {
+                panic!("expected quote item expr, got {:?}", f.body.expr);
+            }
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_quote_unquote_struct_field_name() {
+        // TDD: Test that #field_name works in quoted struct field definitions
+        let source = r#"
+            mod test {
+                fn make_struct(field_name: atom) {
+                    quote {
+                        struct Foo {
+                            #field_name: int,
+                        }
+                    }
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = first_user_item(&module) {
+            if let Some(Expr::QuoteItem(item)) = f.body.expr.as_deref() {
+                if let Item::Struct(s) = item.as_ref() {
+                    // The first field name should be the unquote marker
+                    assert_eq!(s.fields[0].0, "$UNQUOTE:field_name");
+                } else {
+                    panic!("expected quoted struct, got {:?}", item);
+                }
+            } else {
+                panic!("expected quote item expr, got {:?}", f.body.expr);
+            }
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_quote_unquote_return_type() {
+        use crate::compiler::ast::Type;
+        // TDD: Test that #ret_type works in quoted function return types
+        let source = r#"
+            mod test {
+                fn make_fn(ret_type: Type) {
+                    quote {
+                        fn foo() -> #ret_type { }
+                    }
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = first_user_item(&module) {
+            if let Some(Expr::QuoteItem(item)) = f.body.expr.as_deref() {
+                if let Item::Function(quoted_func) = item.as_ref() {
+                    // The return type should be an unquote marker
+                    if let Some(Type::Named { name, .. }) = &quoted_func.return_type {
+                        assert_eq!(name, "$UNQUOTE:ret_type");
+                    } else {
+                        panic!("expected named type with unquote marker, got {:?}", quoted_func.return_type);
+                    }
+                } else {
+                    panic!("expected quoted function, got {:?}", item);
+                }
+            } else {
+                panic!("expected quote item expr, got {:?}", f.body.expr);
             }
         } else {
             panic!("expected function");
