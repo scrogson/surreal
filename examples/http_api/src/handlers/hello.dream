@@ -8,22 +8,22 @@ fn to_binary(s: string) -> any {
 pub fn init(req: any, state: any) -> (atom, any, any) {
     // Build a map for JSON response
     let message = to_binary("Hello from Dream!");
-    let data = :maps::put(:message, message, :maps::new());
+    let data = {:message => message};
 
     // Use auto-generated jason bindings from _build/bindings/
     match jason::encode(data, []) {
         Ok(json) => {
-            let headers = :maps::put("content-type", "application/json", :maps::new());
+            let headers = {"content-type" => "application/json"};
             let req2 = cowboy_req::reply(200, headers, json, req);
             (:ok, req2, state)
         },
         Err(_) => {
-            let headers = :maps::put("content-type", "text/plain", :maps::new());
+            let headers = {"content-type" => "text/plain"};
             let req2 = cowboy_req::reply(500, headers, "JSON encoding error", req);
             (:ok, req2, state)
         },
         _ => {
-            let headers = :maps::put("content-type", "text/plain", :maps::new());
+            let headers = {"content-type" => "text/plain"};
             let req2 = cowboy_req::reply(500, headers, "Unexpected error", req);
             (:ok, req2, state)
         }

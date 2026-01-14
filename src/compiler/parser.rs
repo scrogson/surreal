@@ -1245,6 +1245,49 @@ impl<'source> Parser<'source> {
         Ok(Block { stmts, expr })
     }
 
+    /// Parse block contents when we've already parsed the first expression.
+    /// Used when disambiguating between map literals and blocks.
+    fn parse_block_contents_with_first(&mut self, first: Expr) -> ParseResult<Block> {
+        let mut stmts = Vec::new();
+        let mut expr = None;
+
+        // Handle the first expression we already parsed
+        if self.check(&Token::Semi) {
+            self.advance();
+            stmts.push(Stmt::Expr(first));
+        } else if self.check(&Token::RBrace) {
+            // It's the trailing expression
+            return Ok(Block { stmts, expr: Some(Box::new(first)) });
+        } else if Self::is_block_expr(&first) {
+            stmts.push(Stmt::Expr(first));
+        } else {
+            let span = self.current_span();
+            return Err(ParseError::new("expected `;` or `}`", span));
+        }
+
+        // Continue parsing remaining block contents
+        while !self.check(&Token::RBrace) && !self.is_at_end() {
+            if self.check(&Token::Let) {
+                stmts.push(self.parse_let_stmt()?);
+            } else {
+                let e = self.parse_expr()?;
+                if self.check(&Token::Semi) {
+                    self.advance();
+                    stmts.push(Stmt::Expr(e));
+                } else if self.check(&Token::RBrace) {
+                    expr = Some(Box::new(e));
+                } else if Self::is_block_expr(&e) {
+                    stmts.push(Stmt::Expr(e));
+                } else {
+                    let span = self.current_span();
+                    return Err(ParseError::new("expected `;` or `}`", span));
+                }
+            }
+        }
+
+        Ok(Block { stmts, expr })
+    }
+
     /// Check if an expression is a "block expression" that doesn't need a semicolon.
     fn is_block_expr(e: &Expr) -> bool {
         matches!(
@@ -1962,35 +2005,54 @@ impl<'source> Parser<'source> {
             return Ok(Expr::List(elements));
         }
 
-        // Map literal: %{key => value, ...}
-        if self.check(&Token::Percent) {
-            self.advance();
-            self.expect(&Token::LBrace)?;
+        // Map literal or block expression: { ... }
+        // Map literal: { key => value, ... }
+        // Block: { stmt; stmt; expr }
+        if self.check(&Token::LBrace) {
+            self.advance(); // consume '{'
 
-            let mut pairs = Vec::new();
-            if !self.check(&Token::RBrace) {
-                loop {
-                    let key = self.parse_expr()?;
-                    self.expect(&Token::FatArrow)?;
-                    let value = self.parse_expr()?;
-                    pairs.push((key, value));
+            // Empty braces = empty map
+            if self.check(&Token::RBrace) {
+                self.advance();
+                return Ok(Expr::MapLiteral(vec![]));
+            }
 
-                    if !self.check(&Token::Comma) {
-                        break;
-                    }
+            // If it starts with 'let', it's definitely a block
+            if self.check(&Token::Let) {
+                let block = self.parse_block_contents()?;
+                self.expect(&Token::RBrace)?;
+                return Ok(Expr::Block(block));
+            }
+
+            // Try to determine if this is a map or block
+            // Parse first expression and check for '=>'
+            let first = self.parse_expr()?;
+
+            if self.check(&Token::FatArrow) {
+                // It's a map literal
+                self.advance(); // consume '=>'
+                let value = self.parse_expr()?;
+                let mut pairs = vec![(first, value)];
+
+                while self.check(&Token::Comma) {
                     self.advance();
                     if self.check(&Token::RBrace) {
                         break;
                     }
+                    let key = self.parse_expr()?;
+                    self.expect(&Token::FatArrow)?;
+                    let value = self.parse_expr()?;
+                    pairs.push((key, value));
                 }
+                self.expect(&Token::RBrace)?;
+                return Ok(Expr::MapLiteral(pairs));
+            } else {
+                // It's a block - continue parsing as block contents
+                // The first expression we parsed is either the return expr or first statement
+                let block = self.parse_block_contents_with_first(first)?;
+                self.expect(&Token::RBrace)?;
+                return Ok(Expr::Block(block));
             }
-            self.expect(&Token::RBrace)?;
-            return Ok(Expr::MapLiteral(pairs));
-        }
-
-        // Block expression
-        if self.check(&Token::LBrace) {
-            return Ok(Expr::Block(self.parse_block()?));
         }
 
         // If expression
@@ -5393,11 +5455,11 @@ mod repl_edit {
 
     #[test]
     fn test_parse_map_literal() {
-        // Test that %{key => value} syntax works
+        // Test that {key => value} syntax works
         let source = r#"
             mod test {
                 fn make_map() {
-                    %{:foo => 1, :bar => 2}
+                    {:foo => 1, :bar => 2}
                 }
             }
         "#;
@@ -5423,11 +5485,11 @@ mod repl_edit {
 
     #[test]
     fn test_parse_empty_map_literal() {
-        // Test that empty map literal %{} works
+        // Test that empty map literal {} works
         let source = r#"
             mod test {
                 fn empty_map() {
-                    %{}
+                    {}
                 }
             }
         "#;
