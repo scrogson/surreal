@@ -1,0 +1,55 @@
+// Serialization trait and runtime dispatch helper
+//
+// The Serialize trait provides a `serialize()` method that converts
+// a value to a JSON-compatible representation (maps, lists, primitives).
+
+/// Trait for types that can be serialized to JSON-compatible data.
+///
+/// Implement this trait for custom types to enable JSON serialization.
+/// Use the `#[derive(Serialize)]` macro for automatic implementation.
+pub trait Serialize {
+    /// Convert this value to a JSON-compatible representation.
+    /// Returns maps for structs, lists for arrays, and primitives as-is.
+    fn serialize(self) -> any;
+}
+
+/// Serialize any value with automatic type dispatch.
+///
+/// This function handles:
+/// - Structs (maps with __struct__ key): calls Serialize::serialize
+/// - Lists: recursively serializes each element
+/// - Maps: recursively serializes values
+/// - Primitives (int, string, bool, atom): returns as-is
+///
+/// Use this in derived serialize implementations to handle nested values.
+pub fn serialize_value(value: any) -> any {
+    if :erlang::is_map(value) {
+        // Check if it's a struct (has __struct__ key)
+        match :maps::get(:__struct__, value, :not_a_struct) {
+            :not_a_struct => {
+                // Regular map - serialize each value
+                serialize_map(value)
+            },
+            _ => {
+                // It's a struct - call its serialize method
+                Serialize::serialize(value)
+            }
+        }
+    } else if :erlang::is_list(value) {
+        // List - recursively serialize each element
+        :lists::map(|elem| { serialize_value(elem) }, value)
+    } else {
+        // Primitive (int, string, bool, atom, etc.) - return as-is
+        value
+    }
+}
+
+/// Serialize a plain map's values (not a struct).
+fn serialize_map(m: any) -> any {
+    let entries = :maps::to_list(m);
+    :lists::foldl(|entry, acc| {
+        let key = :erlang::element(1, entry);
+        let val = :erlang::element(2, entry);
+        :maps::put(key, serialize_value(val), acc)
+    }, :maps::new(), entries)
+}

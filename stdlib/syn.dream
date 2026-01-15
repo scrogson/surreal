@@ -1,0 +1,295 @@
+// syn - Parsing library for proc_macro
+//
+// Provides structured types for working with derive macro input,
+// similar to Rust's syn crate.
+//
+// ## Usage
+//
+// ```dream
+// use syn::{parse_derive_input, DeriveInput, Data, Fields};
+//
+// #[proc_macro_derive(MyDerive)]
+// pub fn my_derive(input: any) -> any {
+//     let derive_input = parse_derive_input(input);
+//     let name = derive_input.ident;
+//     let fields = get_struct_fields(derive_input);
+//     // ...
+// }
+// ```
+//
+// ## Input Format
+//
+// Derive macros receive input in this format:
+// ```
+// {derive_input, 'Name', [TypeParams], Data}
+// ```
+//
+// Where Data is one of:
+// - `{struct_data, named, [Fields]}` - struct with named fields
+// - `{struct_data, unnamed, [Fields]}` - tuple struct
+// - `{struct_data, unit, []}` - unit struct
+// - `{enum_data, [Variants]}` - enum
+//
+// Each Field is: `{field, 'name', is_pub, Type}`
+// Each Variant is: `{variant, 'name', Kind}`
+
+// =============================================================================
+// Core Types (as records/maps for pattern matching)
+// =============================================================================
+
+/// Parsed input for a derive macro.
+///
+/// Fields:
+/// - ident: atom - the name of the struct/enum
+/// - generics: Generics - generic type parameters
+/// - data: Data - struct or enum data
+pub struct DeriveInput {
+    ident: atom,
+    generics: Generics,
+    data: Data,
+}
+
+/// Generic type parameters.
+pub struct Generics {
+    params: [TypeParam],
+}
+
+/// A generic type parameter with optional bounds.
+pub struct TypeParam {
+    ident: atom,
+    bounds: [atom],
+}
+
+/// The data portion of a DeriveInput.
+pub enum Data {
+    /// A struct
+    Struct(DataStruct),
+    /// An enum
+    Enum(DataEnum),
+}
+
+/// Data for a struct.
+pub struct DataStruct {
+    fields: Fields,
+}
+
+/// Data for an enum.
+pub struct DataEnum {
+    variants: [Variant],
+}
+
+/// Fields of a struct.
+pub enum Fields {
+    /// Named fields: `{ x: int, y: int }`
+    Named([Field]),
+    /// Unnamed fields (tuple struct): `(int, string)`
+    Unnamed([Field]),
+    /// Unit struct: no fields
+    Unit,
+}
+
+/// A single field of a struct.
+/// Note: ident is Option<atom> at runtime but typed as `any` to avoid
+/// cross-module type resolution issues during stdlib compilation.
+pub struct Field {
+    ident: any,  // Option<atom> - None for tuple struct fields
+    is_pub: bool,
+    ty: any,  // Type information (as Erlang term)
+}
+
+/// An enum variant.
+pub struct Variant {
+    ident: atom,
+    fields: Fields,
+}
+
+// =============================================================================
+// Parsing Functions
+// =============================================================================
+
+/// Parse the raw derive input into a DeriveInput struct.
+///
+/// Input format: `{derive_input, 'Name', [TypeParams], Data}`
+pub fn parse_derive_input(input: any) -> DeriveInput {
+    // Extract components from the tuple
+    let ident = :erlang::element(2, input);
+    let type_params_raw = :erlang::element(3, input);
+    let data_raw = :erlang::element(4, input);
+
+    // Parse generics
+    let generics = parse_generics(type_params_raw);
+
+    // Parse data
+    let data = parse_data(data_raw);
+
+    DeriveInput { ident: ident, generics: generics, data: data }
+}
+
+/// Parse generic type parameters.
+fn parse_generics(raw: any) -> Generics {
+    let params = :lists::map(|tp| { parse_type_param(tp) }, raw);
+    Generics { params: params }
+}
+
+/// Parse a single type parameter.
+/// Format: `{type_param, 'T', ['Bound1', 'Bound2']}`
+fn parse_type_param(raw: any) -> TypeParam {
+    let ident = :erlang::element(2, raw);
+    let bounds = :erlang::element(3, raw);
+    TypeParam { ident: ident, bounds: bounds }
+}
+
+/// Parse the data portion (struct or enum).
+fn parse_data(raw: any) -> Data {
+    let tag = :erlang::element(1, raw);
+    if tag == :struct_data {
+        Struct(parse_struct_data(raw))
+    } else {
+        Enum(parse_enum_data(raw))
+    }
+}
+
+/// Parse struct data.
+/// Format: `{struct_data, named|unnamed|unit, [Fields]}`
+fn parse_struct_data(raw: any) -> DataStruct {
+    let kind = :erlang::element(2, raw);
+    let fields_raw = :erlang::element(3, raw);
+    let fields = parse_fields(kind, fields_raw);
+    DataStruct { fields: fields }
+}
+
+/// Parse enum data.
+/// Format: `{enum_data, [Variants]}`
+fn parse_enum_data(raw: any) -> DataEnum {
+    let variants_raw = :erlang::element(2, raw);
+    let variants = :lists::map(|v| { parse_variant(v) }, variants_raw);
+    DataEnum { variants: variants }
+}
+
+/// Parse fields based on their kind.
+fn parse_fields(kind: atom, raw: any) -> Fields {
+    if kind == :named {
+        Named(:lists::map(|f| { parse_field(f) }, raw))
+    } else if kind == :unnamed {
+        Unnamed(:lists::map(|f| { parse_field(f) }, raw))
+    } else {
+        Unit
+    }
+}
+
+/// Parse a single field.
+/// Format: `{field, 'name', is_pub, Type}`
+fn parse_field(raw: any) -> Field {
+    let ident_raw = :erlang::element(2, raw);
+    let is_pub = :erlang::element(3, raw);
+    let ty = :erlang::element(4, raw);
+
+    // ident might be an atom or 'none' for unnamed fields
+    let ident = if ident_raw == :none {
+        None
+    } else {
+        Some(ident_raw)
+    };
+
+    Field { ident: ident, is_pub: is_pub, ty: ty }
+}
+
+/// Parse an enum variant.
+/// Format: `{variant, 'Name', unit | {tuple, [Types]} | {struct, [Fields]}}`
+fn parse_variant(raw: any) -> Variant {
+    let ident = :erlang::element(2, raw);
+    let kind_raw = :erlang::element(3, raw);
+
+    let fields = if kind_raw == :unit {
+        Unit
+    } else {
+        let kind_tag = :erlang::element(1, kind_raw);
+        let kind_data = :erlang::element(2, kind_raw);
+        if kind_tag == :tuple {
+            // Tuple variant - create unnamed fields from types
+            let fields_list = :lists::map(|ty| {
+                Field { ident: None, is_pub: true, ty: ty }
+            }, kind_data);
+            Unnamed(fields_list)
+        } else {
+            // Struct variant - parse named fields
+            Named(:lists::map(|f| { parse_field(f) }, kind_data))
+        }
+    };
+
+    Variant { ident: ident, fields: fields }
+}
+
+// =============================================================================
+// Convenience Functions
+// =============================================================================
+
+/// Get the struct fields from a DeriveInput.
+/// Returns an empty list if not a struct or unit struct.
+pub fn get_struct_fields(input: DeriveInput) -> [Field] {
+    match input.data {
+        Struct(s) => match s.fields {
+            Named(fields) => fields,
+            Unnamed(fields) => fields,
+            Unit => [],
+            _ => [],
+        },
+        Enum(_) => [],
+        _ => [],
+    }
+}
+
+/// Get the enum variants from a DeriveInput.
+/// Returns an empty list if not an enum.
+pub fn get_enum_variants(input: DeriveInput) -> [Variant] {
+    match input.data {
+        Struct(_) => [],
+        Enum(e) => e.variants,
+        _ => [],
+    }
+}
+
+/// Check if the input is a struct.
+pub fn is_struct(input: DeriveInput) -> bool {
+    match input.data {
+        Struct(_) => true,
+        Enum(_) => false,
+        _ => false,
+    }
+}
+
+/// Check if the input is an enum.
+pub fn is_enum(input: DeriveInput) -> bool {
+    match input.data {
+        Struct(_) => false,
+        Enum(_) => true,
+        _ => false,
+    }
+}
+
+/// Get field names from a list of fields.
+/// Returns atoms for named fields, skips unnamed fields.
+pub fn field_names(fields: [Field]) -> [atom] {
+    :lists::filtermap(|f| {
+        // f.ident is Option<atom>: {:Some, name} or :None
+        if :erlang::is_tuple(f.ident) {
+            (:true, :erlang::element(2, f.ident))
+        } else {
+            :false
+        }
+    }, fields)
+}
+
+/// Iterate over named fields with their names.
+/// Calls the function with (field_name, field) for each named field.
+pub fn each_named_field(fields: [Field], func: fn(atom, Field) -> any) -> [any] {
+    :lists::filtermap(|f| {
+        // f.ident is Option<atom>: {:Some, name} or :None
+        if :erlang::is_tuple(f.ident) {
+            let name = :erlang::element(2, f.ident);
+            (:true, func(name, f))
+        } else {
+            :false
+        }
+    }, fields)
+}

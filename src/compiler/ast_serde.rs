@@ -547,6 +547,104 @@ pub fn item_to_erlang_term(item: &Item) -> String {
 }
 
 // =============================================================================
+// DeriveInput Format (syn-style structured input for derive macros)
+// =============================================================================
+
+/// Convert a struct definition to DeriveInput format.
+/// This format is more explicit and matches syn's DeriveInput structure.
+///
+/// Format:
+/// ```erlang
+/// {derive_input,
+///   'StructName',
+///   [{type_param, 'T', []}],  % generics
+///   {struct_data, named, [
+///     {field, 'field_name', is_pub, Type}
+///   ]}
+/// }
+/// ```
+pub fn struct_to_derive_input(s: &StructDef) -> String {
+    let type_params_str: Vec<String> = s.type_params.iter()
+        .map(|tp| {
+            let bounds: Vec<String> = tp.bounds.iter()
+                .map(|b| format!("'{}'", escape_atom(b)))
+                .collect();
+            format!("{{type_param, '{}', [{}]}}", escape_atom(&tp.name), bounds.join(", "))
+        })
+        .collect();
+
+    let fields_str: Vec<String> = s.fields.iter()
+        .map(|(name, ty)| {
+            format!("{{field, '{}', true, {}}}", escape_atom(name), type_to_erlang_term(ty))
+        })
+        .collect();
+
+    format!("{{derive_input, '{}', [{}], {{struct_data, named, [{}]}}}}",
+        escape_atom(&s.name),
+        type_params_str.join(", "),
+        fields_str.join(", "))
+}
+
+/// Convert an enum definition to DeriveInput format.
+///
+/// Format:
+/// ```erlang
+/// {derive_input,
+///   'EnumName',
+///   [{type_param, 'T', []}],  % generics
+///   {enum_data, [
+///     {variant, 'VariantName', unit | {tuple, [Type]} | {struct, [Field]}}
+///   ]}
+/// }
+/// ```
+pub fn enum_to_derive_input(e: &EnumDef) -> String {
+    let type_params_str: Vec<String> = e.type_params.iter()
+        .map(|tp| {
+            let bounds: Vec<String> = tp.bounds.iter()
+                .map(|b| format!("'{}'", escape_atom(b)))
+                .collect();
+            format!("{{type_param, '{}', [{}]}}", escape_atom(&tp.name), bounds.join(", "))
+        })
+        .collect();
+
+    let variants_str: Vec<String> = e.variants.iter()
+        .map(|v| {
+            let kind_str = match &v.kind {
+                VariantKind::Unit => "unit".to_string(),
+                VariantKind::Tuple(types) => {
+                    let types_str: Vec<String> = types.iter()
+                        .map(|t| type_to_erlang_term(t))
+                        .collect();
+                    format!("{{tuple, [{}]}}", types_str.join(", "))
+                }
+                VariantKind::Struct(fields) => {
+                    let fields_str: Vec<String> = fields.iter()
+                        .map(|(n, t)| format!("{{field, '{}', true, {}}}", escape_atom(n), type_to_erlang_term(t)))
+                        .collect();
+                    format!("{{struct, [{}]}}", fields_str.join(", "))
+                }
+            };
+            format!("{{variant, '{}', {}}}", escape_atom(&v.name), kind_str)
+        })
+        .collect();
+
+    format!("{{derive_input, '{}', [{}], {{enum_data, [{}]}}}}",
+        escape_atom(&e.name),
+        type_params_str.join(", "),
+        variants_str.join(", "))
+}
+
+/// Convert an Item to DeriveInput format (for derive macros).
+/// Returns None for items that can't be used with derive.
+pub fn item_to_derive_input(item: &Item) -> Option<String> {
+    match item {
+        Item::Struct(s) => Some(struct_to_derive_input(s)),
+        Item::Enum(e) => Some(enum_to_derive_input(e)),
+        _ => None,
+    }
+}
+
+// =============================================================================
 // Erlang Term to AST (Deserialization)
 // =============================================================================
 

@@ -1,0 +1,6 @@
+[package]
+name = "serde"
+version = "0.1.0"
+
+[dependencies]
+jason = "1.4.4"

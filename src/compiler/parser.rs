@@ -3258,6 +3258,12 @@ impl<'source> Parser<'source> {
     }
 
     fn expect_type_ident(&mut self) -> ParseResult<String> {
+        // In quote mode, allow #ident for unquote in type position
+        if self.in_quote && self.check(&Token::Hash) {
+            self.advance(); // consume #
+            let var_name = self.expect_ident()?;
+            return Ok(format!("$UNQUOTE:{}", var_name));
+        }
         if let Some(Token::TypeIdent(name)) = self.peek().cloned() {
             self.advance();
             Ok(name)

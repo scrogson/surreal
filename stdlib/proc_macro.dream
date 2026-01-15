@@ -1,0 +1,166 @@
+// proc_macro - Procedural macro support for Dream
+//
+// This module provides types and utilities for writing procedural macros.
+// Macros receive input as TokenStream and return TokenStream.
+//
+// ## Usage
+//
+// ```dream
+// use proc_macro::TokenStream;
+//
+// #[proc_macro_derive(MyDerive)]
+// pub fn my_derive(input: TokenStream) -> TokenStream {
+//     // Process tokens and generate code
+// }
+// ```
+//
+// ## TokenTree Format
+//
+// Tokens are represented as tagged tuples:
+// - `{ident, Name}` - Identifier (lowercase)
+// - `{type_ident, Name}` - Type identifier (PascalCase)
+// - `{int, Value}` - Integer literal
+// - `{string, Value}` - String literal
+// - `{atom, Name}` - Atom literal
+// - `{punct, Chars}` - Punctuation (operators, delimiters)
+// - `{keyword, Name}` - Keyword (fn, let, struct, etc.)
+// - `{group, Delimiter, Tokens}` - Delimited group
+//
+// Delimiters:
+// - `paren` - Parentheses ()
+// - `bracket` - Brackets []
+// - `brace` - Braces {}
+
+/// A delimiter for grouped tokens.
+pub enum Delimiter {
+    /// Parentheses: `( )`
+    Paren,
+    /// Square brackets: `[ ]`
+    Bracket,
+    /// Curly braces: `{ }`
+    Brace,
+}
+
+/// A single token or a delimited group of tokens.
+///
+/// TokenTree is represented as tagged tuples in the macro runtime:
+/// - `{ident, name}` for identifiers
+/// - `{type_ident, name}` for type identifiers
+/// - `{int, value}` for integers
+/// - `{string, value}` for strings
+/// - `{atom, name}` for atoms
+/// - `{punct, chars}` for punctuation
+/// - `{keyword, name}` for keywords
+/// - `{group, delimiter, tokens}` for groups
+pub enum TokenTree {
+    /// An identifier: `foo`, `my_var`
+    Ident(string),
+    /// A type identifier: `User`, `Option`
+    TypeIdent(string),
+    /// An integer literal: `42`, `-5`
+    Int(int),
+    /// A string literal: `"hello"`
+    String(string),
+    /// An atom literal: `:ok`, `:error`
+    Atom(string),
+    /// Punctuation: `+`, `->`, `::`, `,`, etc.
+    Punct(string),
+    /// A keyword: `fn`, `let`, `struct`, `pub`, etc.
+    Keyword(string),
+    /// A delimited group of tokens
+    Group(Delimiter, [TokenTree]),
+}
+
+/// A stream of tokens.
+///
+/// TokenStream is simply a list of TokenTree values.
+/// In the macro runtime, this is `[TokenTree]`.
+pub type TokenStream = [TokenTree];
+
+// =============================================================================
+// TokenStream utilities
+// =============================================================================
+
+/// Check if a TokenStream is empty.
+pub fn is_empty(tokens: TokenStream) -> bool {
+    :erlang::length(tokens) == 0
+}
+
+/// Get the first token from a TokenStream.
+/// Returns (:some, token) or :none.
+pub fn first(tokens: TokenStream) -> (:some, TokenTree) | :none {
+    if :erlang::length(tokens) == 0 {
+        :none
+    } else {
+        (:some, :erlang::hd(tokens))
+    }
+}
+
+/// Get the rest of the tokens after the first.
+/// Returns empty list if tokens is empty.
+pub fn rest(tokens: TokenStream) -> TokenStream {
+    if :erlang::length(tokens) == 0 {
+        []
+    } else {
+        :erlang::tl(tokens)
+    }
+}
+
+/// Concatenate two TokenStreams.
+pub fn concat(a: TokenStream, b: TokenStream) -> TokenStream {
+    :lists::append(a, b)
+}
+
+// =============================================================================
+// Token constructors (for building TokenStream in macros)
+// =============================================================================
+
+/// Create an identifier token.
+pub fn ident(name: string) -> TokenTree {
+    Ident(name)
+}
+
+/// Create a type identifier token.
+pub fn type_ident(name: string) -> TokenTree {
+    TypeIdent(name)
+}
+
+/// Create an integer token.
+pub fn int(value: int) -> TokenTree {
+    Int(value)
+}
+
+/// Create a string token.
+pub fn string(value: string) -> TokenTree {
+    String(value)
+}
+
+/// Create an atom token.
+pub fn atom(name: string) -> TokenTree {
+    Atom(name)
+}
+
+/// Create a punctuation token.
+pub fn punct(chars: string) -> TokenTree {
+    Punct(chars)
+}
+
+/// Create a keyword token.
+pub fn keyword(name: string) -> TokenTree {
+    Keyword(name)
+}
+
+/// Create a parenthesized group.
+pub fn paren_group(tokens: TokenStream) -> TokenTree {
+    Group(Delimiter::Paren, tokens)
+}
+
+/// Create a bracketed group.
+pub fn bracket_group(tokens: TokenStream) -> TokenTree {
+    Group(Delimiter::Bracket, tokens)
+}
+
+/// Create a braced group.
+pub fn brace_group(tokens: TokenStream) -> TokenTree {
+    Group(Delimiter::Brace, tokens)
+}

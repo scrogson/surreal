@@ -255,8 +255,9 @@ pub enum Token {
     }, priority = 2)]
     Charlist(String),
 
-    // Simple atoms: :ok, :error, :my_atom
-    #[regex(r":[a-z_][a-z0-9_]*", |lex| Some(lex.slice()[1..].to_string()))]
+    // Simple atoms: :ok, :error, :my_atom, :Self, :Some, :None
+    // Allow both lowercase and uppercase letters for Dream macros and Erlang interop
+    #[regex(r":[a-zA-Z_][a-zA-Z0-9_]*", |lex| Some(lex.slice()[1..].to_string()))]
     Atom(String),
 
     // Quoted atoms for Elixir modules: :'Elixir.Enum', :'my-atom'

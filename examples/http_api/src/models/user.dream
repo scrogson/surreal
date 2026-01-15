@@ -1,7 +1,7 @@
 // User model with JSON serialization
 
 /// A user with an ID and name.
-#[derive(to_json_derive)]
+#[derive(Serialize)]
 pub struct User {
     id: int,
     name: string,

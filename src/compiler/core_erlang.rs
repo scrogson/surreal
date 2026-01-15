@@ -816,7 +816,7 @@ impl CoreErlangEmitter {
         receiver_var: &str,
         args: &[Expr],
     ) -> CoreErlangResult<()> {
-        // The struct tag is an atom like 'module::Type'
+        // The struct tag is an atom like 'dream::module::Type'
         // We need to parse it at runtime to get the module and type
         // Then call dream::module:Trait_Type_method(receiver, args...)
 
@@ -828,7 +828,7 @@ impl CoreErlangEmitter {
         ));
         self.newline();
 
-        // Split on "::" to get [Module, Type]
+        // Split on "::" to get parts like ["dream", "http_api", "models", "user", "User"]
         let parts_var = self.fresh_var();
         self.emit(&format!(
             "let <{}> = call 'string':'split'({}, \"::\",'all') in",
@@ -836,17 +836,27 @@ impl CoreErlangEmitter {
         ));
         self.newline();
 
-        // Extract module and type name
-        let module_var = self.fresh_var();
+        // Extract type name (last element)
         let type_var = self.fresh_var();
-        self.emit(&format!(
-            "let <{}> = call 'lists':'nth'(1, {}) in",
-            module_var, parts_var
-        ));
-        self.newline();
         self.emit(&format!(
             "let <{}> = call 'lists':'last'({}) in",
             type_var, parts_var
+        ));
+        self.newline();
+
+        // Extract module parts (all but last), then join with "::"
+        let module_parts_var = self.fresh_var();
+        self.emit(&format!(
+            "let <{}> = call 'lists':'droplast'({}) in",
+            module_parts_var, parts_var
+        ));
+        self.newline();
+
+        // Join module parts with "::" to get full module name (e.g., "dream::http_api::models::user")
+        let full_module_var = self.fresh_var();
+        self.emit(&format!(
+            "let <{}> = call 'erlang':'list_to_atom'(call 'lists':'flatten'(call 'lists':'join'(\"::\", {}))) in",
+            full_module_var, module_parts_var
         ));
         self.newline();
 
@@ -855,14 +865,6 @@ impl CoreErlangEmitter {
         self.emit(&format!(
             "let <{}> = call 'erlang':'list_to_atom'(call 'lists':'flatten'([[\"{}\" | \"_\"], {}, \"_{}\"])) in",
             method_name_var, trait_name, type_var, method_name
-        ));
-        self.newline();
-
-        // Build the full module name: dream::module
-        let full_module_var = self.fresh_var();
-        self.emit(&format!(
-            "let <{}> = call 'erlang':'list_to_atom'(call 'lists':'flatten'([[\"dream::\" | {}]])) in",
-            full_module_var, module_var
         ));
         self.newline();
 

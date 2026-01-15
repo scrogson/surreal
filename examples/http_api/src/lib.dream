@@ -20,7 +20,6 @@ mod bindings;
 mod cowboy;  // Auto-generated from _build/bindings/cowboy.dreamt
 mod jason;   // Auto-generated from _build/bindings/jason.dreamt
 mod handlers;
-mod macros;  // Custom derive macros for JSON serialization
 mod models;  // Data models (User, etc.)
 mod tests;
 

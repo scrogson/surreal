@@ -33,6 +33,70 @@ pub fn is_macro(attrs: &[Attribute]) -> bool {
     attrs.iter().any(|attr| attr.name == "macro")
 }
 
+/// Check if a function has the `#[proc_macro_derive(Name)]` attribute.
+/// This is the Rust-style attribute for defining derive macros.
+pub fn is_proc_macro_derive(attrs: &[Attribute]) -> bool {
+    attrs.iter().any(|attr| attr.name == "proc_macro_derive")
+}
+
+/// Get the derive name from a `#[proc_macro_derive(Name)]` attribute.
+/// Returns None if no valid proc_macro_derive attribute is found.
+pub fn get_proc_macro_derive_name(attrs: &[Attribute]) -> Option<String> {
+    for attr in attrs {
+        if attr.name == "proc_macro_derive" {
+            if let AttributeArgs::Parenthesized(args) = &attr.args {
+                if let Some(AttributeArg::Ident(name)) = args.first() {
+                    return Some(name.clone());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Check if an item has the `#[derive(...)]` attribute that defines a derive macro.
+/// Returns true if this is a macro function definition (has #[derive(Name)] on a function).
+/// DEPRECATED: Use is_proc_macro_derive() instead.
+pub fn is_derive_macro(attrs: &[Attribute]) -> bool {
+    // Check for new-style #[proc_macro_derive(Name)] first
+    if is_proc_macro_derive(attrs) {
+        return true;
+    }
+    // Fall back to old-style #[derive(Name)] on functions
+    attrs.iter().any(|attr| {
+        if attr.name == "derive" {
+            if let AttributeArgs::Parenthesized(args) = &attr.args {
+                // #[derive(Name)] - single identifier arg means this defines a derive macro
+                return args.len() == 1 && matches!(&args[0], AttributeArg::Ident(_));
+            }
+        }
+        false
+    })
+}
+
+/// Get the derive macro name from a `#[derive(Name)]` or `#[proc_macro_derive(Name)]` attribute.
+/// Returns None if no valid derive macro attribute is found.
+/// DEPRECATED: Use get_proc_macro_derive_name() instead.
+pub fn get_derive_macro_name(attrs: &[Attribute]) -> Option<String> {
+    // Check for new-style #[proc_macro_derive(Name)] first
+    if let Some(name) = get_proc_macro_derive_name(attrs) {
+        return Some(name);
+    }
+    // Fall back to old-style #[derive(Name)]
+    for attr in attrs {
+        if attr.name == "derive" {
+            if let AttributeArgs::Parenthesized(args) = &attr.args {
+                if args.len() == 1 {
+                    if let AttributeArg::Ident(name) = &args[0] {
+                        return Some(name.clone());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Check if an item has `#[cfg(test)]` attribute.
 pub fn is_cfg_test(attrs: &[Attribute]) -> bool {
     attrs.iter().any(|attr| {

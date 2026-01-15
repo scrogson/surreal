@@ -139,8 +139,8 @@ impl MacroRegistry {
             )
         })?;
 
-        // Serialize the struct to Erlang term format
-        let ast_term = ast_serde::struct_def_to_erlang_term(struct_def);
+        // Serialize the struct to DeriveInput format (syn-style)
+        let ast_term = ast_serde::struct_to_derive_input(struct_def);
 
         // Get or create the expander
         let expander = self.get_expander()?;
@@ -188,8 +188,8 @@ impl MacroRegistry {
             )
         })?;
 
-        // Serialize the enum to Erlang term format
-        let ast_term = ast_serde::enum_def_to_erlang_term(enum_def);
+        // Serialize the enum to DeriveInput format (syn-style)
+        let ast_term = ast_serde::enum_to_derive_input(enum_def);
 
         // Get or create the expander
         let expander = self.get_expander()?;

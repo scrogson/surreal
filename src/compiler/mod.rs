@@ -15,11 +15,12 @@ mod lexer;
 mod loader;
 mod parser;
 mod prelude;
+pub mod quote_expand;
 mod token;
 pub mod typeck;
 
 pub use ast::*;
-pub use cfg::{is_macro, is_test, should_include};
+pub use cfg::{get_derive_macro_name, get_proc_macro_derive_name, is_derive_macro, is_macro, is_proc_macro_derive, is_test, should_include};
 pub use codegen::{compile, compile_file, Codegen, CodegenError, CodegenResult};
 pub use core_erlang::{
     emit_core_erlang, CoreErlangEmitter, CoreErlangError, GenericFunctionRegistry,
@@ -32,4 +33,5 @@ pub use parser::Parser;
 pub use token::Token;
 pub use derive::{expand_derives, expand_derives_with_registry, DeriveError, MacroRegistry};
 pub use macro_expander::{MacroExpander, MacroError, MacroResult};
+pub use quote_expand::expand_quotes;
 pub use typeck::{check_module, check_modules, check_modules_with_metadata, resolve_stdlib_methods, TypeCheckResult};

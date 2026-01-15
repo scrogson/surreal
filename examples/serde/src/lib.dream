@@ -1,0 +1,79 @@
+// Serde - Serialization framework for Dream
+//
+// Provides the Serialize trait for converting data structures to
+// JSON-compatible representations, with automatic recursive serialization.
+//
+// Usage:
+//   use serde::serialize::Serialize;
+//   use serde::serialize::serialize_value;
+//
+//   #[derive(Serialize)]
+//   pub struct MyStruct { ... }
+
+pub mod serialize;
+pub mod json;
+pub mod macros;
+
+use syn::{parse_derive_input, get_struct_fields, DeriveInput, Field};
+
+/// Derive macro for serde::Serialize trait.
+/// Use as #[derive(Serialize)] on structs.
+///
+/// Uses the syn-like API and quote for cleaner code generation.
+#[proc_macro_derive(Serialize)]
+pub fn serialize_derive(input: any) -> any {
+    // Parse input using syn-like API
+    let derive_input = parse_derive_input(input);
+    let name = derive_input.ident;
+    let fields = get_struct_fields(derive_input);
+
+    // Build field serialization statements
+    let field_stmts = build_field_stmts(fields);
+
+    // Build the method body: init statement + field statements
+    // quote { ... } produces a block tuple (stmts, expr), so extract the stmts list
+    let init_block = quote { let map = :maps::new(); };
+    let init_stmts = :erlang::element(1, init_block);
+    let all_stmts = :lists::append([init_stmts, field_stmts]);
+    let body = (all_stmts, (:ident, :map));
+
+    // Build method parameter (self)
+    let param = ((:ident, :self), (:named, :Self));
+
+    // Build the serialize method
+    // Use binary_to_atom to avoid the "serialize" name being resolved to the serialize module path
+    let method_name = :erlang::binary_to_atom("serialize", :utf8);
+    let method = (:function, method_name, [], [param], (:type, :any), body);
+
+    // Return trait impl for Serialize
+    // Note: We use manual tuple here because the method body is dynamically built
+    (:traitimpl, :Serialize, name, [method])
+}
+
+/// Build a list of statements that serialize each field.
+fn build_field_stmts(fields: [Field]) -> [any] {
+    :lists::filtermap(|field| {
+        // Get field name - extract from the Option wrapper
+        let field_ident = field.ident;
+        if :erlang::is_tuple(field_ident) {
+            // Some(name) is represented as {:Some, name}
+            let field_name = :erlang::element(2, field_ident);
+
+            // Build: let map = :maps::put(:field_name, serialize_value(self.field_name), map);
+            let atom_expr = (:atom, field_name);
+            let self_ident = (:ident, :self);
+            let field_access = (:field_access, self_ident, field_name);
+            // Use fully qualified extern call to avoid path resolution issues across projects
+            let serialize_call = (:extern_call, :'dream::serde::serialize', :serialize_value, [field_access]);
+            let map_ident = (:ident, :map);
+            let put_args = [atom_expr, serialize_call, map_ident];
+            let put_call = (:extern_call, :maps, :put, put_args);
+            let stmt = (:let, (:ident, :map), :none, put_call);
+
+            (:true, stmt)
+        } else {
+            // Skip unnamed fields
+            :false
+        }
+    }, fields)
+}

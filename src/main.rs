@@ -9,10 +9,10 @@ use clap::{Parser, Subcommand};
 
 use dream::{
     compiler::{
-        cfg, check_modules_with_metadata, expand_derives_with_registry, is_macro,
-        resolve_stdlib_methods, CompilerError, CoreErlangEmitter, GenericFunctionRegistry, Item,
-        MacroRegistry, Module, ModuleContext, ModuleLoader, Parser as DreamParser,
-        SharedGenericRegistry,
+        cfg, check_modules_with_metadata, expand_derives_with_registry, expand_quotes,
+        get_derive_macro_name, is_derive_macro, is_macro, resolve_stdlib_methods,
+        CompilerError, CoreErlangEmitter, GenericFunctionRegistry, Item, MacroRegistry,
+        Module, ModuleContext, ModuleLoader, Parser as DreamParser, SharedGenericRegistry,
     },
     config::{generate_dream_toml, generate_main_dream, ApplicationConfig, CompileOptions, ProjectConfig},
     deps::DepsManager,
@@ -313,6 +313,10 @@ fn cmd_build(file: Option<&Path>, target: &str, output: Option<&Path>, features:
     let resolved_features = config.resolve_features(features);
     let compile_options = CompileOptions::with_features(resolved_features);
 
+    // Get dependency ebin paths for loading macros from dependencies
+    let deps_manager = DepsManager::new(project_root.clone(), config.clone());
+    let dep_ebin_paths = deps_manager.dep_ebin_paths();
+
     // Compile all loaded modules with package name for module resolution
     let result = compile_modules_with_options(
         modules,
@@ -320,6 +324,7 @@ fn cmd_build(file: Option<&Path>, target: &str, output: Option<&Path>, features:
         target,
         Some(&config.package.name),
         &compile_options,
+        &dep_ebin_paths,
     );
 
     // Generate .app file if compilation succeeded
@@ -369,17 +374,35 @@ fn build_standalone_file(source_file: &Path, target: &str, output: Option<&Path>
                 return ExitCode::from(1);
             }
 
+            // Collect module names before compilation
+            let modules = loader.into_modules();
+            let module_names: Vec<String> = modules.iter().map(|m| m.name.clone()).collect();
+
             // Resolve features
             let resolved_features = config.resolve_features(features);
             let compile_options = CompileOptions::with_features(resolved_features);
 
-            return compile_modules_with_options(
-                loader.into_modules(),
+            // Get dependency ebin paths for loading macros from dependencies
+            let deps_manager = DepsManager::new(project_root.clone(), config.clone());
+            let dep_ebin_paths = deps_manager.dep_ebin_paths();
+
+            let result = compile_modules_with_options(
+                modules,
                 &build_dir,
                 target,
                 Some(&config.package.name),
                 &compile_options,
+                &dep_ebin_paths,
             );
+
+            // Generate .app file if compilation succeeded
+            if result == ExitCode::SUCCESS && target == "beam" {
+                if let Err(e) = generate_app_file(&build_dir, &config, &module_names) {
+                    eprintln!("Warning: Failed to generate .app file: {}", e);
+                }
+            }
+
+            return result;
         }
     }
 
@@ -431,8 +454,8 @@ fn compile_and_emit(entry_file: &Path, build_dir: &Path, target: &str, features:
     let resolved_features: HashSet<String> = features.iter().cloned().collect();
     let compile_options = CompileOptions::with_features(resolved_features);
 
-    // Standalone files don't have a package context
-    compile_modules_with_options(loader.into_modules(), build_dir, target, None, &compile_options)
+    // Standalone files don't have a package context or dependencies
+    compile_modules_with_options(loader.into_modules(), build_dir, target, None, &compile_options, &[])
 }
 
 /// Compile modules to Core Erlang and optionally BEAM.
@@ -444,7 +467,7 @@ fn compile_modules(
 ) -> ExitCode {
     // Use stdlib generics registry if available
     let stdlib_registry = load_stdlib_generics();
-    compile_modules_with_registry(modules, build_dir, target, stdlib_registry, package_name)
+    compile_modules_with_registry(modules, build_dir, target, stdlib_registry, package_name, &[])
 }
 
 /// Compile modules to Core Erlang and optionally BEAM, with compile options for cfg filtering.
@@ -454,6 +477,7 @@ fn compile_modules_with_options(
     target: &str,
     package_name: Option<&str>,
     compile_options: &CompileOptions,
+    dep_ebin_paths: &[PathBuf],
 ) -> ExitCode {
     // Use stdlib generics registry if available
     let stdlib_registry = load_stdlib_generics();
@@ -464,6 +488,7 @@ fn compile_modules_with_options(
         stdlib_registry,
         package_name,
         compile_options,
+        dep_ebin_paths,
     )
 }
 
@@ -474,6 +499,7 @@ fn compile_modules_with_registry(
     target: &str,
     external_registry: Option<SharedGenericRegistry>,
     package_name: Option<&str>,
+    dep_ebin_paths: &[PathBuf],
 ) -> ExitCode {
     if modules.is_empty() {
         eprintln!("No modules to compile");
@@ -597,7 +623,21 @@ fn compile_modules_with_registry(
     };
 
     // Create macro registry for user-defined derives
-    let mut macro_registry = MacroRegistry::with_paths(vec![build_dir.to_path_buf()]);
+    // Include build_dir, stdlib, and dependency ebin paths for loading macro modules
+    let mut beam_paths = vec![build_dir.to_path_buf()];
+    // Add stdlib so macros can use syn, proc_macro, etc.
+    let stdlib_dir = stdlib_beam_dir();
+    if stdlib_dir.exists() {
+        beam_paths.push(stdlib_dir);
+    }
+    beam_paths.extend(dep_ebin_paths.iter().cloned());
+    let mut macro_registry = MacroRegistry::with_paths(beam_paths);
+
+    // Load macros from dependencies (from .macros metadata files)
+    load_dependency_macros(&mut macro_registry, dep_ebin_paths);
+
+    // Track macros defined in this project for .macros file generation
+    let mut project_macros: Vec<(String, String, String)> = Vec::new();
 
     // Identify and compile macro modules first
     let macro_module_names: Vec<String> = modules
@@ -618,6 +658,9 @@ fn compile_modules_with_registry(
                     }
                     return ExitCode::from(1);
                 }
+
+                // Expand quote expressions (quote { ... } -> tuple construction)
+                expand_quotes(&mut macro_module);
 
                 // Resolve stdlib methods
                 resolve_stdlib_methods(&mut macro_module);
@@ -640,9 +683,10 @@ fn compile_modules_with_registry(
                         };
                         println!("  Compiled macro module {}.beam", beam_module_name);
 
-                        // Register macros from this module
-                        for func_name in get_macro_functions(module) {
-                            macro_registry.register(&func_name, &beam_module_name, &func_name);
+                        // Register macros from this module and track for .macros file
+                        for (derive_name, func_name) in get_macro_functions(module) {
+                            macro_registry.register(&derive_name, &beam_module_name, &func_name);
+                            project_macros.push((derive_name, beam_module_name.clone(), func_name));
                         }
                     }
                     Err(e) => {
@@ -764,6 +808,15 @@ fn compile_modules_with_registry(
         }
     }
 
+    // Generate .macros file if we have macros and a package name
+    if !project_macros.is_empty() {
+        if let Some(pkg_name) = package_name {
+            if let Err(e) = generate_macros_file(build_dir, pkg_name, &project_macros) {
+                eprintln!("Warning: Failed to generate .macros file: {}", e);
+            }
+        }
+    }
+
     println!();
     println!("Build complete.");
 
@@ -778,6 +831,7 @@ fn compile_modules_with_registry_and_options(
     external_registry: Option<SharedGenericRegistry>,
     package_name: Option<&str>,
     compile_options: &CompileOptions,
+    dep_ebin_paths: &[PathBuf],
 ) -> ExitCode {
     if modules.is_empty() {
         eprintln!("No modules to compile");
@@ -901,7 +955,21 @@ fn compile_modules_with_registry_and_options(
     };
 
     // Create macro registry for user-defined derives
-    let mut macro_registry = MacroRegistry::with_paths(vec![build_dir.to_path_buf()]);
+    // Include build_dir, stdlib, and dependency ebin paths for loading macro modules
+    let mut beam_paths = vec![build_dir.to_path_buf()];
+    // Add stdlib so macros can use syn, proc_macro, etc.
+    let stdlib_dir = stdlib_beam_dir();
+    if stdlib_dir.exists() {
+        beam_paths.push(stdlib_dir);
+    }
+    beam_paths.extend(dep_ebin_paths.iter().cloned());
+    let mut macro_registry = MacroRegistry::with_paths(beam_paths);
+
+    // Load macros from dependencies (from .macros metadata files)
+    load_dependency_macros(&mut macro_registry, dep_ebin_paths);
+
+    // Track macros defined in this project for .macros file generation
+    let mut project_macros: Vec<(String, String, String)> = Vec::new();
 
     // Identify and compile macro modules first
     let macro_module_names: Vec<String> = modules
@@ -922,6 +990,9 @@ fn compile_modules_with_registry_and_options(
                     }
                     return ExitCode::from(1);
                 }
+
+                // Expand quote expressions (quote { ... } -> tuple construction)
+                expand_quotes(&mut macro_module);
 
                 // Resolve stdlib methods
                 resolve_stdlib_methods(&mut macro_module);
@@ -944,9 +1015,10 @@ fn compile_modules_with_registry_and_options(
                         };
                         println!("  Compiled macro module {}.beam", beam_module_name);
 
-                        // Register macros from this module
-                        for func_name in get_macro_functions(module) {
-                            macro_registry.register(&func_name, &beam_module_name, &func_name);
+                        // Register macros from this module and track for .macros file
+                        for (derive_name, func_name) in get_macro_functions(module) {
+                            macro_registry.register(&derive_name, &beam_module_name, &func_name);
+                            project_macros.push((derive_name, beam_module_name.clone(), func_name));
                         }
                     }
                     Err(e) => {
@@ -1085,6 +1157,15 @@ fn compile_modules_with_registry_and_options(
         }
     }
 
+    // Generate .macros file if we have macros and a package name
+    if !project_macros.is_empty() {
+        if let Some(pkg_name) = package_name {
+            if let Err(e) = generate_macros_file(build_dir, pkg_name, &project_macros) {
+                eprintln!("Warning: Failed to generate .macros file: {}", e);
+            }
+        }
+    }
+
     println!();
     if skipped_count > 0 && core_files.is_empty() {
         println!("Build complete. All {} module(s) up to date.", skipped_count);
@@ -1178,6 +1259,88 @@ fn generate_app_file(
 
     println!("  Generated {}.app", app_name);
     Ok(())
+}
+
+/// Macro metadata for serialization
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+struct MacroMetadata {
+    /// Derive name (e.g., "Serialize")
+    derive_name: String,
+    /// Module containing the macro (e.g., "dream::serde::serde")
+    module: String,
+    /// Function name (e.g., "serialize_derive")
+    function: String,
+}
+
+/// Macros file format
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+struct MacrosFile {
+    macros: Vec<MacroMetadata>,
+}
+
+/// Generate a .macros metadata file listing exported macros.
+fn generate_macros_file(
+    build_dir: &Path,
+    app_name: &str,
+    macros: &[(String, String, String)], // (derive_name, module, function)
+) -> Result<(), String> {
+    if macros.is_empty() {
+        return Ok(());
+    }
+
+    let macros_file = MacrosFile {
+        macros: macros
+            .iter()
+            .map(|(derive_name, module, function)| MacroMetadata {
+                derive_name: derive_name.clone(),
+                module: module.clone(),
+                function: function.clone(),
+            })
+            .collect(),
+    };
+
+    let content = serde_json::to_string_pretty(&macros_file)
+        .map_err(|e| format!("Failed to serialize macros: {}", e))?;
+
+    let macros_path = build_dir.join(format!("{}.macros", app_name));
+    fs::write(&macros_path, content)
+        .map_err(|e| format!("Failed to write {}: {}", macros_path.display(), e))?;
+
+    println!("  Generated {}.macros", app_name);
+    Ok(())
+}
+
+/// Load macros from dependency .macros files and register them.
+fn load_dependency_macros(
+    macro_registry: &mut MacroRegistry,
+    dep_ebin_paths: &[PathBuf],
+) {
+    for ebin_dir in dep_ebin_paths {
+        // Look for .macros files in the ebin directory
+        if let Ok(entries) = fs::read_dir(ebin_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map_or(false, |ext| ext == "macros") {
+                    if let Ok(content) = fs::read_to_string(&path) {
+                        match serde_json::from_str::<MacrosFile>(&content) {
+                            Ok(macros_file) => {
+                                for m in macros_file.macros {
+                                    macro_registry.register(&m.derive_name, &m.module, &m.function);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "Warning: Failed to parse {}: {}",
+                                    path.display(),
+                                    e
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Find the stdlib directory relative to the executable or current directory.
@@ -1836,11 +1999,12 @@ fn command_exists(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Check if a module contains any macro functions (functions with `#[macro]` attribute).
+/// Check if a module contains any macro functions.
+/// Supports both `#[macro]` and `#[derive(Name)]` attributes.
 fn has_macro_functions(module: &Module) -> bool {
     for item in &module.items {
         if let Item::Function(func) = item {
-            if is_macro(&func.attrs) {
+            if is_macro(&func.attrs) || is_derive_macro(&func.attrs) {
                 return true;
             }
         }
@@ -1848,14 +2012,19 @@ fn has_macro_functions(module: &Module) -> bool {
     false
 }
 
-/// Get macro function info from a module: Vec<(function_name, derive_name)>.
-/// By convention, the derive name is the function name.
-fn get_macro_functions(module: &Module) -> Vec<String> {
+/// Get macro function info from a module: Vec<(derive_name, func_name)>.
+/// For `#[macro]` functions, the derive name equals the function name.
+/// For `#[proc_macro_derive(Name)]` functions, the derive name is extracted from the attribute.
+fn get_macro_functions(module: &Module) -> Vec<(String, String)> {
     let mut macros = Vec::new();
     for item in &module.items {
         if let Item::Function(func) = item {
-            if is_macro(&func.attrs) {
-                macros.push(func.name.clone());
+            // Check for #[proc_macro_derive(Name)] first (preferred Rust-style syntax)
+            if let Some(derive_name) = get_derive_macro_name(&func.attrs) {
+                macros.push((derive_name, func.name.clone()));
+            } else if is_macro(&func.attrs) {
+                // Fall back to #[macro] where derive name = function name
+                macros.push((func.name.clone(), func.name.clone()));
             }
         }
     }
@@ -2020,6 +2189,10 @@ fn cmd_test(filter: Option<&str>, features: &[String]) -> ExitCode {
     let resolved_features = config.resolve_features(features);
     let compile_options = CompileOptions::for_testing_with_features(resolved_features);
 
+    // Get dependency ebin paths for loading macros from dependencies
+    let deps_manager = DepsManager::new(project_root.clone(), config.clone());
+    let dep_ebin_paths = deps_manager.dep_ebin_paths();
+
     // Compile all modules in test mode
     let result = compile_modules_with_options(
         modules,
@@ -2027,6 +2200,7 @@ fn cmd_test(filter: Option<&str>, features: &[String]) -> ExitCode {
         "beam",
         Some(&config.package.name),
         &compile_options,
+        &dep_ebin_paths,
     );
 
     if result != ExitCode::SUCCESS {

@@ -1,8 +1,9 @@
 // Handler for GET /api/users
 //
-// Demonstrates using the json_encode derive macro to serialize structs to JSON.
+// Demonstrates using the serde package for automatic JSON serialization.
 
 use crate::models::user::User;
+use serde::serialize::serialize_value;
 
 pub fn init(req: any, state: any) -> (atom, any, any) {
     // Create users using the User struct
@@ -10,11 +11,11 @@ pub fn init(req: any, state: any) -> (atom, any, any) {
     let user2 = User::new(2, "Bob");
     let user3 = User::new(3, "Charlie");
 
-    // Convert to JSON-serializable maps using the macro-generated to_json() method
-    let users_json = [user1.to_json(), user2.to_json(), user3.to_json()];
-    let data = {users: users_json};
+    // Create response data - serialize_value handles the list of structs automatically
+    let users = [user1, user2, user3];
+    let data = {users: serialize_value(users)};
 
-    // Use auto-generated jason bindings from _build/bindings/
+    // Encode to JSON using Jason (data is already serialized by serialize_value)
     match jason::encode(data, []) {
         Ok(json) => {
             let headers = {"content-type": "application/json"};

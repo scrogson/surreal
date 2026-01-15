@@ -4,10 +4,10 @@
 use crate::models::user::User;
 
 #[test]
-pub fn test_user_to_json() -> atom {
-    // Test cross-module method call - this was the bug!
+pub fn test_user_serialize() -> atom {
+    // Test cross-module method call with Serialize trait
     let user = User { id: 42, name: "Alice" };
-    let json = user.to_json();
+    let json = user.serialize();
 
     // Check that the map has the correct keys and values
     let id = :maps::get(:id, json);
@@ -26,9 +26,9 @@ pub fn test_user_to_json() -> atom {
 
 #[test]
 pub fn test_map_to_json_compatible() -> atom {
-    // Test that to_json returns a map compatible with JSON encoding
+    // Test that serialize returns a map compatible with JSON encoding
     let user = User { id: 1, name: "Bob" };
-    let map = user.to_json();
+    let map = user.serialize();
 
     // Verify the map has the expected structure
     let has_id = :maps::is_key(:id, map);

@@ -1,0 +1,20 @@
+// JSON encoding for serializable types
+//
+// Provides a convenient encode function that serializes a value
+// then passes it to Jason for JSON string encoding.
+
+use crate::serialize::Serialize;
+
+/// Encode a serializable value as JSON.
+///
+/// This function:
+/// 1. Calls Serialize::serialize() on the value
+/// 2. Passes the result to Jason for JSON string encoding
+///
+/// The type must implement the Serialize trait.
+pub fn encode<T: Serialize>(value: T) -> Result<string, any> {
+    // First serialize to JSON-compatible data structure
+    let data = Serialize::serialize(value);
+    // Then encode to JSON string using Jason
+    jason::encode(data, [])
+}

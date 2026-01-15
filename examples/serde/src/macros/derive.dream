@@ -1,0 +1,86 @@
+// Derive macro for Serialize trait
+//
+// Generates a Serialize trait implementation that converts struct fields
+// to a map, using serialize_value for automatic recursive serialization.
+
+/// Derive macro for Serialize trait.
+///
+/// Generates an implementation of `Serialize` that:
+/// 1. Creates an empty map
+/// 2. For each field, calls serialize_value(self.field) and adds to map
+/// 3. Returns the completed map
+///
+/// The use of serialize_value ensures nested structs and lists are
+/// properly serialized without requiring type information at macro time.
+#[macro]
+pub fn serialize_derive(item: any) -> any {
+    // Get struct name and fields from the AST
+    // item is a tuple: (struct, name, fields)
+    let name = :erlang::element(2, item);
+    let fields = :erlang::element(3, item);
+
+    // Build the method body
+    let body = build_serialize_body(fields);
+
+    // Build method parameter (self)
+    let param_pattern = (:ident, :self);
+    let param_type = (:type, :any);
+    let param = (param_pattern, param_type);
+
+    // Build the serialize method
+    let ret_type = (:type, :any);
+    let method = (:function, :serialize, [], [param], ret_type, body);
+
+    // Return trait impl for Serialize
+    let trait_name = :erlang::binary_to_atom("Serialize", :utf8);
+    (:traitimpl, trait_name, name, [method])
+}
+
+/// Build the body of the serialize method.
+/// Returns (statements, final_expression)
+fn build_serialize_body(fields: any) -> any {
+    // Start with empty map: let map = maps:new();
+    let init = (:let, (:ident, :map), :none, (:extern_call, :maps, :new, []));
+
+    // Build statements for each field
+    let stmts = build_field_stmts(fields, [init]);
+
+    // Final expression returns the map
+    let expr = (:ident, :map);
+    (stmts, expr)
+}
+
+/// Build let statements for each field.
+/// Each field becomes: let map = maps:put(:field_name, serialize_value(self.field), map);
+fn build_field_stmts(fields: any, acc: any) -> any {
+    if :erlang::length(fields) == 0 {
+        :lists::reverse(acc)
+    } else {
+        let field = :erlang::hd(fields);
+        let rest = :erlang::tl(fields);
+
+        // Extract field name
+        let field_name = :erlang::element(1, field);
+
+        // Build: :field_name (atom for map key)
+        let atom_expr = (:atom, field_name);
+
+        // Build: self.field_name (field access)
+        let self_ident = (:ident, :self);
+        let field_access = (:field_access, self_ident, field_name);
+
+        // Build: serde::serialize::serialize_value(self.field_name)
+        let serialize_path = (:path, [:serde, :serialize, :serialize_value]);
+        let serialize_call = (:call, serialize_path, [field_access]);
+
+        // Build: maps:put(:field_name, serialize_value(...), map)
+        let map_ident = (:ident, :map);
+        let put_args = [atom_expr, serialize_call, map_ident];
+        let put_call = (:extern_call, :maps, :put, put_args);
+
+        // Build: let map = maps:put(...)
+        let stmt = (:let, (:ident, :map), :none, put_call);
+
+        build_field_stmts(rest, [stmt | acc])
+    }
+}

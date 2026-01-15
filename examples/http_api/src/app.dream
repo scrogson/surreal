@@ -49,7 +49,6 @@ fn compile_routes() -> any {
     let r1 = ("/api/hello", hello, []);
     let r2 = ("/api/users", users, []);
     let r3 = (:_, not_found, []);
-    let routes = [r1, r2, r3];
 
-    :cowboy_router::compile([(:_, routes)])
+    :cowboy_router::compile([(:_, [r1, r2, r3])])
 }
