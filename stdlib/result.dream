@@ -68,7 +68,7 @@ pub fn to_list<T, E>(res: Result<T, E>) -> [T] {
 
 /// Unwrap the result with a custom error message.
 /// Panics with the given message if the result is Err.
-pub fn expect<T, E>(res: Result<T, E>, msg: string) -> T {
+pub fn expect<T, E>(res: Result<T, E>, msg: String) -> T {
     match res {
         Ok(x) => x,
         Err(_) => :erlang::error(msg),
@@ -77,7 +77,7 @@ pub fn expect<T, E>(res: Result<T, E>, msg: string) -> T {
 
 /// Unwrap the error with a custom message.
 /// Panics with the given message if the result is Ok.
-pub fn expect_err<T, E>(res: Result<T, E>, msg: string) -> E {
+pub fn expect_err<T, E>(res: Result<T, E>, msg: String) -> E {
     match res {
         Ok(_) => :erlang::error(msg),
         Err(e) => e,
