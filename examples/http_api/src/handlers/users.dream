@@ -6,9 +6,10 @@ use crate::models::user::User;
 use serde::serialize::serialize_value;
 
 pub fn init(req: any, state: any) -> (atom, any, any) {
-    // Create users using a for comprehension
+    // Create users using a for comprehension with filter
+    // Only include users with id > 1 (filters out Alice)
     let user_data = [(1, "Alice"), (2, "Bob"), (3, "Charlie")];
-    let users = for (id, name) <- user_data { User::new(id, name) };
+    let users = for (id, name) <- user_data, when id > 1 { User::new(id, name) };
     let data = {users: serialize_value(users)};
 
     // Encode to JSON using Jason (data is already serialized by serialize_value)
