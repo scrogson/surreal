@@ -160,7 +160,13 @@ fn main() -> ExitCode {
             println!("dream {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
-        Commands::Shell => repl::run_shell(),
+        Commands::Shell => {
+            // Compile stdlib first so it's available in the shell
+            if let Err(e) = compile_stdlib() {
+                eprintln!("Warning: Failed to compile stdlib: {}", e);
+            }
+            repl::run_shell()
+        }
         Commands::Deps { action } => cmd_deps(action),
     }
 }

@@ -1,0 +1,133 @@
+// Dream Standard Library - Keyword Module
+//
+// Provides functions for working with keyword lists (ordered key-value pairs).
+// A keyword list is a list of 2-tuples where the first element is an atom.
+// Backed by Erlang's proplists module.
+
+/// Get the first value associated with a key, returns None if not found.
+pub fn get<V>(keywords: [(atom, V)], key: atom) -> Option<V> {
+    match :proplists::lookup(key, keywords) {
+        :none => None,
+        (_, value) => Some(value),
+    }
+}
+
+/// Get a value by key with a default if not found.
+pub fn get_or<V>(keywords: [(atom, V)], key: atom, default: V) -> V {
+    :proplists::get_value(key, keywords, default)
+}
+
+/// Get all values associated with a key (keyword lists can have duplicate keys).
+pub fn get_all<V>(keywords: [(atom, V)], key: atom) -> [V] {
+    :proplists::get_all_values(key, keywords)
+}
+
+/// Put a key-value pair at the front of the keyword list.
+/// If the key already exists, this adds a new entry (doesn't replace).
+/// Use `put_new` to only add if key doesn't exist, or `replace` to update.
+pub fn put<V>(keywords: [(atom, V)], key: atom, value: V) -> [(atom, V)] {
+    [(key, value) | keywords]
+}
+
+/// Put a key-value pair only if the key doesn't already exist.
+pub fn put_new<V>(keywords: [(atom, V)], key: atom, value: V) -> [(atom, V)] {
+    if has_key(keywords, key) {
+        keywords
+    } else {
+        [(key, value) | keywords]
+    }
+}
+
+/// Replace all occurrences of a key with a new value.
+/// If the key doesn't exist, adds it to the front.
+pub fn replace<V>(keywords: [(atom, V)], key: atom, value: V) -> [(atom, V)] {
+    let without = delete_all(keywords, key);
+    [(key, value) | without]
+}
+
+/// Delete the first occurrence of a key.
+pub fn delete<V>(keywords: [(atom, V)], key: atom) -> [(atom, V)] {
+    :proplists::delete(key, keywords)
+}
+
+/// Delete all occurrences of a key.
+pub fn delete_all<V>(keywords: [(atom, V)], key: atom) -> [(atom, V)] {
+    :lists::filter(|kv| {
+        let (k, _) = kv;
+        k != key
+    }, keywords)
+}
+
+/// Check if a key exists in the keyword list.
+pub fn has_key<V>(keywords: [(atom, V)], key: atom) -> bool {
+    :proplists::is_defined(key, keywords)
+}
+
+/// Get all keys (may contain duplicates if keyword list has duplicate keys).
+pub fn keys<V>(keywords: [(atom, V)]) -> [atom] {
+    :proplists::get_keys(keywords)
+}
+
+/// Get all values in order.
+pub fn values<V>(keywords: [(atom, V)]) -> [V] {
+    :lists::map(|kv| {
+        let (_, v) = kv;
+        v
+    }, keywords)
+}
+
+/// Merge two keyword lists. Entries from the second list are prepended.
+/// If both lists have the same key, both entries are kept.
+pub fn merge<V>(keywords1: [(atom, V)], keywords2: [(atom, V)]) -> [(atom, V)] {
+    :lists::append(keywords2, keywords1)
+}
+
+/// Merge two keyword lists, keeping only the first occurrence of each key.
+/// Entries from the second list take precedence.
+pub fn merge_unique<V>(keywords1: [(atom, V)], keywords2: [(atom, V)]) -> [(atom, V)] {
+    let merged = :lists::append(keywords2, keywords1);
+    unique_keys(merged)
+}
+
+/// Remove duplicate keys, keeping only the first occurrence of each.
+pub fn unique_keys<V>(keywords: [(atom, V)]) -> [(atom, V)] {
+    :lists::reverse(:lists::foldl(|kv, acc| {
+        let (k, _) = kv;
+        if has_key(acc, k) {
+            acc
+        } else {
+            [kv | acc]
+        }
+    }, [], keywords))
+}
+
+/// Convert a keyword list to a map.
+/// If there are duplicate keys, the first occurrence wins.
+pub fn to_map<V>(keywords: [(atom, V)]) -> map {
+    :maps::from_list(unique_keys(keywords))
+}
+
+/// Create a keyword list from a map.
+pub fn from_map<V>(m: map) -> [(atom, V)] {
+    :maps::to_list(m)
+}
+
+/// Get the number of entries in the keyword list.
+pub fn len<V>(keywords: [(atom, V)]) -> int {
+    :erlang::length(keywords)
+}
+
+/// Check if the keyword list is empty.
+pub fn is_empty<V>(keywords: [(atom, V)]) -> bool {
+    :erlang::length(keywords) == 0
+}
+
+/// Take the first n entries.
+pub fn take<V>(keywords: [(atom, V)], n: int) -> [(atom, V)] {
+    :lists::sublist(keywords, n)
+}
+
+/// Drop the first n entries.
+pub fn drop<V>(keywords: [(atom, V)], n: int) -> [(atom, V)] {
+    :lists::nthtail(n, keywords)
+}
