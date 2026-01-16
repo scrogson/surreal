@@ -3,15 +3,22 @@
 // System interaction: environment, arguments, shell commands.
 // Provides access to OS-level functionality.
 
+use erlang::std::os as erl_os;
+use erlang::std::init as erl_init;
+use erlang::std::erlang as erl;
+use erlang::std::lists as erl_lists;
+use erlang::std::binary as erl_binary;
+use erlang::std::file as erl_file;
+
 // ============== Environment Variables ==============
 
 /// Get all environment variables as a list of (key, value) tuples.
 pub fn env() -> [(String, String)] {
-    let raw = :os::getenv();
-    :lists::map(|entry| {
+    let raw = erl_os::getenv();
+    erl_lists::map(|entry| {
         // Convert charlist to binary and split on '='
-        let bin = :erlang::list_to_binary(entry);
-        match :binary::split(bin, <<"=">>) {
+        let bin = erl::list_to_binary(entry);
+        match erl_binary::split(bin, <<"=">>) {
             [key, value] => (key, value),
             [key] => (key, ""),
             _ => ("", ""),
@@ -22,9 +29,9 @@ pub fn env() -> [(String, String)] {
 /// Get a specific environment variable.
 /// Returns None if the variable is not set.
 pub fn get_env(name: String) -> Option<String> {
-    match :os::getenv(:erlang::binary_to_list(name)) {
+    match erl_os::getenv(erl::binary_to_list(name)) {
         false => None,
-        value => Some(:erlang::list_to_binary(value)),
+        value => Some(erl::list_to_binary(value)),
     }
 }
 
@@ -39,13 +46,13 @@ pub fn get_env_or(name: String, default: String) -> String {
 /// Set an environment variable.
 /// Returns true on success.
 pub fn put_env(name: String, value: String) -> bool {
-    :os::putenv(:erlang::binary_to_list(name), :erlang::binary_to_list(value))
+    erl_os::putenv(erl::binary_to_list(name), erl::binary_to_list(value))
 }
 
 /// Unset an environment variable.
 /// Returns true on success.
 pub fn unset_env(name: String) -> bool {
-    :os::unsetenv(:erlang::binary_to_list(name))
+    erl_os::unsetenv(erl::binary_to_list(name))
 }
 
 // ============== Command Line Arguments ==============
@@ -53,25 +60,25 @@ pub fn unset_env(name: String) -> bool {
 /// Get command line arguments passed to the program.
 /// Returns the list of arguments as strings.
 pub fn argv() -> [String] {
-    let args = :init::get_plain_arguments();
-    :lists::map(|arg| { :erlang::list_to_binary(arg) }, args)
+    let args = erl_init::get_plain_arguments();
+    erl_lists::map(|arg| { erl::list_to_binary(arg) }, args)
 }
 
 // ============== Process Control ==============
 
 /// Halt the BEAM VM with exit code 0.
 pub fn halt() {
-    :erlang::halt(0)
+    erl::halt(0)
 }
 
 /// Halt the BEAM VM with a specific exit code.
 pub fn halt_with(code: int) {
-    :erlang::halt(code)
+    erl::halt(code)
 }
 
 /// Halt with a message printed to stderr.
 pub fn halt_with_message(message: String) {
-    :erlang::halt(message)
+    erl::halt(message)
 }
 
 // ============== Shell Commands ==============
@@ -79,8 +86,8 @@ pub fn halt_with_message(message: String) {
 /// Run a shell command and return its output.
 /// Note: This is blocking and waits for the command to complete.
 pub fn cmd(command: String) -> String {
-    let result = :os::cmd(:erlang::binary_to_list(command));
-    :erlang::list_to_binary(result)
+    let result = erl_os::cmd(erl::binary_to_list(command));
+    erl::list_to_binary(result)
 }
 
 // ============== Directories ==============
@@ -88,8 +95,8 @@ pub fn cmd(command: String) -> String {
 /// Get the current working directory.
 /// Returns Ok(path) or Err(reason).
 pub fn cwd() -> Result<String, Any> {
-    match :file::get_cwd() {
-        Ok(dir) => Ok(:erlang::list_to_binary(dir)),
+    match erl_file::get_cwd() {
+        Ok(dir) => Ok(erl::list_to_binary(dir)),
         Err(e) => Err(e),
     }
 }
@@ -121,8 +128,8 @@ pub fn user_home() -> Option<String> {
                 Some(dir) => Some(dir),
                 None => {
                     // Try init:get_argument(home)
-                    match :init::get_argument(:home) {
-                        Ok([home_list]) => Some(:erlang::list_to_binary(:lists::flatten(home_list))),
+                    match erl_init::get_argument(:home) {
+                        Ok([home_list]) => Some(erl::list_to_binary(erl_lists::flatten(home_list))),
                         _ => None,
                     }
                 },
@@ -136,49 +143,49 @@ pub fn user_home() -> Option<String> {
 /// Get the operating system type.
 /// Returns a tuple of (family, name) atoms, e.g., (:unix, :darwin) or (:win32, :nt).
 pub fn os_type() -> (Atom, Atom) {
-    :erlang::apply(:os, :type, [])
+    erl::apply(:os, :type, [])
 }
 
 /// Get the operating system version.
 /// Returns a tuple of version numbers or atoms depending on OS.
 pub fn os_version() -> Any {
-    :os::version()
+    erl_os::version()
 }
 
 /// Get the system architecture (e.g., "x86_64-apple-darwin").
 pub fn arch() -> Any {
-    let info = :erlang::apply(:erlang, :system_info, [:system_architecture]);
-    :erlang::list_to_binary(info)
+    let info = erl::apply(:erlang, :system_info, [:system_architecture]);
+    erl::list_to_binary(info)
 }
 
 /// Get the number of schedulers (logical CPUs) available.
 pub fn schedulers() -> int {
-    :erlang::apply(:erlang, :system_info, [:schedulers])
+    erl::apply(:erlang, :system_info, [:schedulers])
 }
 
 /// Get the number of online schedulers.
 pub fn schedulers_online() -> int {
-    :erlang::apply(:erlang, :system_info, [:schedulers_online])
+    erl::apply(:erlang, :system_info, [:schedulers_online])
 }
 
 /// Get monotonic time in native time units.
 /// Useful for measuring elapsed time.
 pub fn monotonic_time() -> int {
-    :erlang::monotonic_time()
+    erl::monotonic_time(:native)
 }
 
 /// Get monotonic time in the specified unit.
 /// Unit can be :second, :millisecond, :microsecond, :nanosecond, or :native.
 pub fn monotonic_time_in(unit: Atom) -> int {
-    :erlang::monotonic_time(unit)
+    erl::monotonic_time(unit)
 }
 
 /// Get system time (Unix timestamp) in seconds.
 pub fn system_time() -> int {
-    :erlang::system_time(:second)
+    erl::system_time(:second)
 }
 
 /// Get system time in the specified unit.
 pub fn system_time_in(unit: Atom) -> int {
-    :erlang::system_time(unit)
+    erl::system_time(unit)
 }

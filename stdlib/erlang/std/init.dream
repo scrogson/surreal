@@ -1,0 +1,40 @@
+// Erlang init module bindings
+//
+// System initialization and shutdown.
+// See: https://www.erlang.org/doc/man/init.html
+
+#[name = "init"]
+extern mod init {
+    /// Get command line arguments.
+    fn get_plain_arguments() -> [Any];
+
+    /// Get a specific command line argument.
+    fn get_argument(flag: Atom) -> Any;
+
+    /// Get all command line arguments.
+    fn get_arguments() -> [(Atom, [Any])];
+
+    /// Get the boot script.
+    fn script_id() -> Any;
+
+    /// Stop the system with a specific status.
+    fn stop() -> Atom;
+
+    /// Stop the system with a specific status code.
+    fn stop(status: int) -> Atom;
+
+    /// Restart the system.
+    fn restart() -> Atom;
+
+    /// Reboot the system.
+    fn reboot() -> Atom;
+
+    /// Get boot flags.
+    fn get_status() -> (Atom, Atom);
+
+    /// Boot the system (internal).
+    fn boot(args: [Any]) -> Atom;
+
+    /// Notify initialization complete.
+    fn notify_when_started(pid: Pid) -> Any;
+}

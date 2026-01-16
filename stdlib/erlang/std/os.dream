@@ -1,0 +1,70 @@
+// Erlang os module bindings
+//
+// Operating system interface functions.
+// See: https://www.erlang.org/doc/man/os.html
+
+#[name = "os"]
+extern mod os {
+    // ============== Environment ==============
+
+    /// Get all environment variables as a list of "KEY=VALUE" strings.
+    fn getenv() -> [Any];
+
+    /// Get specific environment variable (returns charlist or false).
+    fn getenv(name: Any) -> Any;
+
+    /// Set an environment variable.
+    fn putenv(name: Any, value: Any) -> bool;
+
+    /// Unset an environment variable.
+    fn unsetenv(name: Any) -> bool;
+
+    // ============== System Commands ==============
+
+    /// Execute a shell command and return output.
+    fn cmd(command: Any) -> Any;
+
+    /// Execute a shell command with options.
+    fn cmd(command: Any, opts: [Any]) -> Any;
+
+    /// Find an executable in the system path.
+    fn find_executable(name: Any) -> Any;
+
+    /// Find an executable in specified path.
+    fn find_executable(name: Any, path: Any) -> Any;
+
+    // ============== System Info ==============
+
+    /// Get the operating system type as {Family, Name}.
+    fn type() -> (Atom, Atom);
+
+    /// Get the operating system version.
+    fn version() -> Any;
+
+    // ============== Time ==============
+
+    /// Get system time as {MegaSecs, Secs, MicroSecs}.
+    fn timestamp() -> (int, int, int);
+
+    /// Get system time in specified unit.
+    fn system_time() -> int;
+
+    /// Get system time in specified unit.
+    fn system_time(unit: Atom) -> int;
+
+    /// Get performance counter.
+    fn perf_counter() -> int;
+
+    /// Get performance counter in specified unit.
+    fn perf_counter(unit: Atom) -> int;
+
+    // ============== Signals ==============
+
+    /// Set signal handling.
+    fn set_signal(signal: Atom, action: Atom) -> Atom;
+
+    // ============== Process ID ==============
+
+    /// Get the OS process ID of the Erlang emulator.
+    fn getpid() -> Any;
+}
