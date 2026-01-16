@@ -322,14 +322,18 @@ pub fn block_to_erlang_term(block: &Block) -> String {
 /// Convert a statement to Erlang term format.
 pub fn stmt_to_erlang_term(stmt: &Stmt) -> String {
     match stmt {
-        Stmt::Let { pattern, ty, value } => {
+        Stmt::Let { pattern, ty, value, else_block } => {
             let ty_str = ty.as_ref()
                 .map(|t| type_to_erlang_term(t))
                 .unwrap_or_else(|| "none".to_string());
-            format!("{{let, {}, {}, {}}}",
+            let else_str = else_block.as_ref()
+                .map(|b| block_to_erlang_term(b))
+                .unwrap_or_else(|| "none".to_string());
+            format!("{{let, {}, {}, {}, {}}}",
                 pattern_to_erlang_term(pattern),
                 ty_str,
-                expr_to_erlang_term(value))
+                expr_to_erlang_term(value),
+                else_str)
         }
         Stmt::Expr(e) => {
             format!("{{expr, {}}}", expr_to_erlang_term(e))
@@ -1550,7 +1554,12 @@ fn term_to_stmt(term: &Term) -> TermParseResult<Stmt> {
                 Some(term_to_type(&tuple[2])?)
             };
             let value = term_to_expr(&tuple[3])?;
-            Ok(Stmt::Let { pattern, ty, value })
+            let else_block = if tuple.len() > 4 && !is_none(&tuple[4]) {
+                Some(term_to_block(&tuple[4])?)
+            } else {
+                None
+            };
+            Ok(Stmt::Let { pattern, ty, value, else_block })
         }
         "expr" => {
             let expr = term_to_expr(&tuple[1])?;

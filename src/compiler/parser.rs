@@ -1352,6 +1352,7 @@ impl<'source> Parser<'source> {
     }
 
     /// Parse a let statement.
+    /// Supports both `let pattern = value;` and `let pattern = value else { ... };`
     fn parse_let_stmt(&mut self) -> ParseResult<Stmt> {
         self.expect(&Token::Let)?;
         let pattern = self.parse_pattern()?;
@@ -1365,9 +1366,18 @@ impl<'source> Parser<'source> {
 
         self.expect(&Token::Eq)?;
         let value = self.parse_expr()?;
+
+        // Check for `else` block (let-else syntax)
+        let else_block = if self.check(&Token::Else) {
+            self.advance();
+            Some(self.parse_block()?)
+        } else {
+            None
+        };
+
         self.expect(&Token::Semi)?;
 
-        Ok(Stmt::Let { pattern, ty, value })
+        Ok(Stmt::Let { pattern, ty, value, else_block })
     }
 
     /// Parse an expression.
@@ -3805,7 +3815,7 @@ mod tests {
         }).expect("expected function");
 
         // Check the let statement
-        if let Some(Stmt::Let { pattern: _, ty: _, value: init }) = func.body.stmts.first() {
+        if let Some(Stmt::Let { pattern: _, ty: _, value: init, .. }) = func.body.stmts.first() {
             if let Expr::EnumVariant { type_name, variant, args } = init {
                 assert_eq!(type_name.as_deref(), Some("Message"));
                 assert_eq!(variant, "Move");

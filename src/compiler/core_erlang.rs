@@ -2172,12 +2172,37 @@ impl CoreErlangEmitter {
         let (first, rest) = stmts.split_first().unwrap();
 
         match first {
-            Stmt::Let { pattern, value, .. } => {
+            Stmt::Let { pattern, value, else_block, .. } => {
                 // Add bound variables to scope
                 self.collect_pattern_vars(pattern);
 
-                // Simple identifier patterns use let, complex patterns use case
-                if matches!(pattern, Pattern::Ident(_) | Pattern::Wildcard) {
+                // If there's an else block, always use case with two arms
+                if let Some(else_blk) = else_block {
+                    self.emit("case ");
+                    self.emit_expr(value)?;
+                    self.emit(" of");
+                    self.newline();
+                    self.indent += 1;
+                    // Pattern arm - continues with rest of block
+                    self.emit("<");
+                    self.emit_pattern(pattern)?;
+                    self.emit("> when 'true' ->");
+                    self.newline();
+                    self.indent += 1;
+                    self.emit_block_inner(rest, final_expr)?;
+                    self.indent -= 1;
+                    self.newline();
+                    // Wildcard arm - executes else block (must diverge)
+                    self.emit("<_> when 'true' ->");
+                    self.newline();
+                    self.indent += 1;
+                    self.emit_block(else_blk)?;
+                    self.indent -= 1;
+                    self.newline();
+                    self.indent -= 1;
+                    self.emit("end");
+                } else if matches!(pattern, Pattern::Ident(_) | Pattern::Wildcard) {
+                    // Simple identifier patterns use let
                     self.emit("let <");
                     self.emit_pattern(pattern)?;
                     self.emit("> =");
@@ -3804,11 +3829,15 @@ impl CoreErlangEmitter {
     /// Emit a quoted statement.
     fn emit_quoted_stmt(&mut self, stmt: &Stmt) -> CoreErlangResult<()> {
         match stmt {
-            Stmt::Let { pattern, ty: _, value } => {
+            Stmt::Let { pattern, ty: _, value, else_block } => {
                 self.emit("{'let', ");
                 self.emit_quoted_pattern(pattern)?;
                 self.emit(", ");
                 self.emit_quoted_expr(value)?;
+                if let Some(else_blk) = else_block {
+                    self.emit(", ");
+                    self.emit_quoted_block(else_blk)?;
+                }
                 self.emit("}");
             }
             Stmt::Expr(expr) => {

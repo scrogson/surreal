@@ -387,6 +387,7 @@ fn quote_block_with_splice(block: &Block, expr_tuple: Expr) -> Expr {
         pattern: Pattern::Ident("_quoted_stmts".to_string()),
         ty: None,
         value: stmts_expr,
+        else_block: None,
     });
 
     // Generate: (_stmts, final_expr)
@@ -468,6 +469,7 @@ fn quote_list_with_splice(elems: &[Expr]) -> Expr {
                 pattern: Pattern::Ident(var_name.clone()),
                 ty: None,
                 value: part,
+                else_block: None,
             });
             list_vars.push(Expr::Ident(var_name));
         }
@@ -707,10 +709,11 @@ fn substitute_var_in_expr(expr: &Expr, var_name: &str, replacement: &str) -> Exp
         }
         Expr::Block(block) => {
             let stmts = block.stmts.iter().map(|s| match s {
-                Stmt::Let { pattern, ty, value } => Stmt::Let {
+                Stmt::Let { pattern, ty, value, else_block } => Stmt::Let {
                     pattern: pattern.clone(),
                     ty: ty.clone(),
                     value: substitute_var_in_expr(value, var_name, replacement),
+                    else_block: else_block.clone(),
                 },
                 Stmt::Expr(e) => Stmt::Expr(substitute_var_in_expr(e, var_name, replacement)),
             }).collect();
@@ -732,18 +735,23 @@ fn substitute_var_in_expr(expr: &Expr, var_name: &str, replacement: &str) -> Exp
 /// Convert a quoted statement to tuple construction code.
 fn quote_stmt_to_tuple(stmt: &Stmt) -> Expr {
     match stmt {
-        Stmt::Let { pattern, ty, value } => {
+        Stmt::Let { pattern, ty, value, else_block } => {
             let pattern_tuple = quote_pattern_to_tuple(pattern);
             let type_tuple = ty
                 .as_ref()
                 .map(|t| quote_type_to_tuple(t))
                 .unwrap_or_else(|| make_atom("none"));
             let value_tuple = quote_expr_to_tuple(value);
+            let else_tuple = else_block
+                .as_ref()
+                .map(|b| quote_block_to_tuple(b))
+                .unwrap_or_else(|| make_atom("none"));
             make_tuple(vec![
                 make_atom("let"),
                 pattern_tuple,
                 type_tuple,
                 value_tuple,
+                else_tuple,
             ])
         }
         Stmt::Expr(expr) => quote_expr_to_tuple(expr),

@@ -506,11 +506,13 @@ pub struct Block {
 /// Statements.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
-    /// Let binding: `let pattern: type = value;`
+    /// Let binding: `let pattern: type = value;` or `let pattern = value else { ... };`
     Let {
         pattern: Pattern,
         ty: Option<Type>,
         value: Expr,
+        /// Optional else block for `let else` syntax (must diverge)
+        else_block: Option<Block>,
     },
     /// Expression statement (with semicolon).
     Expr(Expr),

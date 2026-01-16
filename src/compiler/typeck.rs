@@ -1691,7 +1691,7 @@ impl TypeChecker {
     /// Type check a statement.
     fn check_stmt(&mut self, stmt: &Stmt) -> TypeResult<()> {
         match stmt {
-            Stmt::Let { pattern, ty, value } => {
+            Stmt::Let { pattern, ty, value, else_block } => {
                 let value_ty = self.infer_expr(value)?;
 
                 // If there's a type annotation, check it matches
@@ -1703,6 +1703,11 @@ impl TypeChecker {
                             format!("expected {}, found {}", expected, value_ty),
                         ));
                     }
+                }
+
+                // Check else block if present (let-else syntax)
+                if let Some(else_blk) = else_block {
+                    self.check_block(else_blk)?;
                 }
 
                 // Bind pattern variables
@@ -3313,10 +3318,11 @@ impl TypeChecker {
 
     fn annotate_stmt(&mut self, stmt: &Stmt) -> Stmt {
         match stmt {
-            Stmt::Let { pattern, ty, value } => Stmt::Let {
+            Stmt::Let { pattern, ty, value, else_block } => Stmt::Let {
                 pattern: pattern.clone(),
                 ty: ty.clone(),
                 value: self.annotate_expr(value),
+                else_block: else_block.as_ref().map(|b| self.annotate_block(b)),
             },
             Stmt::Expr(e) => Stmt::Expr(self.annotate_expr(e)),
         }
@@ -4044,8 +4050,13 @@ impl MethodResolver {
 
     fn resolve_stmt(&mut self, stmt: &mut Stmt) {
         match stmt {
-            Stmt::Let { pattern, ty, value } => {
+            Stmt::Let { pattern, ty, value, else_block } => {
                 self.resolve_expr(value);
+
+                // Resolve else block if present
+                if let Some(else_blk) = else_block {
+                    self.resolve_block(else_blk);
+                }
 
                 // Bind variable with inferred or annotated type
                 let value_ty = if let Some(ann) = ty {
