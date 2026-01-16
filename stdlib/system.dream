@@ -1,0 +1,184 @@
+// Dream Standard Library - System Module
+//
+// System interaction: environment, arguments, shell commands.
+// Provides access to OS-level functionality.
+
+// ============== Environment Variables ==============
+
+/// Get all environment variables as a list of (key, value) tuples.
+pub fn env() -> [(string, string)] {
+    let raw = :os::getenv();
+    :lists::map(|entry| {
+        // Convert charlist to binary and split on '='
+        let bin = :erlang::list_to_binary(entry);
+        match :binary::split(bin, <<"=">>) {
+            [key, value] => (key, value),
+            [key] => (key, ""),
+            _ => ("", ""),
+        }
+    }, raw)
+}
+
+/// Get a specific environment variable.
+/// Returns None if the variable is not set.
+pub fn get_env(name: string) -> Option<string> {
+    match :os::getenv(:erlang::binary_to_list(name)) {
+        false => None,
+        value => Some(:erlang::list_to_binary(value)),
+    }
+}
+
+/// Get an environment variable with a default value.
+pub fn get_env_or(name: string, default: string) -> string {
+    match get_env(name) {
+        Some(value) => value,
+        None => default,
+    }
+}
+
+/// Set an environment variable.
+/// Returns true on success.
+pub fn put_env(name: string, value: string) -> bool {
+    :os::putenv(:erlang::binary_to_list(name), :erlang::binary_to_list(value))
+}
+
+/// Unset an environment variable.
+/// Returns true on success.
+pub fn unset_env(name: string) -> bool {
+    :os::unsetenv(:erlang::binary_to_list(name))
+}
+
+// ============== Command Line Arguments ==============
+
+/// Get command line arguments passed to the program.
+/// Returns the list of arguments as strings.
+pub fn argv() -> [string] {
+    let args = :init::get_plain_arguments();
+    :lists::map(|arg| { :erlang::list_to_binary(arg) }, args)
+}
+
+// ============== Process Control ==============
+
+/// Halt the BEAM VM with exit code 0.
+pub fn halt() {
+    :erlang::halt(0)
+}
+
+/// Halt the BEAM VM with a specific exit code.
+pub fn halt_with(code: int) {
+    :erlang::halt(code)
+}
+
+/// Halt with a message printed to stderr.
+pub fn halt_with_message(message: string) {
+    :erlang::halt(message)
+}
+
+// ============== Shell Commands ==============
+
+/// Run a shell command and return its output.
+/// Note: This is blocking and waits for the command to complete.
+pub fn cmd(command: string) -> string {
+    let result = :os::cmd(:erlang::binary_to_list(command));
+    :erlang::list_to_binary(result)
+}
+
+// ============== Directories ==============
+
+/// Get the current working directory.
+/// Returns Ok(path) or Err(reason).
+pub fn cwd() -> Result<string, any> {
+    match :file::get_cwd() {
+        Ok(dir) => Ok(:erlang::list_to_binary(dir)),
+        Err(e) => Err(e),
+    }
+}
+
+/// Get the system's temporary directory.
+pub fn tmp_dir() -> string {
+    // Try common env vars first, fall back to /tmp
+    match get_env("TMPDIR") {
+        Some(dir) => dir,
+        None => match get_env("TEMP") {
+            Some(dir) => dir,
+            None => match get_env("TMP") {
+                Some(dir) => dir,
+                None => "/tmp",
+            },
+        },
+    }
+}
+
+/// Get the user's home directory.
+/// Returns None if it cannot be determined.
+pub fn user_home() -> Option<string> {
+    // Try HOME env var first (Unix)
+    match get_env("HOME") {
+        Some(dir) => Some(dir),
+        None => {
+            // Try USERPROFILE (Windows)
+            match get_env("USERPROFILE") {
+                Some(dir) => Some(dir),
+                None => {
+                    // Try init:get_argument(home)
+                    match :init::get_argument(:home) {
+                        Ok([home_list]) => Some(:erlang::list_to_binary(:lists::flatten(home_list))),
+                        _ => None,
+                    }
+                },
+            }
+        },
+    }
+}
+
+// ============== System Information ==============
+
+/// Get the operating system type.
+/// Returns a tuple of (family, name) atoms, e.g., (:unix, :darwin) or (:win32, :nt).
+pub fn os_type() -> (atom, atom) {
+    :erlang::apply(:os, :type, [])
+}
+
+/// Get the operating system version.
+/// Returns a tuple of version numbers or atoms depending on OS.
+pub fn os_version() -> any {
+    :os::version()
+}
+
+/// Get the system architecture (e.g., "x86_64-apple-darwin").
+pub fn arch() -> any {
+    let info = :erlang::apply(:erlang, :system_info, [:system_architecture]);
+    :erlang::list_to_binary(info)
+}
+
+/// Get the number of schedulers (logical CPUs) available.
+pub fn schedulers() -> int {
+    :erlang::apply(:erlang, :system_info, [:schedulers])
+}
+
+/// Get the number of online schedulers.
+pub fn schedulers_online() -> int {
+    :erlang::apply(:erlang, :system_info, [:schedulers_online])
+}
+
+/// Get monotonic time in native time units.
+/// Useful for measuring elapsed time.
+pub fn monotonic_time() -> int {
+    :erlang::monotonic_time()
+}
+
+/// Get monotonic time in the specified unit.
+/// Unit can be :second, :millisecond, :microsecond, :nanosecond, or :native.
+pub fn monotonic_time_in(unit: atom) -> int {
+    :erlang::monotonic_time(unit)
+}
+
+/// Get system time (Unix timestamp) in seconds.
+pub fn system_time() -> int {
+    :erlang::system_time(:second)
+}
+
+/// Get system time in the specified unit.
+pub fn system_time_in(unit: atom) -> int {
+    :erlang::system_time(unit)
+}

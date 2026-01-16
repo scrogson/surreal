@@ -179,3 +179,12 @@ bd sync               # Sync with git
 2. Ask the user to review and approve before committing
 3. Only commit after explicit user approval
 4. NEVER auto-commit without asking first
+
+## Commit Signing
+
+**NEVER bypass commit signing.** All commits in this repository must be signed.
+
+- Always use `git commit -S` to sign commits
+- If the signing process times out or hangs (e.g., waiting for 1Password), **WAIT for the user** - do NOT use `--no-gpg-sign` or any other workaround
+- The user will resolve signing issues manually if needed
+- An unsigned commit is worse than waiting - it breaks the trust chain
