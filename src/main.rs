@@ -1908,12 +1908,13 @@ fn run_application(
     cmd.arg("-noshell").arg("-eval").arg(&eval_expr);
 
     // Save terminal state before running erl
-    save_terminal_state();
+    let saved_term = save_terminal_state();
 
-    let status = cmd.status();
+    // Run erl with proper signal handling - let erl handle Ctrl+C (BREAK menu)
+    let status = run_with_signal_handling(cmd);
 
     // Restore terminal state after erl exits
-    restore_terminal_state();
+    restore_terminal_state(saved_term);
 
     match status {
         Ok(s) if s.success() => ExitCode::SUCCESS,
@@ -1978,12 +1979,13 @@ fn run_function(
     cmd.arg("-noshell").arg("-eval").arg(&eval_expr);
 
     // Save terminal state before running erl
-    save_terminal_state();
+    let saved_term = save_terminal_state();
 
-    let status = cmd.status();
+    // Run erl with proper signal handling - let erl handle Ctrl+C (BREAK menu)
+    let status = run_with_signal_handling(cmd);
 
     // Restore terminal state after erl exits
-    restore_terminal_state();
+    restore_terminal_state(saved_term);
 
     match status {
         Ok(s) if s.success() => ExitCode::SUCCESS,
@@ -1995,29 +1997,68 @@ fn run_function(
     }
 }
 
-/// Reset the terminal to a sane state.
-/// This is necessary after running erl because it may leave the terminal in raw mode
-/// if interrupted with Ctrl+C, causing arrow keys and other control sequences to
-/// print garbage instead of working properly.
-/// Save terminal state using crossterm.
-/// By briefly enabling raw mode, crossterm captures the current terminal state internally.
-fn save_terminal_state() {
-    // Enable raw mode briefly to make crossterm save the current "good" terminal state
-    // Then immediately disable it - we don't actually want raw mode
-    if crossterm::terminal::enable_raw_mode().is_ok() {
-        let _ = crossterm::terminal::disable_raw_mode();
-    }
+/// Run a command while ignoring Ctrl+C in the parent process.
+/// This allows the child (erl) to handle SIGINT itself (showing BREAK menu).
+fn run_with_signal_handling(cmd: Command) -> io::Result<std::process::ExitStatus> {
+    use tokio::runtime::Runtime;
+
+    // Create a runtime for async signal handling
+    let rt = Runtime::new()?;
+
+    rt.block_on(async {
+        let mut child = tokio::process::Command::from(cmd).spawn()?;
+
+        // Wait for child to exit, ignoring Ctrl+C in parent
+        // The child receives SIGINT directly from the terminal
+        loop {
+            tokio::select! {
+                // Ignore Ctrl+C - let the child handle it
+                _ = tokio::signal::ctrl_c() => {
+                    // Do nothing - erl will show BREAK menu
+                    continue;
+                }
+                // Child exited
+                status = child.wait() => {
+                    return status;
+                }
+            }
+        }
+    })
 }
 
-/// Restore terminal state using crossterm.
-fn restore_terminal_state() {
-    // Disable raw mode - this restores to the state crossterm saved
-    let _ = crossterm::terminal::disable_raw_mode();
+/// Reset the terminal to a sane state.
+/// This is necessary after running erl because it may leave the terminal in raw mode
+/// Save terminal state before running a subprocess that might modify it.
+/// Returns saved state string on Unix.
+#[cfg(unix)]
+fn save_terminal_state() -> Option<String> {
+    std::process::Command::new("stty")
+        .arg("-g")
+        .stdin(std::process::Stdio::inherit())
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+}
 
-    // Show cursor in case it was hidden
-    let _ = crossterm::execute!(io::stdout(), crossterm::cursor::Show);
+#[cfg(not(unix))]
+fn save_terminal_state() -> Option<String> {
+    None
+}
 
-    // Drain any pending input that accumulated during the subprocess
+/// Restore terminal state after subprocess exits.
+fn restore_terminal_state(saved: Option<String>) {
+    #[cfg(unix)]
+    if let Some(state) = saved {
+        let _ = std::process::Command::new("stty")
+            .arg(&state)
+            .stdin(std::process::Stdio::inherit())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+
+    // Drain any pending input
     while crossterm::event::poll(std::time::Duration::ZERO).unwrap_or(false) {
         let _ = crossterm::event::read();
     }
