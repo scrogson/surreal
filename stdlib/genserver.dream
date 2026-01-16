@@ -35,8 +35,8 @@
 /// Represents the caller of a synchronous call.
 /// Contains the pid and reference needed to send a reply.
 pub struct From {
-    pid: pid,
-    ref: ref,
+    pid: Pid,
+    ref: Ref,
 }
 
 // ============== GenServer Trait ==============
@@ -66,30 +66,30 @@ pub trait GenServer {
     /// Called when the server starts.
     /// Return (:ok, state) to start, :ignore to silently stop,
     /// or (:stop, reason) to stop with error.
-    fn init(args: any) -> (atom, Self::State);
+    fn init(args: Any) -> (Atom, Self::State);
 
     /// Handle a synchronous call.
     /// `from` is a From struct - use genserver::reply(from, msg) to reply.
     /// Return (:reply, response, new_state) to reply immediately,
     /// (:noreply, new_state) to reply later via genserver::reply/2,
     /// or (:stop, reason, response, new_state) to stop the server.
-    fn handle_call(msg: Self::CallMsg, from: From, state: Self::State) -> (atom, any, Self::State);
+    fn handle_call(msg: Self::CallMsg, from: From, state: Self::State) -> (Atom, any, Self::State);
 
     /// Handle an asynchronous cast.
     /// Return (:noreply, new_state) to continue,
     /// or (:stop, reason, new_state) to stop the server.
-    fn handle_cast(msg: Self::CastMsg, state: Self::State) -> (atom, Self::State);
+    fn handle_cast(msg: Self::CastMsg, state: Self::State) -> (Atom, Self::State);
 
     /// Handle any other message (optional).
     /// Default implementation ignores the message and continues with unchanged state.
-    fn handle_info(_msg: Self::Info, state: Self::State) -> (atom, Self::State) {
+    fn handle_info(_msg: Self::Info, state: Self::State) -> (Atom, Self::State) {
         // Default: ignore the message, keep state unchanged
         (:noreply, state)
     }
 
     /// Called when the server is about to terminate (optional).
     /// Use this for cleanup. Default implementation does nothing.
-    fn terminate(_reason: atom, _state: Self::State) -> atom {
+    fn terminate(_reason: Atom, _state: Self::State) -> Atom {
         // Default: do nothing
         :ok
     }
@@ -99,7 +99,7 @@ pub trait GenServer {
 
 /// Make a synchronous call to a GenServer.
 /// Waits for a reply from the server.
-pub fn call(server: pid, msg: any) -> any {
+pub fn call(server: Pid, msg: Any) -> Any {
     let ref = :erlang::make_ref();
     let from = (self(), ref);
     process::send(server, (:gen_call, from, msg));
@@ -110,7 +110,7 @@ pub fn call(server: pid, msg: any) -> any {
 
 /// Make a synchronous call with timeout (in milliseconds).
 /// Returns (:ok, reply) on success, (:error, :timeout) on timeout.
-pub fn call_timeout(server: pid, msg: any, timeout: int) -> (atom, any) {
+pub fn call_timeout(server: Pid, msg: Any, timeout: int) -> (Atom, Any) {
     let ref = :erlang::make_ref();
     let from = (self(), ref);
     process::send(server, (:gen_call, from, msg));
@@ -124,27 +124,27 @@ pub fn call_timeout(server: pid, msg: any, timeout: int) -> (atom, any) {
 
 /// Send an asynchronous cast to a GenServer.
 /// Returns immediately without waiting for a reply.
-pub fn cast(server: pid, msg: any) -> atom {
+pub fn cast(server: Pid, msg: Any) -> Atom {
     process::send(server, (:gen_cast, msg));
     :ok
 }
 
 /// Reply to a call from within a handler.
 /// Useful for async replies when you don't reply in handle_call.
-pub fn reply(from: From, msg: any) -> atom {
+pub fn reply(from: From, msg: Any) -> Atom {
     process::send(from.pid, (from.ref, msg));
     :ok
 }
 
 /// Stop a GenServer gracefully.
-pub fn stop(server: pid) -> atom {
+pub fn stop(server: Pid) -> Atom {
     // Send a cast with :stop message
     cast(server, :stop);
     :ok
 }
 
 /// Stop a GenServer with a specific reason.
-pub fn stop_reason(server: pid, reason: atom) -> atom {
+pub fn stop_reason(server: Pid, reason: Atom) -> Atom {
     cast(server, (:stop, reason));
     :ok
 }
@@ -153,7 +153,7 @@ pub fn stop_reason(server: pid, reason: atom) -> atom {
 
 /// Start a GenServer using dynamic dispatch (module-based).
 /// The module must implement the GenServer trait (have init, handle_call, handle_cast functions).
-pub fn start(module: atom, args: any) -> pid {
+pub fn start(module: Atom, args: Any) -> Pid {
     spawn || {
         let init_result = :erlang::apply(module, :init, [args]);
         match init_result {
@@ -170,7 +170,7 @@ pub fn start(module: atom, args: any) -> pid {
 /// Start a GenServer using static dispatch (type-based).
 /// Uses monomorphization to call trait methods at compile time.
 /// This provides type safety - the compiler verifies T implements GenServer.
-pub fn start_typed<T: GenServer>(args: any) -> pid {
+pub fn start_typed<T: GenServer>(args: Any) -> Pid {
     spawn || {
         let init_result = GenServer::init::<T>(args);
         match init_result {
@@ -184,7 +184,7 @@ pub fn start_typed<T: GenServer>(args: any) -> pid {
 
 /// Start a linked GenServer using static dispatch.
 /// Links the calling process to the new server process.
-pub fn start_link_typed<T: GenServer>(args: any) -> pid {
+pub fn start_link_typed<T: GenServer>(args: Any) -> Pid {
     let caller = process::current();
     spawn || {
         // Link to the caller before running init
@@ -200,7 +200,7 @@ pub fn start_link_typed<T: GenServer>(args: any) -> pid {
 }
 
 /// The typed server loop using static dispatch.
-fn server_loop_typed<T: GenServer>(state: any) -> atom {
+fn server_loop_typed<T: GenServer>(state: Any) -> Atom {
     receive {
         // Call protocol: {:gen_call, {pid, ref}, request}
         (:gen_call, (from_pid, from_ref), msg) => {
@@ -263,7 +263,7 @@ fn server_loop_typed<T: GenServer>(state: any) -> atom {
 }
 
 /// The main server loop.
-fn server_loop(module: atom, state: any) -> atom {
+fn server_loop(module: Atom, state: Any) -> Atom {
     receive {
         // Call protocol: {:gen_call, {pid, ref}, request}
         (:gen_call, (from_pid, from_ref), msg) => {
@@ -326,7 +326,7 @@ fn server_loop(module: atom, state: any) -> atom {
 }
 
 /// Call handle_info if exported, otherwise use default (ignore message).
-fn call_handle_info(module: atom, msg: any, state: any) -> (atom, any) {
+fn call_handle_info(module: Atom, msg: Any, state: Any) -> (Atom, Any) {
     match :erlang::function_exported(module, :handle_info, 2) {
         true => :erlang::apply(module, :handle_info, [msg, state]),
         false => (:noreply, state)  // Default: ignore message
@@ -334,7 +334,7 @@ fn call_handle_info(module: atom, msg: any, state: any) -> (atom, any) {
 }
 
 /// Call terminate if exported, otherwise use default (do nothing).
-fn call_terminate(module: atom, reason: atom, state: any) -> atom {
+fn call_terminate(module: Atom, reason: Atom, state: Any) -> Atom {
     match :erlang::function_exported(module, :terminate, 2) {
         true => :erlang::apply(module, :terminate, [reason, state]),
         false => :ok  // Default: do nothing
@@ -343,6 +343,6 @@ fn call_terminate(module: atom, reason: atom, state: any) -> atom {
 
 /// Call terminate for typed GenServer. Takes state first so trait dispatch
 /// can use the state's __struct__ tag for method resolution.
-fn terminate_typed<T: GenServer>(state: any, reason: atom) -> atom {
+fn terminate_typed<T: GenServer>(state: Any, reason: Atom) -> Atom {
     GenServer::terminate::<T>(reason, state)
 }

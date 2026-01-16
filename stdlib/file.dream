@@ -8,13 +8,13 @@
 
 /// Read entire file contents as binary.
 /// Returns Ok(binary) or Err(reason).
-pub fn read(path: any) -> Result<any, any> {
+pub fn read(path: any) -> Result<Any, Any> {
     :file::read_file(path)
 }
 
 /// Read file and split into lines.
 /// Returns Ok([lines]) or Err(reason).
-pub fn read_lines(path: any) -> Result<any, any> {
+pub fn read_lines(path: any) -> Result<Any, Any> {
     match :file::read_file(path) {
         Ok(content) => {
             let lines = :binary::split(content, <<"\n">>, [:global]);
@@ -34,7 +34,7 @@ pub fn write(path: any, content: any) -> any {
 
 /// Write content with specific modes.
 /// Modes: [:append, :binary, :raw, etc.]
-pub fn write_with_modes(path: any, content: any, modes: [any]) -> any {
+pub fn write_with_modes(path: any, content: any, modes: [Any]) -> any {
     :file::write_file(path, content, modes)
 }
 
@@ -67,13 +67,13 @@ pub fn dir(path: any) -> bool {
 
 /// Get file statistics.
 /// Returns Ok(stat_info) or Err(reason).
-pub fn stat(path: any) -> Result<any, any> {
+pub fn stat(path: any) -> Result<Any, Any> {
     :file::read_file_info(path)
 }
 
 /// Get file size in bytes.
 /// Returns Ok(size) or Err(reason).
-pub fn size(path: any) -> Result<any, any> {
+pub fn size(path: any) -> Result<Any, Any> {
     match :file::read_file_info(path) {
         Ok(info) => {
             let file_size = :erlang::element(2, info);
@@ -105,7 +105,7 @@ pub fn rmdir(path: any) -> any {
 
 /// List directory contents.
 /// Returns Ok([filenames]) or Err(reason).
-pub fn ls(path: any) -> Result<any, any> {
+pub fn ls(path: any) -> Result<Any, Any> {
     match :file::list_dir(path) {
         Ok(files) => {
             // Convert charlists to binaries
@@ -120,7 +120,7 @@ pub fn ls(path: any) -> Result<any, any> {
 
 /// Copy a file.
 /// Returns Ok(bytes_copied) or Err(reason).
-pub fn cp(source: any, destination: any) -> Result<any, any> {
+pub fn cp(source: any, destination: any) -> Result<Any, Any> {
     :file::copy(source, destination)
 }
 
@@ -163,7 +163,7 @@ pub fn rm_rf(path: any) -> any {
 
 /// Get current working directory.
 /// Returns Ok(path) or Err(reason).
-pub fn cwd() -> Result<any, any> {
+pub fn cwd() -> Result<Any, Any> {
     match :file::get_cwd() {
         Ok(dir) => Ok(:erlang::list_to_binary(dir)),
         Err(e) => Err(e)
@@ -201,7 +201,7 @@ pub fn ln(existing: any, new: any) -> any {
 
 /// Read the target of a symbolic link.
 /// Returns Ok(target) or Err(reason).
-pub fn read_link(path: any) -> Result<any, any> {
+pub fn read_link(path: any) -> Result<Any, Any> {
     match :file::read_link(path) {
         Ok(target) => Ok(:erlang::list_to_binary(target)),
         Err(e) => Err(e)
@@ -229,7 +229,7 @@ pub fn touch(path: any) -> any {
 /// Open a file with specified modes.
 /// Modes: [:read, :write, :append, :binary, :raw, etc.]
 /// Returns Ok(io_device) or Err(reason).
-pub fn open(path: any, modes: [any]) -> Result<any, any> {
+pub fn open(path: any, modes: [Any]) -> Result<Any, Any> {
     :file::open(path, modes)
 }
 

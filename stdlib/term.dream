@@ -28,9 +28,9 @@ pub enum Term {
     /// A binary/string value
     Binary(binary),
     /// A list (elements are raw, use from_any on each to convert)
-    List([any]),
+    List([Any]),
     /// A tuple as list of elements (raw, use from_any on each to convert)
-    Tuple([any]),
+    Tuple([Any]),
     /// An Erlang map
     Map(map),
     /// A process identifier
@@ -155,7 +155,7 @@ impl Term {
     }
 
     /// Try to extract a list value (elements are raw `any` values).
-    pub fn as_list(self) -> Option<[any]> {
+    pub fn as_list(self) -> Option<[Any]> {
         match self {
             Term::List(l) => Some(l),
             _ => None,
@@ -163,7 +163,7 @@ impl Term {
     }
 
     /// Try to extract a tuple as a list of elements (raw `any` values).
-    pub fn as_tuple(self) -> Option<[any]> {
+    pub fn as_tuple(self) -> Option<[Any]> {
         match self {
             Term::Tuple(t) => Some(t),
             _ => None,

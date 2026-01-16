@@ -39,7 +39,7 @@ pub fn whereis(name: atom) -> pid {
 }
 
 /// Get a list of all registered process names.
-pub fn registered() -> [atom] {
+pub fn registered() -> [Atom] {
     :erlang::registered()
 }
 
@@ -64,7 +64,7 @@ pub fn exit_pid(p: pid, reason: atom) -> atom {
 }
 
 /// Get a list of all processes.
-pub fn list() -> [pid] {
+pub fn list() -> [Pid] {
     :erlang::processes()
 }
 

@@ -168,7 +168,7 @@ pub fn repeat(value: any, n: int) -> Iter {
 }
 
 /// Create an iterator that cycles through a list infinitely.
-pub fn cycle(items: [any]) -> Iter {
+pub fn cycle(items: [Any]) -> Iter {
     let next_fn = |state| {
         let (original, current) = state;
         match current {
@@ -187,7 +187,7 @@ pub fn cycle(items: [any]) -> Iter {
 }
 
 /// Create an iterator from a list.
-pub fn from_list(items: [any]) -> Iter {
+pub fn from_list(items: [Any]) -> Iter {
     let next_fn = |state| {
         match state {
             [] => None,
@@ -229,7 +229,7 @@ pub fn filter(iter: Iter, pred: any) -> Iter {
     Iter { next_fn: next_fn, state: (iter.next_fn, iter.state, pred) }
 }
 
-fn filter_step(state: any) -> Option<(any, any)> {
+fn filter_step(state: any) -> Option<(Any, Any)> {
     let (inner_next, inner_state, pred) = state;
     match :erlang::apply(inner_next, [inner_state]) {
         Some((value, new_inner)) => {
@@ -342,7 +342,7 @@ pub fn chain(iter1: Iter, iter2: Iter) -> Iter {
     Iter { next_fn: next_fn, state: (1, iter1.next_fn, iter1.state, iter2.next_fn, iter2.state) }
 }
 
-fn chain_step(state: any) -> Option<(any, any)> {
+fn chain_step(state: any) -> Option<(Any, Any)> {
     let (phase, n1, s1, n2, s2) = state;
     if phase == 1 {
         match :erlang::apply(n1, [s1]) {
@@ -373,11 +373,11 @@ fn chain_step(state: any) -> Option<(any, any)> {
 
 /// Collect iterator into a list.
 /// WARNING: Don't use on infinite iterators!
-pub fn collect(iter: Iter) -> [any] {
+pub fn collect(iter: Iter) -> [Any] {
     collect_acc(iter.next_fn, iter.state, [])
 }
 
-fn collect_acc(next_fn: any, state: any, acc: [any]) -> [any] {
+fn collect_acc(next_fn: any, state: any, acc: [Any]) -> [Any] {
     match :erlang::apply(next_fn, [state]) {
         Some((value, new_state)) => {
             collect_acc(next_fn, new_state, :lists::append(acc, [value]))

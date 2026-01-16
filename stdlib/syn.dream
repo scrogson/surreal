@@ -55,7 +55,7 @@ pub struct Generics {
 /// A generic type parameter with optional bounds.
 pub struct TypeParam {
     ident: atom,
-    bounds: [atom],
+    bounds: [Atom],
 }
 
 /// The data portion of a DeriveInput.
@@ -165,7 +165,7 @@ fn is_keyword_token(token: any, kw: atom) -> bool {
 }
 
 /// Expect one of the given keywords.
-fn expect_keyword_one_of(state: any, keywords: [atom]) -> (any, atom) {
+fn expect_keyword_one_of(state: any, keywords: [Atom]) -> (Any, Atom) {
     let tokens = state.tokens;
     let token = :hd(tokens);
     let tag = :erlang::element(1, token);
@@ -183,7 +183,7 @@ fn expect_keyword_one_of(state: any, keywords: [atom]) -> (any, atom) {
 }
 
 /// Expect a type identifier token.
-fn expect_type_ident(state: any) -> (any, atom) {
+fn expect_type_ident(state: any) -> (Any, Atom) {
     let tokens = state.tokens;
     let token = :hd(tokens);
     let tag = :erlang::element(1, token);
@@ -197,7 +197,7 @@ fn expect_type_ident(state: any) -> (any, atom) {
 }
 
 /// Expect an identifier token.
-fn expect_ident(state: any) -> (any, atom) {
+fn expect_ident(state: any) -> (Any, Atom) {
     let tokens = state.tokens;
     if :erlang::length(tokens) == 0 {
         (state, :unknown)
@@ -214,7 +214,7 @@ fn expect_ident(state: any) -> (any, atom) {
 }
 
 /// Parse generic type parameters from tokens.
-fn parse_generics_from_tokens(state: any) -> (any, Generics) {
+fn parse_generics_from_tokens(state: any) -> (Any, Generics) {
     let tokens = state.tokens;
     if :erlang::length(tokens) == 0 {
         (state, Generics { params: [] })
@@ -267,11 +267,11 @@ fn parse_type_params(tokens: any) -> [TypeParam] {
 }
 
 /// Split tokens by a punctuation character.
-fn split_by_punct(tokens: any, punct: binary) -> [[any]] {
+fn split_by_punct(tokens: any, punct: binary) -> [[Any]] {
     split_by_punct_acc(tokens, punct, [], [])
 }
 
-fn split_by_punct_acc(tokens: any, punct: binary, current: [any], result: [[any]]) -> [[any]] {
+fn split_by_punct_acc(tokens: any, punct: binary, current: [Any], result: [[Any]]) -> [[Any]] {
     if :erlang::length(tokens) == 0 {
         // Add final group if non-empty
         if :erlang::length(current) > 0 {
@@ -513,7 +513,7 @@ pub fn is_enum(input: DeriveInput) -> bool {
 
 /// Get field names from a list of fields.
 /// Returns atoms for named fields, skips unnamed fields.
-pub fn field_names(fields: [Field]) -> [atom] {
+pub fn field_names(fields: [Field]) -> [Atom] {
     :lists::filtermap(|f| {
         // f.ident is Option<atom>: {:Some, name} or :None
         if :erlang::is_tuple(f.ident) {
@@ -526,7 +526,7 @@ pub fn field_names(fields: [Field]) -> [atom] {
 
 /// Iterate over named fields with their names.
 /// Calls the function with (field_name, field) for each named field.
-pub fn each_named_field(fields: [Field], func: fn(atom, Field) -> any) -> [any] {
+pub fn each_named_field(fields: [Field], func: fn(Atom, Field) -> any) -> [Any] {
     :lists::filtermap(|f| {
         // f.ident is Option<atom>: {:Some, name} or :None
         if :erlang::is_tuple(f.ident) {

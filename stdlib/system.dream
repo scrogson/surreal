@@ -87,7 +87,7 @@ pub fn cmd(command: string) -> string {
 
 /// Get the current working directory.
 /// Returns Ok(path) or Err(reason).
-pub fn cwd() -> Result<string, any> {
+pub fn cwd() -> Result<string, Any> {
     match :file::get_cwd() {
         Ok(dir) => Ok(:erlang::list_to_binary(dir)),
         Err(e) => Err(e),
@@ -135,7 +135,7 @@ pub fn user_home() -> Option<string> {
 
 /// Get the operating system type.
 /// Returns a tuple of (family, name) atoms, e.g., (:unix, :darwin) or (:win32, :nt).
-pub fn os_type() -> (atom, atom) {
+pub fn os_type() -> (Atom, Atom) {
     :erlang::apply(:os, :type, [])
 }
 
