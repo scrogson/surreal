@@ -2000,6 +2000,24 @@ fn reset_terminal() {
     // Also show cursor in case it was hidden
     let _ = crossterm::execute!(io::stdout(), crossterm::cursor::Show);
 
+    // On Unix, also use stty sane as a fallback since erl may have changed
+    // terminal settings in ways crossterm doesn't track
+    #[cfg(unix)]
+    {
+        let _ = std::process::Command::new("stty")
+            .arg("sane")
+            .stdin(std::process::Stdio::inherit())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+
+    // Drain any pending input events that might interfere with the shell
+    // This handles key presses during shutdown that would otherwise print garbage
+    while crossterm::event::poll(std::time::Duration::ZERO).unwrap_or(false) {
+        let _ = crossterm::event::read();
+    }
+
     // Flush stdout to ensure any pending output is written
     let _ = io::stdout().flush();
 }
