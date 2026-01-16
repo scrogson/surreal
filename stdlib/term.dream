@@ -8,7 +8,7 @@
 ///
 /// Example:
 /// ```dream
-/// fn handle_message(msg: Term) -> string {
+/// fn handle_message(msg: Term) -> String {
 ///     match msg {
 ///         Term::Atom(a) => atom::to_string(a),
 ///         Term::Int(n) => int::to_string(n),
@@ -20,25 +20,25 @@
 /// ```
 pub enum Term {
     /// An atom value (e.g., :ok, :error)
-    Atom(atom),
+    Atom(Atom),
     /// An integer value (arbitrary precision)
     Int(int),
     /// A floating point value
     Float(float),
     /// A binary/string value
-    Binary(binary),
+    Binary(Binary),
     /// A list (elements are raw, use from_any on each to convert)
     List([Any]),
     /// A tuple as list of elements (raw, use from_any on each to convert)
     Tuple([Any]),
     /// An Erlang map
-    Map(map),
+    Map(Map),
     /// A process identifier
-    Pid(pid),
+    Pid(Pid),
     /// A reference
-    Ref(ref),
+    Ref(Ref),
     /// A function (opaque)
-    Fun(any),
+    Fun(Any),
 }
 
 impl Term {
@@ -123,7 +123,7 @@ impl Term {
     }
 
     /// Try to extract an atom value.
-    pub fn as_atom(self) -> Option<atom> {
+    pub fn as_atom(self) -> Option<Atom> {
         match self {
             Term::Atom(a) => Some(a),
             _ => None,
@@ -147,7 +147,7 @@ impl Term {
     }
 
     /// Try to extract a binary/string value.
-    pub fn as_binary(self) -> Option<binary> {
+    pub fn as_binary(self) -> Option<Binary> {
         match self {
             Term::Binary(b) => Some(b),
             _ => None,
@@ -171,7 +171,7 @@ impl Term {
     }
 
     /// Try to extract a map value.
-    pub fn as_map(self) -> Option<map> {
+    pub fn as_map(self) -> Option<Map> {
         match self {
             Term::Map(m) => Some(m),
             _ => None,
@@ -179,7 +179,7 @@ impl Term {
     }
 
     /// Try to extract a pid value.
-    pub fn as_pid(self) -> Option<pid> {
+    pub fn as_pid(self) -> Option<Pid> {
         match self {
             Term::Pid(p) => Some(p),
             _ => None,
@@ -187,7 +187,7 @@ impl Term {
     }
 
     /// Try to extract a reference value.
-    pub fn as_ref(self) -> Option<ref> {
+    pub fn as_ref(self) -> Option<Ref> {
         match self {
             Term::Ref(r) => Some(r),
             _ => None,
@@ -199,7 +199,7 @@ impl Term {
 
 /// Wrap a dynamic value into a Term (shallow - doesn't recurse into lists/tuples).
 /// Uses runtime type detection to determine the variant.
-pub fn from_any(value: any) -> Term {
+pub fn from_any(value: Any) -> Term {
     if :erlang::is_atom(value) {
         Term::Atom(value)
     } else if :erlang::is_integer(value) {
@@ -229,7 +229,7 @@ pub fn from_any(value: any) -> Term {
 }
 
 /// Unwrap a Term back to its raw Erlang value.
-pub fn to_any(t: Term) -> any {
+pub fn to_any(t: Term) -> Any {
     match t {
         Term::Atom(a) => a,
         Term::Int(n) => n,
@@ -245,7 +245,7 @@ pub fn to_any(t: Term) -> any {
 }
 
 /// Get a string representation of the term type.
-pub fn type_name(t: Term) -> string {
+pub fn type_name(t: Term) -> String {
     match t {
         Term::Atom(_) => "atom",
         Term::Int(_) => "int",

@@ -483,6 +483,9 @@ pub struct TypeEnv {
     /// Maps extern function (module, dream_name, arity) -> beam_name
     /// Used for #[name = "encode!"] attribute support on functions
     extern_function_names: HashMap<(String, String, usize), String>,
+    /// Module aliases: alias_name -> full_module_path
+    /// Used for `use erlang::std::application as erl_app` syntax
+    extern_module_aliases: HashMap<String, String>,
 }
 
 impl TypeEnv {
@@ -508,6 +511,7 @@ impl TypeEnv {
             extern_modules: self.extern_modules.clone(),
             extern_imports: self.extern_imports.clone(),
             extern_function_names: self.extern_function_names.clone(),
+            extern_module_aliases: self.extern_module_aliases.clone(),
         }
     }
 
@@ -576,20 +580,34 @@ impl TypeEnv {
     }
 
     /// Get external function info (from .dreamt stubs).
+    /// Resolves module aliases before lookup.
     pub fn get_extern_function(&self, module: &str, function: &str, arity: usize) -> Option<&FnInfo> {
+        // Resolve module alias if present
+        let resolved_module = self.resolve_module_alias(module);
         self.extern_functions
-            .get(&(module.to_string(), function.to_string(), arity))
+            .get(&(resolved_module.to_string(), function.to_string(), arity))
     }
 
-    /// Check if a name is a known extern module.
+    /// Check if a name is a known extern module (or an alias to one).
     pub fn is_extern_module(&self, name: &str) -> bool {
-        self.extern_modules.contains(name)
+        // Check direct module name first
+        if self.extern_modules.contains(name) {
+            return true;
+        }
+        // Check if it's an alias to an extern module
+        if let Some(aliased) = self.extern_module_aliases.get(name) {
+            return self.extern_modules.contains(aliased.as_str());
+        }
+        false
     }
 
     /// Get the BEAM module name for a Dream extern module name.
     /// Returns the mapped name if #[name = "..."] was used, otherwise the original name.
+    /// Resolves module aliases first.
     pub fn get_beam_module_name(&self, dream_name: &str) -> Option<&String> {
-        self.extern_module_names.get(dream_name)
+        // Resolve module alias first
+        let resolved = self.resolve_module_alias(dream_name);
+        self.extern_module_names.get(resolved)
     }
 
     /// Get all extern module name mappings (for code generation).
@@ -606,6 +624,26 @@ impl TypeEnv {
     /// Check if a name is an imported extern function.
     pub fn get_extern_import(&self, name: &str) -> Option<&(String, String)> {
         self.extern_imports.get(name)
+    }
+
+    /// Register a module alias: `use erlang::std::application as erl_app`
+    /// Maps alias "erl_app" -> "application" (the registered extern module name)
+    pub fn add_module_alias(&mut self, alias: String, module_path: String) {
+        self.extern_module_aliases.insert(alias, module_path);
+    }
+
+    /// Resolve a module name, checking aliases first.
+    /// Returns the actual module name if it's an alias, otherwise returns the input.
+    pub fn resolve_module_alias<'a>(&'a self, name: &'a str) -> &'a str {
+        self.extern_module_aliases
+            .get(name)
+            .map(|s| s.as_str())
+            .unwrap_or(name)
+    }
+
+    /// Check if a name is a module alias.
+    pub fn is_module_alias(&self, name: &str) -> bool {
+        self.extern_module_aliases.contains_key(name)
     }
 }
 
@@ -1183,7 +1221,19 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// First pass: collect struct and enum definitions.
+    /// Collect extern mod definitions from a module.
+    /// This is done first to ensure extern modules are registered before
+    /// use statements that may reference them are processed.
+    fn collect_extern_mods(&mut self, module: &Module) -> TypeResult<()> {
+        for item in &module.items {
+            if let Item::ExternMod(extern_mod) = item {
+                self.collect_extern_mod(extern_mod, &extern_mod.name);
+            }
+        }
+        Ok(())
+    }
+
+    /// Second pass: collect struct and enum definitions.
     fn collect_types(&mut self, module: &Module) -> TypeResult<()> {
         for item in &module.items {
             match item {
@@ -1421,10 +1471,23 @@ impl TypeChecker {
 
     /// Collect extern imports from a use declaration.
     /// Handles `use jason::encode;` and `use jason::{encode, decode};`
+    /// Also handles module aliasing: `use erlang::std::application as erl_app;`
     /// Note: Dream stdlib modules take priority over extern modules with the same name.
     fn collect_use_decl(&mut self, use_decl: &UseDecl) {
         match &use_decl.tree {
             UseTree::Path { module, name, rename } => {
+                // Check if this is a module alias: `use erlang::std::application as erl_app`
+                // In this case, `name` is an extern module and we're aliasing it
+                if self.env.is_extern_module(name) {
+                    if let Some(alias) = rename {
+                        // Register the module alias: alias -> extern_module_name
+                        self.env.add_module_alias(alias.clone(), name.clone());
+                    }
+                    // If no rename, it's not really useful as a module alias
+                    // (you can just use the module name directly)
+                    return;
+                }
+
                 // Check if the module path refers to an extern module
                 // e.g., `use jason::encode;` where `jason` is an extern module
                 if module.segments.len() >= 1 && module.prefix == PathPrefix::None {
@@ -3872,12 +3935,19 @@ pub struct TypeCheckResult {
 pub fn check_modules_with_metadata(modules: &[Module]) -> TypeCheckResult {
     let mut checker = TypeChecker::new();
 
-    // First pass: collect all type definitions from ALL modules
+    // First pass: collect all extern mods from ALL modules
+    // This ensures extern modules are registered before use statements are processed
+    for module in modules {
+        let _ = checker.collect_extern_mods(module);
+    }
+
+    // Second pass: collect all type definitions from ALL modules
+    // (including use statements which can now resolve module aliases)
     for module in modules {
         let _ = checker.collect_types(module);
     }
 
-    // Second pass: collect all function signatures from ALL modules
+    // Third pass: collect all function signatures from ALL modules
     for module in modules {
         let _ = checker.collect_functions(module);
     }

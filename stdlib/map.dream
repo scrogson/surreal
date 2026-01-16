@@ -12,7 +12,7 @@ pub enum KeyError {
 /// Note: Due to parser limitations, Map is not generic at the struct level,
 /// but functions use generic type parameters.
 pub struct Map {
-    data: map,
+    data: ErlMap,
 }
 
 impl Map {

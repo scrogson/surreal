@@ -29,19 +29,19 @@ pub fn read_lines(path: Any) -> Result<Any, Any> {
 
 /// Write content to file, creating if it doesn't exist.
 /// Returns :ok or (:error, reason).
-pub fn write(path: any, content: Any) -> Any {
+pub fn write(path: Any, content: Any) -> Any {
     :file::write_file(path, content)
 }
 
 /// Write content with specific modes.
 /// Modes: [:append, :binary, :raw, etc.]
-pub fn write_with_modes(path: any, content: any, modes: [Any]) -> Any {
+pub fn write_with_modes(path: Any, content: Any, modes: [Any]) -> Any {
     :file::write_file(path, content, modes)
 }
 
 /// Append content to file.
 /// Returns :ok or (:error, reason).
-pub fn append(path: any, content: Any) -> Any {
+pub fn append(path: Any, content: Any) -> Any {
     :file::write_file(path, content, [:append])
 }
 
@@ -123,13 +123,13 @@ pub fn ls(path: Any) -> Result<Any, Any> {
 
 /// Copy a file.
 /// Returns Ok(bytes_copied) or Err(reason).
-pub fn cp(source: any, destination: Any) -> Result<Any, Any> {
+pub fn cp(source: Any, destination: Any) -> Result<Any, Any> {
     :file::copy(source, destination)
 }
 
 /// Rename/move a file or directory.
 /// Returns :ok or (:error, reason).
-pub fn rename(source: any, destination: Any) -> Any {
+pub fn rename(source: Any, destination: Any) -> Any {
     :file::rename(source, destination)
 }
 
@@ -186,7 +186,7 @@ pub fn cd(path: Any) -> Any {
 /// Change file permissions.
 /// Mode is an integer (e.g., 0o755).
 /// Returns :ok or (:error, reason).
-pub fn chmod(path: any, mode: int) -> Any {
+pub fn chmod(path: Any, mode: int) -> Any {
     :file::change_mode(path, mode)
 }
 
@@ -194,13 +194,13 @@ pub fn chmod(path: any, mode: int) -> Any {
 
 /// Create a symbolic link.
 /// Returns :ok or (:error, reason).
-pub fn ln_s(existing: any, new: Any) -> Any {
+pub fn ln_s(existing: Any, new: Any) -> Any {
     :file::make_symlink(existing, new)
 }
 
 /// Create a hard link.
 /// Returns :ok or (:error, reason).
-pub fn ln(existing: any, new: Any) -> Any {
+pub fn ln(existing: Any, new: Any) -> Any {
     :file::make_link(existing, new)
 }
 
@@ -235,7 +235,7 @@ pub fn touch(path: Any) -> Any {
 /// Open a file with specified modes.
 /// Modes: [:read, :write, :append, :binary, :raw, etc.]
 /// Returns Ok(io_device) or Err(reason).
-pub fn open(path: any, modes: [Any]) -> Result<Any, Any> {
+pub fn open(path: Any, modes: [Any]) -> Result<Any, Any> {
     :file::open(path, modes)
 }
 

@@ -4,11 +4,11 @@
 // Similar to Rust's Display trait.
 
 // Binary-safe string concatenation
-fn concat(a: any, b: any) -> binary {
+fn concat(a: Any, b: Any) -> Binary {
     :erlang::iolist_to_binary([a, b])
 }
 
-fn concat3(a: any, b: any, c: any) -> binary {
+fn concat3(a: Any, b: Any, c: Any) -> Binary {
     :erlang::iolist_to_binary([a, b, c])
 }
 
@@ -22,7 +22,7 @@ pub struct DisplayOpts {
     /// Line width for pretty printing
     width: int,
     /// Optional label to prefix the output
-    label: string,
+    label: String,
 }
 
 impl DisplayOpts {
@@ -47,7 +47,7 @@ impl DisplayOpts {
     }
 
     /// Set a label for the output.
-    pub fn with_label(self, label: string) -> DisplayOpts {
+    pub fn with_label(self, label: String) -> DisplayOpts {
         DisplayOpts { label: label, ..self }
     }
 
@@ -73,34 +73,34 @@ impl DisplayOpts {
 /// The default implementation uses Erlang's term formatting.
 pub trait Display {
     /// Convert to a binary representation with default options.
-    fn display(self) -> binary {
+    fn display(self) -> Binary {
         self.display(DisplayOpts::new())
     }
 
     /// Convert to a binary representation with custom options.
-    fn display(self, opts: DisplayOpts) -> binary;
+    fn display(self, opts: DisplayOpts) -> Binary;
 }
 
 /// Type-safe display with compile-time trait bound checking.
 /// Use this when you know the type implements Display.
 /// This function is monomorphized at compile time for each concrete type.
-pub fn display<T: Display>(value: T) -> binary {
+pub fn display<T: Display>(value: T) -> Binary {
     Display::display(value)
 }
 
 /// Type-safe display with options and compile-time trait bound checking.
-pub fn display_opts<T: Display>(value: T, opts: DisplayOpts) -> binary {
+pub fn display_opts<T: Display>(value: T, opts: DisplayOpts) -> Binary {
     Display::display(value, opts)
 }
 
 // Helper function to format any term using Erlang's io_lib
 // This is used as the fallback for types without custom Display impls
-pub fn format_term(term: any) -> binary {
+pub fn format_term(term: Any) -> Binary {
     :erlang::iolist_to_binary(:io_lib::format("~p", [term]))
 }
 
 // Format with a limit on collection items
-pub fn format_term_limit(term: any, limit: int) -> binary {
+pub fn format_term_limit(term: Any, limit: int) -> Binary {
     if limit == 0 {
         :erlang::iolist_to_binary(:io_lib::format("~p", [term]))
     } else {
@@ -110,14 +110,14 @@ pub fn format_term_limit(term: any, limit: int) -> binary {
 
 /// Display any term, dispatching to Display trait if implemented.
 /// Falls back to Erlang's term formatting for primitives and unknown types.
-pub fn display_any(term: any) -> binary {
+pub fn display_any(term: Any) -> Binary {
     do_display_any(term, DisplayOpts::new())
 }
 
 /// Convert any term to a string for interpolation.
 /// Unlike display_any, this doesn't add quotes around strings.
 /// Use this for string interpolation: "Hello {name}!"
-pub fn to_string(term: any) -> binary {
+pub fn to_string(term: Any) -> Binary {
     if :erlang::is_binary(term) {
         // Return string directly without quotes
         term
@@ -134,11 +134,11 @@ pub fn to_string(term: any) -> binary {
     }
 }
 
-pub fn display_any_opts(term: any, opts: DisplayOpts) -> binary {
+pub fn display_any_opts(term: Any, opts: DisplayOpts) -> Binary {
     do_display_any(term, opts)
 }
 
-fn do_display_any(term: any, opts: DisplayOpts) -> binary {
+fn do_display_any(term: Any, opts: DisplayOpts) -> Binary {
     // Check if this is a struct (map with __struct__ key)
     let formatted = if :erlang::is_map(term) {
         match :maps::get(:__struct__, term, :not_a_struct) {
@@ -158,7 +158,7 @@ fn do_display_any(term: any, opts: DisplayOpts) -> binary {
 }
 
 /// Format a struct in Rust-like syntax: TypeName { field: value, ... }
-fn format_struct(term: any, struct_tag: atom, opts: DisplayOpts) -> binary {
+fn format_struct(term: Any, struct_tag: Atom, opts: DisplayOpts) -> Binary {
     // Extract type name from tag (e.g., 'module::TypeName' -> 'TypeName')
     let tag_str = :erlang::atom_to_list(struct_tag);
     let type_name = extract_type_name(tag_str);
@@ -187,7 +187,7 @@ fn format_struct(term: any, struct_tag: atom, opts: DisplayOpts) -> binary {
 }
 
 /// Extract the type name from a fully qualified name like "module::TypeName"
-fn extract_type_name(tag_str: any) -> binary {
+fn extract_type_name(tag_str: Any) -> Binary {
     // Find the last "::" and take everything after it
     let parts = :string::split(tag_str, "::", :all);
     let last = :lists::last(parts);
@@ -195,7 +195,7 @@ fn extract_type_name(tag_str: any) -> binary {
 }
 
 /// Format a non-struct value
-fn format_value(term: any, opts: DisplayOpts) -> binary {
+fn format_value(term: Any, opts: DisplayOpts) -> Binary {
     if :erlang::is_binary(term) {
         // Binary string - show with quotes
         concat3("\"", term, "\"")
@@ -224,7 +224,7 @@ fn format_value(term: any, opts: DisplayOpts) -> binary {
 }
 
 /// Format an atom with special handling for Result/Option variants
-fn format_atom(term: any) -> binary {
+fn format_atom(term: Any) -> Binary {
     if term == :true {
         :erlang::iolist_to_binary("true")
     } else if term == :false {
@@ -243,14 +243,14 @@ fn format_atom(term: any) -> binary {
 }
 
 /// Format a list
-fn format_list(term: any, opts: DisplayOpts) -> binary {
+fn format_list(term: Any, opts: DisplayOpts) -> Binary {
     let items = :lists::map(|item| { format_value(item, opts) }, term);
     let items_str = join_strings(items, ", ");
     concat(concat("[", items_str), "]")
 }
 
 /// Format a tuple with special handling for Result/Option
-fn format_tuple(term: any, opts: DisplayOpts) -> binary {
+fn format_tuple(term: Any, opts: DisplayOpts) -> Binary {
     let size = :erlang::tuple_size(term);
 
     // Check for Result/Option patterns (2-element tuples with specific tags)
@@ -278,14 +278,14 @@ fn format_tuple(term: any, opts: DisplayOpts) -> binary {
 }
 
 /// Format a regular tuple (not Result/Option)
-fn format_regular_tuple(term: any, size: int, opts: DisplayOpts) -> binary {
+fn format_regular_tuple(term: Any, size: int, opts: DisplayOpts) -> Binary {
     let items = tuple_to_list(term, 1, size, opts);
     let items_str = join_strings(items, ", ");
     concat(concat("(", items_str), ")")
 }
 
 /// Convert tuple elements to formatted strings
-fn tuple_to_list(tuple: any, idx: int, size: int, opts: DisplayOpts) -> [binary] {
+fn tuple_to_list(tuple: Any, idx: int, size: int, opts: DisplayOpts) -> [Binary] {
     if idx > size {
         []
     } else {
@@ -297,7 +297,7 @@ fn tuple_to_list(tuple: any, idx: int, size: int, opts: DisplayOpts) -> [binary]
 }
 
 /// Format a plain map (not a struct)
-fn format_map(term: any, opts: DisplayOpts) -> binary {
+fn format_map(term: Any, opts: DisplayOpts) -> Binary {
     let entries = :maps::to_list(term);
     let entry_strs = :lists::map(|entry| {
         let key = :erlang::element(1, entry);
@@ -311,7 +311,7 @@ fn format_map(term: any, opts: DisplayOpts) -> binary {
 }
 
 /// Join a list of strings with a separator
-fn join_strings(strings: [binary], sep: any) -> binary {
+fn join_strings(strings: [Binary], sep: Any) -> Binary {
     let iolist = :lists::join(sep, strings);
     :erlang::iolist_to_binary(iolist)
 }

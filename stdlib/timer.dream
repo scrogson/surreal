@@ -3,7 +3,7 @@
 // Provides timing utilities using Erlang's timer module.
 
 /// Sleep for a given number of milliseconds.
-pub fn sleep(ms: int) -> atom {
+pub fn sleep(ms: int) -> Atom {
     :timer::sleep(ms)
 }
 
@@ -24,13 +24,13 @@ pub fn unix_time() -> int {
 
 /// Send a message to a process after a delay.
 /// Returns a timer reference that can be used to cancel.
-pub fn send_after<T>(ms: int, p: pid, msg: T) -> ref {
+pub fn send_after<T>(ms: int, p: Pid, msg: T) -> Ref {
     :erlang::send_after(ms, p, msg)
 }
 
 /// Cancel a timer created by send_after.
 /// Returns the remaining time in ms, or false if already expired.
-pub fn cancel(timer_ref: ref) -> any {
+pub fn cancel(timer_ref: Ref) -> Any {
     :erlang::cancel_timer(timer_ref)
 }
 

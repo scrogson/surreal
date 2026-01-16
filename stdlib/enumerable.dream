@@ -286,7 +286,7 @@ fn dedup_loop<T>(items: [T], prev: T, acc: [T]) -> [T] {
 }
 
 /// Group elements by a key function.
-pub fn group_by<T, K>(items: [T], key_fn: fn(T) -> K) -> map {
+pub fn group_by<T, K>(items: [T], key_fn: fn(T) -> K) -> Map {
     reduce(items, :maps::new(), |item, acc| {
         let key = key_fn(item);
         let existing = :maps::get(key, acc, []);
@@ -350,18 +350,18 @@ pub fn min_by<T>(items: [T], f: fn(T) -> int) -> T {
 // =============================================================================
 
 /// Apply a function to each element for side effects.
-pub fn each<T>(items: [T], f: fn(T) -> ()) -> atom {
+pub fn each<T>(items: [T], f: fn(T) -> ()) -> Atom {
     :lists::foreach(f, items);
     :ok
 }
 
 /// Apply a function to each element with its index.
-pub fn each_with_index<T>(items: [T], f: fn(T, int) -> ()) -> atom {
+pub fn each_with_index<T>(items: [T], f: fn(T, int) -> ()) -> Atom {
     each_with_index_loop(items, 0, f);
     :ok
 }
 
-fn each_with_index_loop<T>(items: [T], idx: int, f: fn(T, int) -> ()) -> atom {
+fn each_with_index_loop<T>(items: [T], idx: int, f: fn(T, int) -> ()) -> Atom {
     match items {
         [] => :ok,
         [head | tail] => {

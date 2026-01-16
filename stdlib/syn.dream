@@ -42,7 +42,7 @@
 /// - generics: Generics - generic type parameters
 /// - data: Data - struct or enum data
 pub struct DeriveInput {
-    ident: atom,
+    ident: Atom,
     generics: Generics,
     data: Data,
 }
@@ -54,7 +54,7 @@ pub struct Generics {
 
 /// A generic type parameter with optional bounds.
 pub struct TypeParam {
-    ident: atom,
+    ident: Atom,
     bounds: [Atom],
 }
 
@@ -87,17 +87,17 @@ pub enum Fields {
 }
 
 /// A single field of a struct.
-/// Note: ident is Option<atom> at runtime but typed as `any` to avoid
+/// Note: ident is Option<Atom> at runtime but typed as `Any` to avoid
 /// cross-module type resolution issues during stdlib compilation.
 pub struct Field {
-    ident: any,  // Option<atom> - None for tuple struct fields
+    ident: Any,  // Option<Atom> - None for tuple struct fields
     is_pub: bool,
-    ty: any,  // Type information (as token or keyword)
+    ty: Any,  // Type information (as token or keyword)
 }
 
 /// An enum variant.
 pub struct Variant {
-    ident: atom,
+    ident: Atom,
     fields: Fields,
 }
 
@@ -109,7 +109,7 @@ pub struct Variant {
 ///
 /// TokenStream format:
 /// `[{keyword, pub}, {keyword, struct}, {type_ident, 'Name'}, ...]`
-pub fn parse_derive_input(tokens: any) -> DeriveInput {
+pub fn parse_derive_input(tokens: Any) -> DeriveInput {
     // Create parser state
     let state = { tokens: tokens, pos: 0 };
 
@@ -136,7 +136,7 @@ pub fn parse_derive_input(tokens: any) -> DeriveInput {
 }
 
 /// Skip a specific keyword if present.
-fn skip_keyword(state: any, kw: atom) -> any {
+fn skip_keyword(state: Any, kw: Atom) -> Any {
     let tokens = state.tokens;
     if :erlang::length(tokens) == 0 {
         state
@@ -151,7 +151,7 @@ fn skip_keyword(state: any, kw: atom) -> any {
 }
 
 /// Check if a token is a specific keyword.
-fn is_keyword_token(token: any, kw: atom) -> bool {
+fn is_keyword_token(token: Any, kw: Atom) -> bool {
     if :erlang::is_tuple(token) {
         let tag = :erlang::element(1, token);
         if tag == :keyword {
@@ -165,7 +165,7 @@ fn is_keyword_token(token: any, kw: atom) -> bool {
 }
 
 /// Expect one of the given keywords.
-fn expect_keyword_one_of(state: any, keywords: [Atom]) -> (Any, Atom) {
+fn expect_keyword_one_of(state: Any, keywords: [Atom]) -> (Any, Atom) {
     let tokens = state.tokens;
     let token = :hd(tokens);
     let tag = :erlang::element(1, token);
@@ -183,7 +183,7 @@ fn expect_keyword_one_of(state: any, keywords: [Atom]) -> (Any, Atom) {
 }
 
 /// Expect a type identifier token.
-fn expect_type_ident(state: any) -> (Any, Atom) {
+fn expect_type_ident(state: Any) -> (Any, Atom) {
     let tokens = state.tokens;
     let token = :hd(tokens);
     let tag = :erlang::element(1, token);
@@ -197,7 +197,7 @@ fn expect_type_ident(state: any) -> (Any, Atom) {
 }
 
 /// Expect an identifier token.
-fn expect_ident(state: any) -> (Any, Atom) {
+fn expect_ident(state: Any) -> (Any, Atom) {
     let tokens = state.tokens;
     if :erlang::length(tokens) == 0 {
         (state, :unknown)
@@ -214,7 +214,7 @@ fn expect_ident(state: any) -> (Any, Atom) {
 }
 
 /// Parse generic type parameters from tokens.
-fn parse_generics_from_tokens(state: any) -> (Any, Generics) {
+fn parse_generics_from_tokens(state: Any) -> (Any, Generics) {
     let tokens = state.tokens;
     if :erlang::length(tokens) == 0 {
         (state, Generics { params: [] })
@@ -232,7 +232,7 @@ fn parse_generics_from_tokens(state: any) -> (Any, Generics) {
 }
 
 /// Check if a token is a group with specific delimiter.
-fn is_group_token(token: any, delim: atom) -> bool {
+fn is_group_token(token: Any, delim: Atom) -> bool {
     if :erlang::is_tuple(token) {
         let tag = :erlang::element(1, token);
         if tag == :group {
@@ -246,7 +246,7 @@ fn is_group_token(token: any, delim: atom) -> bool {
 }
 
 /// Parse type parameters from inner tokens of angle group.
-fn parse_type_params(tokens: any) -> [TypeParam] {
+fn parse_type_params(tokens: Any) -> [TypeParam] {
     // Split by comma and parse each
     let groups = split_by_punct(tokens, <<",">>);
     :lists::filtermap(|group| {
@@ -267,11 +267,11 @@ fn parse_type_params(tokens: any) -> [TypeParam] {
 }
 
 /// Split tokens by a punctuation character.
-fn split_by_punct(tokens: any, punct: binary) -> [[Any]] {
+fn split_by_punct(tokens: Any, punct: Binary) -> [[Any]] {
     split_by_punct_acc(tokens, punct, [], [])
 }
 
-fn split_by_punct_acc(tokens: any, punct: binary, current: [Any], result: [[Any]]) -> [[Any]] {
+fn split_by_punct_acc(tokens: Any, punct: Binary, current: [Any], result: [[Any]]) -> [[Any]] {
     if :erlang::length(tokens) == 0 {
         // Add final group if non-empty
         if :erlang::length(current) > 0 {
@@ -297,7 +297,7 @@ fn split_by_punct_acc(tokens: any, punct: binary, current: [Any], result: [[Any]
 }
 
 /// Check if a token is specific punctuation.
-fn is_punct_token(token: any, punct: binary) -> bool {
+fn is_punct_token(token: Any, punct: Binary) -> bool {
     if :erlang::is_tuple(token) {
         let tag = :erlang::element(1, token);
         if tag == :punct {
@@ -311,7 +311,7 @@ fn is_punct_token(token: any, punct: binary) -> bool {
 }
 
 /// Parse struct body from brace group.
-fn parse_struct_body(state: any) -> Data {
+fn parse_struct_body(state: Any) -> Data {
     let tokens = state.tokens;
     if :erlang::length(tokens) == 0 {
         Struct(DataStruct { fields: Unit })
@@ -334,7 +334,7 @@ fn parse_struct_body(state: any) -> Data {
 }
 
 /// Parse struct fields from inner tokens.
-fn parse_struct_fields(tokens: any) -> Fields {
+fn parse_struct_fields(tokens: Any) -> Fields {
     let groups = split_by_punct(tokens, <<",">>);
     let fields = :lists::filtermap(|group| {
         parse_field_from_tokens(group)
@@ -344,7 +344,7 @@ fn parse_struct_fields(tokens: any) -> Fields {
 
 /// Parse a single field from tokens.
 /// Format: name : type
-fn parse_field_from_tokens(tokens: any) -> (bool, Field) | bool {
+fn parse_field_from_tokens(tokens: Any) -> (bool, Field) | bool {
     if :erlang::length(tokens) < 3 {
         false
     } else {
@@ -373,7 +373,7 @@ fn parse_field_from_tokens(tokens: any) -> (bool, Field) | bool {
 }
 
 /// Parse tuple struct fields (unnamed).
-fn parse_tuple_fields(tokens: any) -> Fields {
+fn parse_tuple_fields(tokens: Any) -> Fields {
     let groups = split_by_punct(tokens, <<",">>);
     let fields = :lists::filtermap(|group| {
         if :erlang::length(group) > 0 {
@@ -388,7 +388,7 @@ fn parse_tuple_fields(tokens: any) -> Fields {
 
 /// Convert type tokens to a type representation.
 /// For now, just returns the first token's value for simple types.
-fn tokens_to_type(tokens: any) -> any {
+fn tokens_to_type(tokens: Any) -> Any {
     if :erlang::length(tokens) == 0 {
         :any
     } else {
@@ -407,7 +407,7 @@ fn tokens_to_type(tokens: any) -> any {
 }
 
 /// Parse enum body from brace group.
-fn parse_enum_body(state: any) -> Data {
+fn parse_enum_body(state: Any) -> Data {
     let tokens = state.tokens;
     if :erlang::length(tokens) == 0 {
         Enum(DataEnum { variants: [] })
@@ -424,7 +424,7 @@ fn parse_enum_body(state: any) -> Data {
 }
 
 /// Parse enum variants from inner tokens.
-fn parse_enum_variants(tokens: any) -> [Variant] {
+fn parse_enum_variants(tokens: Any) -> [Variant] {
     let groups = split_by_punct(tokens, <<",">>);
     :lists::filtermap(|group| {
         parse_variant_from_tokens(group)
@@ -432,7 +432,7 @@ fn parse_enum_variants(tokens: any) -> [Variant] {
 }
 
 /// Parse a single variant from tokens.
-fn parse_variant_from_tokens(tokens: any) -> (bool, Variant) | bool {
+fn parse_variant_from_tokens(tokens: Any) -> (bool, Variant) | bool {
     if :erlang::length(tokens) == 0 {
         false
     } else {
@@ -526,7 +526,7 @@ pub fn field_names(fields: [Field]) -> [Atom] {
 
 /// Iterate over named fields with their names.
 /// Calls the function with (field_name, field) for each named field.
-pub fn each_named_field(fields: [Field], func: fn(Atom, Field) -> any) -> [Any] {
+pub fn each_named_field(fields: [Field], func: fn(Atom, Field) -> Any) -> [Any] {
     :lists::filtermap(|f| {
         // f.ident is Option<atom>: {:Some, name} or :None
         if :erlang::is_tuple(f.ident) {

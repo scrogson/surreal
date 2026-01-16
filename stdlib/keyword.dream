@@ -5,7 +5,7 @@
 // Backed by Erlang's proplists module.
 
 /// Get the first value associated with a key, returns None if not found.
-pub fn get<V>(keywords: [(Atom, V)], key: atom) -> Option<V> {
+pub fn get<V>(keywords: [(Atom, V)], key: Atom) -> Option<V> {
     match :proplists::lookup(key, keywords) {
         :none => None,
         (_, value) => Some(value),
@@ -13,24 +13,24 @@ pub fn get<V>(keywords: [(Atom, V)], key: atom) -> Option<V> {
 }
 
 /// Get a value by key with a default if not found.
-pub fn get_or<V>(keywords: [(Atom, V)], key: atom, default: V) -> V {
+pub fn get_or<V>(keywords: [(Atom, V)], key: Atom, default: V) -> V {
     :proplists::get_value(key, keywords, default)
 }
 
 /// Get all values associated with a key (keyword lists can have duplicate keys).
-pub fn get_all<V>(keywords: [(Atom, V)], key: atom) -> [V] {
+pub fn get_all<V>(keywords: [(Atom, V)], key: Atom) -> [V] {
     :proplists::get_all_values(key, keywords)
 }
 
 /// Put a key-value pair at the front of the keyword list.
 /// If the key already exists, this adds a new entry (doesn't replace).
 /// Use `put_new` to only add if key doesn't exist, or `replace` to update.
-pub fn put<V>(keywords: [(Atom, V)], key: atom, value: V) -> [(Atom, V)] {
+pub fn put<V>(keywords: [(Atom, V)], key: Atom, value: V) -> [(Atom, V)] {
     [(key, value) | keywords]
 }
 
 /// Put a key-value pair only if the key doesn't already exist.
-pub fn put_new<V>(keywords: [(Atom, V)], key: atom, value: V) -> [(Atom, V)] {
+pub fn put_new<V>(keywords: [(Atom, V)], key: Atom, value: V) -> [(Atom, V)] {
     if has_key(keywords, key) {
         keywords
     } else {
@@ -40,18 +40,18 @@ pub fn put_new<V>(keywords: [(Atom, V)], key: atom, value: V) -> [(Atom, V)] {
 
 /// Replace all occurrences of a key with a new value.
 /// If the key doesn't exist, adds it to the front.
-pub fn replace<V>(keywords: [(Atom, V)], key: atom, value: V) -> [(Atom, V)] {
+pub fn replace<V>(keywords: [(Atom, V)], key: Atom, value: V) -> [(Atom, V)] {
     let without = delete_all(keywords, key);
     [(key, value) | without]
 }
 
 /// Delete the first occurrence of a key.
-pub fn delete<V>(keywords: [(Atom, V)], key: atom) -> [(Atom, V)] {
+pub fn delete<V>(keywords: [(Atom, V)], key: Atom) -> [(Atom, V)] {
     :proplists::delete(key, keywords)
 }
 
 /// Delete all occurrences of a key.
-pub fn delete_all<V>(keywords: [(Atom, V)], key: atom) -> [(Atom, V)] {
+pub fn delete_all<V>(keywords: [(Atom, V)], key: Atom) -> [(Atom, V)] {
     :lists::filter(|kv| {
         let (k, _) = kv;
         k != key
@@ -59,7 +59,7 @@ pub fn delete_all<V>(keywords: [(Atom, V)], key: atom) -> [(Atom, V)] {
 }
 
 /// Check if a key exists in the keyword list.
-pub fn has_key<V>(keywords: [(Atom, V)], key: atom) -> bool {
+pub fn has_key<V>(keywords: [(Atom, V)], key: Atom) -> bool {
     :proplists::is_defined(key, keywords)
 }
 
@@ -103,12 +103,12 @@ pub fn unique_keys<V>(keywords: [(Atom, V)]) -> [(Atom, V)] {
 
 /// Convert a keyword list to a map.
 /// If there are duplicate keys, the first occurrence wins.
-pub fn to_map<V>(keywords: [(Atom, V)]) -> map {
+pub fn to_map<V>(keywords: [(Atom, V)]) -> Map {
     :maps::from_list(unique_keys(keywords))
 }
 
 /// Create a keyword list from a map.
-pub fn from_map<V>(m: map) -> [(Atom, V)] {
+pub fn from_map<V>(m: Map) -> [(Atom, V)] {
     :maps::to_list(m)
 }
 

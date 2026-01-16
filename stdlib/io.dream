@@ -3,22 +3,22 @@
 // Provides console input/output functions.
 
 /// Print a string followed by a newline.
-pub fn println(s: string) -> atom {
+pub fn println(s: String) -> Atom {
     :io::format("~s~n", [s])
 }
 
 /// Print with format string (like Erlang's io:format).
-pub fn format(fmt: string, args: any) -> atom {
+pub fn format(fmt: String, args: Any) -> Atom {
     :io::format(fmt, args)
 }
 
 /// Print a string without a newline.
-pub fn print(s: string) -> atom {
+pub fn print(s: String) -> Atom {
     :io::format("~s", [s])
 }
 
 /// Print an integer followed by a newline.
-pub fn println_int(n: int) -> atom {
+pub fn println_int(n: int) -> Atom {
     :io::format("~p~n", [n])
 }
 
@@ -37,17 +37,17 @@ pub fn dbg<T>(term: T) -> T {
 /// Example:
 ///   data |> io::dbg_opts(display::DisplayOpts::pretty())
 ///   data |> io::dbg_opts(display::DisplayOpts::new().with_label("debug"))
-pub fn dbg_opts(term: any, opts: display::DisplayOpts) -> any {
+pub fn dbg_opts(term: Any, opts: display::DisplayOpts) -> Any {
     println(display::display_any_opts(term, opts));
     term
 }
 
 /// Read a line from standard input.
-pub fn read_line() -> string {
+pub fn read_line() -> String {
     :io::get_line("")
 }
 
 /// Read a line with a prompt.
-pub fn read_line_prompt(prompt: string) -> string {
+pub fn read_line_prompt(prompt: String) -> String {
     :io::get_line(prompt)
 }

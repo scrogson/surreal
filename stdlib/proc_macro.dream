@@ -54,19 +54,19 @@ pub enum Delimiter {
 /// - `{group, delimiter, tokens}` for groups
 pub enum TokenTree {
     /// An identifier: `foo`, `my_var`
-    Ident(string),
+    Ident(String),
     /// A type identifier: `User`, `Option`
-    TypeIdent(string),
+    TypeIdent(String),
     /// An integer literal: `42`, `-5`
     Int(int),
     /// A string literal: `"hello"`
-    String(string),
+    String(String),
     /// An atom literal: `:ok`, `:error`
-    Atom(string),
+    Atom(String),
     /// Punctuation: `+`, `->`, `::`, `,`, etc.
-    Punct(string),
+    Punct(String),
     /// A keyword: `fn`, `let`, `struct`, `pub`, etc.
-    Keyword(string),
+    Keyword(String),
     /// A delimited group of tokens
     Group(Delimiter, [TokenTree]),
 }
@@ -116,12 +116,12 @@ pub fn concat(a: TokenStream, b: TokenStream) -> TokenStream {
 // =============================================================================
 
 /// Create an identifier token.
-pub fn ident(name: string) -> TokenTree {
+pub fn ident(name: String) -> TokenTree {
     Ident(name)
 }
 
 /// Create a type identifier token.
-pub fn type_ident(name: string) -> TokenTree {
+pub fn type_ident(name: String) -> TokenTree {
     TypeIdent(name)
 }
 
@@ -131,22 +131,22 @@ pub fn int(value: int) -> TokenTree {
 }
 
 /// Create a string token.
-pub fn string(value: string) -> TokenTree {
+pub fn string(value: String) -> TokenTree {
     String(value)
 }
 
 /// Create an atom token.
-pub fn atom(name: string) -> TokenTree {
+pub fn atom(name: String) -> TokenTree {
     Atom(name)
 }
 
 /// Create a punctuation token.
-pub fn punct(chars: string) -> TokenTree {
+pub fn punct(chars: String) -> TokenTree {
     Punct(chars)
 }
 
 /// Create a keyword token.
-pub fn keyword(name: string) -> TokenTree {
+pub fn keyword(name: String) -> TokenTree {
     Keyword(name)
 }
 

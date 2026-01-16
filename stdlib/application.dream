@@ -3,6 +3,8 @@
 // Provides OTP Application behavior for managing supervision trees
 // and application lifecycle.
 
+use erlang::std::application as erl_app;
+
 /// Start type for application startup.
 /// - `:normal` - Standard application start
 /// - `:takeover` - Distributed takeover (app started on another node)
@@ -59,17 +61,17 @@ pub trait Application {
 /// Get an environment value for the current application.
 /// Returns None if the key is not set.
 pub fn get_env(key: Atom) -> Option<Any> {
-    match :application::get_application() {
-        (:ok, app) => get_env_for(app, key),
-        _ => None
+    match erl_app::get_application() {
+        Ok(app) => get_env_for(app, key),
+        Err(_) => None
     }
 }
 
 /// Get an environment value for a specific application.
 pub fn get_env_for(app: Atom, key: Atom) -> Option<Any> {
-    match :application::get_env(app, key) {
-        (:ok, value) => Some(value),
-        _ => None
+    match erl_app::get_env(app, key) {
+        Ok(value) => Some(value),
+        Err(_) => None
     }
 }
 
@@ -107,59 +109,46 @@ pub fn fetch_env_for(app: Atom, key: Atom) -> Any {
 
 /// Set an environment value for the current application.
 pub fn put_env(key: Atom, value: Any) -> Atom {
-    match :application::get_application() {
-        (:ok, app) => put_env_for(app, key, value),
-        _ => :error
+    match erl_app::get_application() {
+        Ok(app) => put_env_for(app, key, value),
+        Err(_) => :error
     }
 }
 
 /// Set an environment value for a specific application.
 pub fn put_env_for(app: Atom, key: Atom, value: Any) -> Atom {
-    :application::set_env(app, key, value)
+    erl_app::set_env(app, key, value)
 }
 
 /// Get all environment for the current application.
 pub fn get_all_env() -> [(Atom, Any)] {
-    match :application::get_application() {
-        (:ok, app) => get_all_env_for(app),
-        _ => []
+    match erl_app::get_application() {
+        Ok(app) => get_all_env_for(app),
+        Err(_) => []
     }
 }
 
 /// Get all environment for a specific application.
 pub fn get_all_env_for(app: Atom) -> [(Atom, Any)] {
-    :application::get_all_env(app)
+    erl_app::get_all_env(app)
 }
 
 // ============== Application Control API ==============
 
 /// Start an application.
 pub fn start(app: Atom) -> Result<Atom, Any> {
-    match :application::start(app) {
-        (:ok, result) => Ok(result),
-        (:error, reason) => Err(reason),
-        :ok => Ok(:ok),
-        other => Err(other)
-    }
+    erl_app::start(app)
 }
 
 /// Stop an application.
 pub fn stop(app: Atom) -> Result<Atom, Any> {
-    match :application::stop(app) {
-        :ok => Ok(:ok),
-        (:error, reason) => Err(reason),
-        other => Err(other)
-    }
+    erl_app::stop(app)
 }
 
 /// Ensure an application is started.
 /// Also starts any dependencies.
 pub fn ensure_started(app: Atom) -> Result<[Atom], Any> {
-    match :application::ensure_all_started(app) {
-        (:ok, apps) => Ok(apps),
-        (:error, reason) => Err(reason),
-        other => Err(other)
-    }
+    erl_app::ensure_all_started(app)
 }
 
 /// Ensure an application is started (simple version).
@@ -173,22 +162,18 @@ pub fn ensure_started_simple(app: Atom) -> Atom {
 
 /// Get information about a running application.
 pub fn info(app: Atom) -> Result<[(Atom, Any)], Atom> {
-    match :application::get_all_key(app) {
-        (:ok, info) => Ok(info),
-        :undefined => Err(:undefined),
-        other => Err(:error)
-    }
+    erl_app::get_all_key(app)
 }
 
 /// Get which applications are currently running.
 pub fn which_applications() -> [(Atom, Any, Any)] {
-    :application::which_applications()
+    erl_app::which_applications()
 }
 
 /// Get the application that owns the calling process.
 pub fn get_application() -> Option<Atom> {
-    match :application::get_application() {
-        (:ok, app) => Some(app),
-        _ => None
+    match erl_app::get_application() {
+        Ok(app) => Some(app),
+        Err(_) => None
     }
 }

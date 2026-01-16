@@ -525,8 +525,13 @@ fn compile_modules_with_registry(
     // Load stub modules for FFI type checking
     let stub_modules = load_stub_modules();
 
+    // Load all stdlib modules for type checking
+    // This is needed even when compiling stdlib itself, because stdlib modules
+    // may depend on extern modules defined in other stdlib files
+    let stdlib_modules_full = load_stdlib_modules();
+
     // Check if we're compiling stdlib itself (by checking if any module shares a name with stdlib)
-    let stdlib_module_names_raw: std::collections::HashSet<_> = load_stdlib_modules()
+    let stdlib_module_names_raw: std::collections::HashSet<_> = stdlib_modules_full
         .iter()
         .map(|m| m.name.clone())
         .collect();
@@ -537,11 +542,15 @@ fn compile_modules_with_registry(
 
     let is_compiling_stdlib = user_module_names.iter().any(|n| stdlib_module_names_raw.contains(n));
 
-    // Only load stdlib for type checking when compiling user code (not stdlib itself)
-    let stdlib_modules = if is_compiling_stdlib {
-        Vec::new()
+    // When compiling stdlib itself, filter out modules being compiled to avoid duplicates
+    // but keep other stdlib modules for type checking (e.g., extern module definitions)
+    let stdlib_modules: Vec<Module> = if is_compiling_stdlib {
+        stdlib_modules_full
+            .into_iter()
+            .filter(|m| !user_module_names.contains(&m.name))
+            .collect()
     } else {
-        load_stdlib_modules()
+        stdlib_modules_full
     };
 
     // Combine user modules with stub modules and stdlib for type checking
@@ -862,8 +871,13 @@ fn compile_modules_with_registry_and_options(
     // Load stub modules for FFI type checking
     let stub_modules = load_stub_modules();
 
+    // Load all stdlib modules for type checking
+    // This is needed even when compiling stdlib itself, because stdlib modules
+    // may depend on extern modules defined in other stdlib files
+    let stdlib_modules_full = load_stdlib_modules();
+
     // Check if we're compiling stdlib itself (by checking if any module shares a name with stdlib)
-    let stdlib_module_names_raw: std::collections::HashSet<_> = load_stdlib_modules()
+    let stdlib_module_names_raw: std::collections::HashSet<_> = stdlib_modules_full
         .iter()
         .map(|m| m.name.clone())
         .collect();
@@ -874,11 +888,15 @@ fn compile_modules_with_registry_and_options(
 
     let is_compiling_stdlib = user_module_names.iter().any(|n| stdlib_module_names_raw.contains(n));
 
-    // Only load stdlib for type checking when compiling user code (not stdlib itself)
-    let stdlib_modules = if is_compiling_stdlib {
-        Vec::new()
+    // When compiling stdlib itself, filter out modules being compiled to avoid duplicates
+    // but keep other stdlib modules for type checking (e.g., extern module definitions)
+    let stdlib_modules: Vec<Module> = if is_compiling_stdlib {
+        stdlib_modules_full
+            .into_iter()
+            .filter(|m| !user_module_names.contains(&m.name))
+            .collect()
     } else {
-        load_stdlib_modules()
+        stdlib_modules_full
     };
 
     // Combine user modules with stub modules and stdlib for type checking
@@ -1559,16 +1577,18 @@ fn load_stub_modules() -> Vec<Module> {
 fn load_stdlib_modules() -> Vec<Module> {
     let stdlib_dir = match find_stdlib_dir() {
         Some(dir) => dir,
-        None => return Vec::new(),
+        None => {
+            return Vec::new();
+        }
     };
 
     // Use package-aware loader with "dream" as the package name
     // This enables implicit modules: stdlib/io.dream -> dream::io
     let mut loader = ModuleLoader::with_package("dream".to_string(), stdlib_dir.clone());
 
-    if let Err(_) = loader.load_all_in_dir(&stdlib_dir) {
-        return Vec::new();
-    }
+    // Load all Dream files in the stdlib directory
+    // Silently ignore errors - some stdlib files may have parse errors during development
+    let _ = loader.load_all_in_dir(&stdlib_dir);
 
     loader.into_modules()
 }

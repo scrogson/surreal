@@ -39,17 +39,17 @@ pub trait Iterator {
     }
 
     /// Check if any element matches a predicate.
-    fn any(self, pred: any) -> bool {
+    fn any(self, pred: Any) -> bool {
         trait_any_loop(self, pred)
     }
 
     /// Check if all elements match a predicate.
-    fn all(self, pred: any) -> bool {
+    fn all(self, pred: Any) -> bool {
         trait_all_loop(self, pred)
     }
 
     /// Find first element matching predicate.
-    fn find(self, pred: any) -> Option<Self::Item> {
+    fn find(self, pred: Any) -> Option<Self::Item> {
         trait_find_loop(self, pred)
     }
 }
@@ -62,7 +62,7 @@ fn trait_count_loop<T: Iterator>(iter: T, acc: int) -> int {
     }
 }
 
-fn trait_any_loop<T: Iterator>(iter: T, pred: any) -> bool {
+fn trait_any_loop<T: Iterator>(iter: T, pred: Any) -> bool {
     match Iterator::next(iter) {
         Some((value, new_iter)) => {
             if :erlang::apply(pred, [value]) {
@@ -75,7 +75,7 @@ fn trait_any_loop<T: Iterator>(iter: T, pred: any) -> bool {
     }
 }
 
-fn trait_all_loop<T: Iterator>(iter: T, pred: any) -> bool {
+fn trait_all_loop<T: Iterator>(iter: T, pred: Any) -> bool {
     match Iterator::next(iter) {
         Some((value, new_iter)) => {
             if :erlang::apply(pred, [value]) {
@@ -88,7 +88,7 @@ fn trait_all_loop<T: Iterator>(iter: T, pred: any) -> bool {
     }
 }
 
-fn trait_find_loop<T: Iterator>(iter: T, pred: any) -> Option<any> {
+fn trait_find_loop<T: Iterator>(iter: T, pred: Any) -> Option<Any> {
     match Iterator::next(iter) {
         Some((value, new_iter)) => {
             if :erlang::apply(pred, [value]) {
@@ -105,12 +105,12 @@ fn trait_find_loop<T: Iterator>(iter: T, pred: any) -> Option<any> {
 
 /// A generic iterator that wraps a next function and state.
 pub struct Iter {
-    next_fn: any,
-    state: any,
+    next_fn: Any,
+    state: Any,
 }
 
 impl Iterator for Iter {
-    type Item = any;
+    type Item = Any;
 
     fn next(self) -> Option<(Self::Item, Self)> {
         let result = :erlang::apply(self.next_fn, [self.state]);
@@ -147,7 +147,7 @@ pub fn from(start: int) -> Iter {
 
 /// Create an iterator by repeatedly applying a function.
 /// Yields: start, f(start), f(f(start)), ...
-pub fn iterate(start: any, f: any) -> Iter {
+pub fn iterate(start: Any, f: Any) -> Iter {
     let next_fn = |s| {
         let next_state = :erlang::apply(f, [s]);
         Some((s, next_state))
@@ -156,7 +156,7 @@ pub fn iterate(start: any, f: any) -> Iter {
 }
 
 /// Create an iterator that repeats a value n times.
-pub fn repeat(value: any, n: int) -> Iter {
+pub fn repeat(value: Any, n: int) -> Iter {
     let next_fn = |count| {
         if count > 0 {
             Some((value, count - 1))
@@ -200,14 +200,14 @@ pub fn from_list(items: [Any]) -> Iter {
 
 /// Create an iterator using an unfold function.
 /// f(acc) should return Some((value, new_acc)) or None.
-pub fn unfold(initial: any, f: any) -> Iter {
+pub fn unfold(initial: Any, f: Any) -> Iter {
     Iter { next_fn: f, state: initial }
 }
 
 // ============== Iterator Adapters ==============
 
 /// Map a function over an iterator.
-pub fn map(iter: Iter, f: any) -> Iter {
+pub fn map(iter: Iter, f: Any) -> Iter {
     let next_fn = |state| {
         let (inner_next, inner_state, mapper) = state;
         match :erlang::apply(inner_next, [inner_state]) {
@@ -222,14 +222,14 @@ pub fn map(iter: Iter, f: any) -> Iter {
 }
 
 /// Filter an iterator with a predicate.
-pub fn filter(iter: Iter, pred: any) -> Iter {
+pub fn filter(iter: Iter, pred: Any) -> Iter {
     let next_fn = |state| {
         filter_step(state)
     };
     Iter { next_fn: next_fn, state: (iter.next_fn, iter.state, pred) }
 }
 
-fn filter_step(state: any) -> Option<(Any, Any)> {
+fn filter_step(state: Any) -> Option<(Any, Any)> {
     let (inner_next, inner_state, pred) = state;
     match :erlang::apply(inner_next, [inner_state]) {
         Some((value, new_inner)) => {
@@ -267,7 +267,7 @@ pub fn skip(iter: Iter, n: int) -> Iter {
     Iter { next_fn: iter.next_fn, state: skipped }
 }
 
-fn skip_n(next_fn: any, state: any, n: int) -> any {
+fn skip_n(next_fn: Any, state: Any, n: int) -> Any {
     if n > 0 {
         match :erlang::apply(next_fn, [state]) {
             Some((_value, new_state)) => skip_n(next_fn, new_state, n - 1),
@@ -279,7 +279,7 @@ fn skip_n(next_fn: any, state: any, n: int) -> any {
 }
 
 /// Take elements while predicate is true.
-pub fn take_while(iter: Iter, pred: any) -> Iter {
+pub fn take_while(iter: Iter, pred: Any) -> Iter {
     let next_fn = |state| {
         let (inner_next, inner_state, p, done) = state;
         if done {
@@ -342,7 +342,7 @@ pub fn chain(iter1: Iter, iter2: Iter) -> Iter {
     Iter { next_fn: next_fn, state: (1, iter1.next_fn, iter1.state, iter2.next_fn, iter2.state) }
 }
 
-fn chain_step(state: any) -> Option<(Any, Any)> {
+fn chain_step(state: Any) -> Option<(Any, Any)> {
     let (phase, n1, s1, n2, s2) = state;
     if phase == 1 {
         match :erlang::apply(n1, [s1]) {
@@ -377,7 +377,7 @@ pub fn collect(iter: Iter) -> [Any] {
     collect_acc(iter.next_fn, iter.state, [])
 }
 
-fn collect_acc(next_fn: any, state: any, acc: [Any]) -> [Any] {
+fn collect_acc(next_fn: Any, state: Any, acc: [Any]) -> [Any] {
     match :erlang::apply(next_fn, [state]) {
         Some((value, new_state)) => {
             collect_acc(next_fn, new_state, :lists::append(acc, [value]))
@@ -387,11 +387,11 @@ fn collect_acc(next_fn: any, state: any, acc: [Any]) -> [Any] {
 }
 
 /// Fold/reduce the iterator to a single value.
-pub fn fold(iter: Iter, initial: any, f: any) -> any {
+pub fn fold(iter: Iter, initial: Any, f: Any) -> Any {
     fold_acc(iter.next_fn, iter.state, initial, f)
 }
 
-fn fold_acc(next_fn: any, state: any, acc: any, f: any) -> any {
+fn fold_acc(next_fn: Any, state: Any, acc: Any, f: Any) -> Any {
     match :erlang::apply(next_fn, [state]) {
         Some((value, new_state)) => {
             let new_acc = :erlang::apply(f, [acc, value]);
@@ -402,11 +402,11 @@ fn fold_acc(next_fn: any, state: any, acc: any, f: any) -> any {
 }
 
 /// Run iterator for side effects.
-pub fn for_each(iter: Iter, f: any) -> atom {
+pub fn for_each(iter: Iter, f: Any) -> Atom {
     for_each_loop(iter.next_fn, iter.state, f)
 }
 
-fn for_each_loop(next_fn: any, state: any, f: any) -> atom {
+fn for_each_loop(next_fn: Any, state: Any, f: Any) -> Atom {
     match :erlang::apply(next_fn, [state]) {
         Some((value, new_state)) => {
             :erlang::apply(f, [value]);
@@ -427,7 +427,7 @@ pub fn sum(iter: Iter) -> int {
 }
 
 /// Get the first element.
-pub fn first(iter: Iter) -> Option<any> {
+pub fn first(iter: Iter) -> Option<Any> {
     match :erlang::apply(iter.next_fn, [iter.state]) {
         Some((value, _new_state)) => Some(value),
         _ => None
@@ -435,11 +435,11 @@ pub fn first(iter: Iter) -> Option<any> {
 }
 
 /// Get the last element.
-pub fn last(iter: Iter) -> Option<any> {
+pub fn last(iter: Iter) -> Option<Any> {
     last_acc(iter.next_fn, iter.state, None)
 }
 
-fn last_acc(next_fn: any, state: any, current: Option<any>) -> Option<any> {
+fn last_acc(next_fn: Any, state: Any, current: Option<Any>) -> Option<Any> {
     match :erlang::apply(next_fn, [state]) {
         Some((value, new_state)) => last_acc(next_fn, new_state, Some(value)),
         _ => current
@@ -447,11 +447,11 @@ fn last_acc(next_fn: any, state: any, current: Option<any>) -> Option<any> {
 }
 
 /// Find first element matching predicate.
-pub fn find(iter: Iter, pred: any) -> Option<any> {
+pub fn find(iter: Iter, pred: Any) -> Option<Any> {
     find_loop(iter.next_fn, iter.state, pred)
 }
 
-fn find_loop(next_fn: any, state: any, pred: any) -> Option<any> {
+fn find_loop(next_fn: Any, state: Any, pred: Any) -> Option<Any> {
     match :erlang::apply(next_fn, [state]) {
         Some((value, new_state)) => {
             if :erlang::apply(pred, [value]) {
@@ -465,11 +465,11 @@ fn find_loop(next_fn: any, state: any, pred: any) -> Option<any> {
 }
 
 /// Check if any element matches predicate.
-pub fn any(iter: Iter, pred: any) -> bool {
+pub fn any(iter: Iter, pred: Any) -> bool {
     any_loop(iter.next_fn, iter.state, pred)
 }
 
-fn any_loop(next_fn: any, state: any, pred: any) -> bool {
+fn any_loop(next_fn: Any, state: Any, pred: Any) -> bool {
     match :erlang::apply(next_fn, [state]) {
         Some((value, new_state)) => {
             if :erlang::apply(pred, [value]) {
@@ -483,11 +483,11 @@ fn any_loop(next_fn: any, state: any, pred: any) -> bool {
 }
 
 /// Check if all elements match predicate.
-pub fn all(iter: Iter, pred: any) -> bool {
+pub fn all(iter: Iter, pred: Any) -> bool {
     all_loop(iter.next_fn, iter.state, pred)
 }
 
-fn all_loop(next_fn: any, state: any, pred: any) -> bool {
+fn all_loop(next_fn: Any, state: Any, pred: Any) -> bool {
     match :erlang::apply(next_fn, [state]) {
         Some((value, new_state)) => {
             if :erlang::apply(pred, [value]) {
@@ -501,13 +501,13 @@ fn all_loop(next_fn: any, state: any, pred: any) -> bool {
 }
 
 /// Get nth element (0-indexed).
-pub fn nth(iter: Iter, n: int) -> Option<any> {
+pub fn nth(iter: Iter, n: int) -> Option<Any> {
     let skipped = skip(iter, n);
     first(skipped)
 }
 
 /// Get min element.
-pub fn min(iter: Iter) -> Option<any> {
+pub fn min(iter: Iter) -> Option<Any> {
     match first(iter) {
         Some(first_val) => {
             let rest = skip(iter, 1);
@@ -520,7 +520,7 @@ pub fn min(iter: Iter) -> Option<any> {
 }
 
 /// Get max element.
-pub fn max(iter: Iter) -> Option<any> {
+pub fn max(iter: Iter) -> Option<Any> {
     match first(iter) {
         Some(first_val) => {
             let rest = skip(iter, 1);

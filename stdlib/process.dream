@@ -4,37 +4,37 @@
 
 /// Get the current process's PID.
 /// Note: You can also use the built-in `self()` expression directly.
-pub fn current() -> pid {
+pub fn current() -> Pid {
     self()
 }
 
 /// Sleep for the given number of milliseconds.
-pub fn sleep(ms: int) -> atom {
+pub fn sleep(ms: int) -> Atom {
     :timer::sleep(ms)
 }
 
 /// Check if a process is alive.
-pub fn is_alive(p: pid) -> bool {
+pub fn is_alive(p: Pid) -> bool {
     :erlang::is_process_alive(p)
 }
 
 /// Send a message to a process (returns the message).
-pub fn send<T>(p: pid, msg: T) -> T {
+pub fn send<T>(p: Pid, msg: T) -> T {
     :erlang::send(p, msg)
 }
 
 /// Register a process with a name.
-pub fn register(name: atom, p: pid) -> atom {
+pub fn register(name: Atom, p: Pid) -> Atom {
     :erlang::register(name, p)
 }
 
 /// Unregister a process name.
-pub fn unregister(name: atom) -> atom {
+pub fn unregister(name: Atom) -> Atom {
     :erlang::unregister(name)
 }
 
 /// Look up a registered process by name.
-pub fn whereis(name: atom) -> pid {
+pub fn whereis(name: Atom) -> Pid {
     :erlang::whereis(name)
 }
 
@@ -44,22 +44,22 @@ pub fn registered() -> [Atom] {
 }
 
 /// Link to another process.
-pub fn link(p: pid) -> atom {
+pub fn link(p: Pid) -> Atom {
     :erlang::link(p)
 }
 
 /// Unlink from another process.
-pub fn unlink(p: pid) -> atom {
+pub fn unlink(p: Pid) -> Atom {
     :erlang::unlink(p)
 }
 
 /// Exit the current process with a reason.
-pub fn exit(reason: atom) -> atom {
+pub fn exit(reason: Atom) -> Atom {
     :erlang::exit(reason)
 }
 
 /// Exit another process with a reason.
-pub fn exit_pid(p: pid, reason: atom) -> atom {
+pub fn exit_pid(p: Pid, reason: Atom) -> Atom {
     :erlang::exit(p, reason)
 }
 

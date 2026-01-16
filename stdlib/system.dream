@@ -6,7 +6,7 @@
 // ============== Environment Variables ==============
 
 /// Get all environment variables as a list of (key, value) tuples.
-pub fn env() -> [(string, string)] {
+pub fn env() -> [(String, String)] {
     let raw = :os::getenv();
     :lists::map(|entry| {
         // Convert charlist to binary and split on '='
@@ -21,7 +21,7 @@ pub fn env() -> [(string, string)] {
 
 /// Get a specific environment variable.
 /// Returns None if the variable is not set.
-pub fn get_env(name: string) -> Option<string> {
+pub fn get_env(name: String) -> Option<String> {
     match :os::getenv(:erlang::binary_to_list(name)) {
         false => None,
         value => Some(:erlang::list_to_binary(value)),
@@ -29,7 +29,7 @@ pub fn get_env(name: string) -> Option<string> {
 }
 
 /// Get an environment variable with a default value.
-pub fn get_env_or(name: string, default: string) -> string {
+pub fn get_env_or(name: String, default: String) -> String {
     match get_env(name) {
         Some(value) => value,
         None => default,
@@ -38,13 +38,13 @@ pub fn get_env_or(name: string, default: string) -> string {
 
 /// Set an environment variable.
 /// Returns true on success.
-pub fn put_env(name: string, value: string) -> bool {
+pub fn put_env(name: String, value: String) -> bool {
     :os::putenv(:erlang::binary_to_list(name), :erlang::binary_to_list(value))
 }
 
 /// Unset an environment variable.
 /// Returns true on success.
-pub fn unset_env(name: string) -> bool {
+pub fn unset_env(name: String) -> bool {
     :os::unsetenv(:erlang::binary_to_list(name))
 }
 
@@ -52,7 +52,7 @@ pub fn unset_env(name: string) -> bool {
 
 /// Get command line arguments passed to the program.
 /// Returns the list of arguments as strings.
-pub fn argv() -> [string] {
+pub fn argv() -> [String] {
     let args = :init::get_plain_arguments();
     :lists::map(|arg| { :erlang::list_to_binary(arg) }, args)
 }
@@ -70,7 +70,7 @@ pub fn halt_with(code: int) {
 }
 
 /// Halt with a message printed to stderr.
-pub fn halt_with_message(message: string) {
+pub fn halt_with_message(message: String) {
     :erlang::halt(message)
 }
 
@@ -78,7 +78,7 @@ pub fn halt_with_message(message: string) {
 
 /// Run a shell command and return its output.
 /// Note: This is blocking and waits for the command to complete.
-pub fn cmd(command: string) -> string {
+pub fn cmd(command: String) -> String {
     let result = :os::cmd(:erlang::binary_to_list(command));
     :erlang::list_to_binary(result)
 }
@@ -87,7 +87,7 @@ pub fn cmd(command: string) -> string {
 
 /// Get the current working directory.
 /// Returns Ok(path) or Err(reason).
-pub fn cwd() -> Result<string, Any> {
+pub fn cwd() -> Result<String, Any> {
     match :file::get_cwd() {
         Ok(dir) => Ok(:erlang::list_to_binary(dir)),
         Err(e) => Err(e),
@@ -95,7 +95,7 @@ pub fn cwd() -> Result<string, Any> {
 }
 
 /// Get the system's temporary directory.
-pub fn tmp_dir() -> string {
+pub fn tmp_dir() -> String {
     // Try common env vars first, fall back to /tmp
     match get_env("TMPDIR") {
         Some(dir) => dir,
@@ -111,7 +111,7 @@ pub fn tmp_dir() -> string {
 
 /// Get the user's home directory.
 /// Returns None if it cannot be determined.
-pub fn user_home() -> Option<string> {
+pub fn user_home() -> Option<String> {
     // Try HOME env var first (Unix)
     match get_env("HOME") {
         Some(dir) => Some(dir),
@@ -141,12 +141,12 @@ pub fn os_type() -> (Atom, Atom) {
 
 /// Get the operating system version.
 /// Returns a tuple of version numbers or atoms depending on OS.
-pub fn os_version() -> any {
+pub fn os_version() -> Any {
     :os::version()
 }
 
 /// Get the system architecture (e.g., "x86_64-apple-darwin").
-pub fn arch() -> any {
+pub fn arch() -> Any {
     let info = :erlang::apply(:erlang, :system_info, [:system_architecture]);
     :erlang::list_to_binary(info)
 }
@@ -169,7 +169,7 @@ pub fn monotonic_time() -> int {
 
 /// Get monotonic time in the specified unit.
 /// Unit can be :second, :millisecond, :microsecond, :nanosecond, or :native.
-pub fn monotonic_time_in(unit: atom) -> int {
+pub fn monotonic_time_in(unit: Atom) -> int {
     :erlang::monotonic_time(unit)
 }
 
@@ -179,6 +179,6 @@ pub fn system_time() -> int {
 }
 
 /// Get system time in the specified unit.
-pub fn system_time_in(unit: atom) -> int {
+pub fn system_time_in(unit: Atom) -> int {
     :erlang::system_time(unit)
 }

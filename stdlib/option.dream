@@ -59,7 +59,7 @@ pub fn to_list<T>(opt: Option<T>) -> [T] {
 
 /// Unwrap the option with a custom error message.
 /// Panics with the given message if the option is None.
-pub fn expect<T>(opt: Option<T>, msg: string) -> T {
+pub fn expect<T>(opt: Option<T>, msg: String) -> T {
     match opt {
         Some(x) => x,
         None => :erlang::error(msg),
