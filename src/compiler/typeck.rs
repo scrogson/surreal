@@ -3127,6 +3127,18 @@ impl TypeChecker {
                 } else if self.env.get_struct(name).is_some() {
                     // It's a struct - single constructor
                     vec![Constructor::Struct(name.clone())]
+                } else if name == "Result" {
+                    // Built-in Result<T, E> enum: Ok(T) | Err(E)
+                    vec![
+                        Constructor::Variant("Result".to_string(), "Ok".to_string(), 1),
+                        Constructor::Variant("Result".to_string(), "Err".to_string(), 1),
+                    ]
+                } else if name == "Option" {
+                    // Built-in Option<T> enum: Some(T) | None
+                    vec![
+                        Constructor::Variant("Option".to_string(), "Some".to_string(), 1),
+                        Constructor::Variant("Option".to_string(), "None".to_string(), 0),
+                    ]
                 } else {
                     // Unknown named type - treat as non-exhaustive
                     vec![Constructor::NonExhaustive]

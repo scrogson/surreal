@@ -656,8 +656,6 @@ fn compile_modules_with_registry(
         beam_paths.push(stdlib_dir);
     }
     beam_paths.extend(dep_ebin_paths.iter().cloned());
-    eprintln!("[DEBUG] Macro beam paths: {:?}", beam_paths);
-    eprintln!("[DEBUG] Dep ebin paths: {:?}", dep_ebin_paths);
     let mut macro_registry = MacroRegistry::with_paths(beam_paths);
 
     // Load macros from dependencies (from .macros metadata files)
@@ -1004,8 +1002,6 @@ fn compile_modules_with_registry_and_options(
         beam_paths.push(stdlib_dir);
     }
     beam_paths.extend(dep_ebin_paths.iter().cloned());
-    eprintln!("[DEBUG] Macro beam paths: {:?}", beam_paths);
-    eprintln!("[DEBUG] Dep ebin paths: {:?}", dep_ebin_paths);
     let mut macro_registry = MacroRegistry::with_paths(beam_paths);
 
     // Load macros from dependencies (from .macros metadata files)
@@ -1388,7 +1384,6 @@ fn load_dependency_macros(
                             Ok(macros_file) => {
                                 for m in macros_file.macros {
                                     // Register under package name for qualified lookups
-                                    eprintln!("[DEBUG] Registering macro: {}::{} -> {}::{}", package_name, m.derive_name, m.module, m.function);
                                     macro_registry.register_package_macro(
                                         package_name,
                                         &m.derive_name,

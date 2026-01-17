@@ -757,7 +757,6 @@ impl DepsManager {
                     .join("lib")
                     .join(name)
                     .join("ebin");
-                eprintln!("[DEBUG] Path dep '{}': checking ebin at {:?} (exists: {})", name, ebin, ebin.exists());
                 if ebin.exists() {
                     paths.push(ebin);
                 }
