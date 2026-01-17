@@ -10,22 +10,9 @@ pub fn init(req: any, state: any) -> (atom, any, any) {
     let message = to_binary("Hello from Dream!");
     let data = {message: message};
 
-    // Use auto-generated jason bindings from _build/bindings/
-    match jason::encode(data, []) {
-        Ok(json) => {
-            let headers = {"content-type": "application/json"};
-            let req2 = cowboy_req::reply(200, headers, json, req);
-            (:ok, req2, state)
-        },
-        Err(_) => {
-            let headers = {"content-type": "text/plain"};
-            let req2 = cowboy_req::reply(500, headers, "JSON encoding error", req);
-            (:ok, req2, state)
-        },
-        _ => {
-            let headers = {"content-type": "text/plain"};
-            let req2 = cowboy_req::reply(500, headers, "Unexpected error", req);
-            (:ok, req2, state)
-        }
-    }
+    // Encode to JSON using serde_json
+    let json = serde_json::to_string_value(data);
+    let headers = {"content-type": "application/json"};
+    let req2 = cowboy_req::reply(200, headers, json, req);
+    (:ok, req2, state)
 }

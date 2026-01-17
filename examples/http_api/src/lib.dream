@@ -5,20 +5,19 @@
 //   src/
 //     lib.dream           - This file (root module)
 //     app.dream           - Application trait implementation
-//     bindings/           - Extern mod declarations for dependencies
-//       jason.dream       - Jason JSON library bindings
 //     handlers/
 //       hello.dream       - GET /api/hello handler
 //       users.dream       - GET /api/users handler
 //       not_found.dream   - 404 handler
 //
-// Auto-generated bindings are loaded from _build/bindings/*.dreamt
-// Run `dream deps bindgen` to regenerate bindings from dependency sources.
+// Dependencies:
+//   cowboy      - HTTP server
+//   serde       - Serialization framework
+//   serde_json  - JSON encoding using Erlang's json module
 
 mod app;
 mod bindings;
-mod cowboy;  // Auto-generated from _build/bindings/cowboy.dreamt
-mod jason;   // Auto-generated from _build/bindings/jason.dreamt
+mod cowboy;  // Auto-generated from _build/bindings/cowboy.dream
 mod handlers;
 mod models;  // Data models (User, etc.)
 mod tests;

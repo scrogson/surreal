@@ -1,0 +1,29 @@
+// Bindings to Erlang OTP json module (OTP 27+)
+//
+// The json module provides JSON encoding and decoding functions.
+// See: https://www.erlang.org/doc/apps/stdlib/json.html
+
+#[name = "json"]
+extern mod json {
+    /// Encode a term to a JSON binary string.
+    /// The term must be a valid JSON-compatible value:
+    /// - maps become JSON objects
+    /// - lists become JSON arrays
+    /// - binaries/strings become JSON strings
+    /// - integers/floats become JSON numbers
+    /// - true/false become JSON booleans
+    /// - null becomes JSON null
+    fn encode(term: Any) -> Binary;
+
+    /// Encode a term to a JSON binary string with options.
+    /// Options can include custom encoders.
+    fn encode(term: Any, encoder: Any) -> Binary;
+
+    /// Decode a JSON binary string to an Erlang term.
+    /// Returns a map for objects, list for arrays, etc.
+    fn decode(json: Binary) -> Any;
+
+    /// Decode a JSON binary string with options.
+    /// Options can include custom decoders.
+    fn decode(json: Binary, decoder: Any) -> Any;
+}

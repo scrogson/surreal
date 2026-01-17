@@ -1,0 +1,59 @@
+// serde_json - JSON serialization using Erlang's json module
+//
+// Provides JSON encoding for types implementing serde::Serialize.
+// Uses the Erlang OTP json module (OTP 27+) for actual JSON encoding.
+
+mod json;
+
+use serde::serialize::Serialize;
+use serde::serialize::serialize_value;
+
+/// Serialize a value to a JSON string.
+///
+/// The value must implement the Serialize trait.
+/// Returns the JSON as a binary string.
+///
+/// Example:
+/// ```
+/// #[derive(serde::Serialize)]
+/// pub struct User {
+///     id: int,
+///     name: String,
+/// }
+///
+/// let user = User { id: 1, name: "Alice" };
+/// let json_str = serde_json::to_string(user);
+/// // => "{\"id\":1,\"name\":\"Alice\"}"
+/// ```
+pub fn to_string<T: Serialize>(value: T) -> Binary {
+    let data = Serialize::serialize(value);
+    json::encode(data)
+}
+
+/// Serialize any value to a JSON string.
+///
+/// This function handles values that may or may not implement Serialize:
+/// - Structs with Serialize: calls their serialize method
+/// - Lists: recursively serializes elements
+/// - Maps: recursively serializes values
+/// - Primitives: encodes directly
+///
+/// Use `to_string` when you know the type implements Serialize.
+/// Use `to_string_value` for dynamic/unknown types.
+pub fn to_string_value(value: Any) -> Binary {
+    let data = serialize_value(value);
+    json::encode(data)
+}
+
+/// Decode a JSON string to an Erlang term.
+///
+/// Returns:
+/// - Maps for JSON objects
+/// - Lists for JSON arrays
+/// - Binaries for JSON strings
+/// - Numbers for JSON numbers
+/// - true/false for JSON booleans
+/// - null atom for JSON null
+pub fn from_str(json_str: Binary) -> Any {
+    json::decode(json_str)
+}

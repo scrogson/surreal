@@ -1,6 +1,6 @@
 // Handler for GET /api/users
 //
-// Demonstrates using the serde package for automatic JSON serialization.
+// Demonstrates using serde_json for automatic JSON serialization.
 
 use crate::models::user::User;
 use serde::serialize::serialize_value;
@@ -12,23 +12,9 @@ pub fn init(req: any, state: any) -> (atom, any, any) {
     let users = for (id, name) <- user_data, when id > 1 { User::new(id, name) };
     let data = {users: serialize_value(users)};
 
-    // Encode to JSON using Jason (data is already serialized by serialize_value)
-    // Note: jason::encode returns Any from an extern call, so we need a catch-all
-    match jason::encode(data, []) {
-        Ok(json) => {
-            let headers = {"content-type": "application/json"};
-            let req2 = cowboy_req::reply(200, headers, json, req);
-            (:ok, req2, state)
-        },
-        Err(_) => {
-            let headers = {"content-type": "text/plain"};
-            let req2 = cowboy_req::reply(500, headers, "JSON encoding error", req);
-            (:ok, req2, state)
-        },
-        _ => {
-            let headers = {"content-type": "text/plain"};
-            let req2 = cowboy_req::reply(500, headers, "Unexpected result", req);
-            (:ok, req2, state)
-        }
-    }
+    // Encode to JSON using serde_json (wraps Erlang's json module)
+    let json = serde_json::to_string_value(data);
+    let headers = {"content-type": "application/json"};
+    let req2 = cowboy_req::reply(200, headers, json, req);
+    (:ok, req2, state)
 }
