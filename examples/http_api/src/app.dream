@@ -8,11 +8,11 @@ impl Application {
     /// OTP Application start callback
     /// Called automatically when the application starts
     pub fn start(_type: Atom, _args: Any) -> Result<Pid, Any> {
-        let dispatch = compile_routes();
-
-        // Build the options map using maps::put
-        let env_map = :maps::put(:dispatch, dispatch, :maps::new());
-        let opts = :maps::put(:env, env_map, :maps::new());
+        let opts = {
+            env: {
+                dispatch: compile_routes(),
+            }
+        };
 
         // Start cowboy HTTP listener
         match :cowboy::start_clear(:http_listener, [(:port, 8080)], opts) {

@@ -3,18 +3,16 @@
 // Demonstrates using serde_json for automatic JSON serialization.
 
 use crate::models::user::User;
-use serde::serialize::serialize_value;
 
 pub fn init(req: Any, state: Any) -> (Atom, Any, Any) {
-    // Create users using a for comprehension with filter
-    // Only include users with id > 1 (filters out Alice)
-    let user_data = [(1, "Alice"), (2, "Bob"), (3, "Charlie")];
-    let users = for (id, name) <- user_data, when id > 1 { User::new(id, name) };
-    let data = {users: serialize_value(users)};
+    let data = [(1, "Alice"), (2, "Bob"), (3, "Charlie")];
 
-    // Encode to JSON using serde_json (wraps Erlang's json module)
-    let json = serde_json::to_string_value(data);
     let headers = {"content-type": "application/json"};
-    let req2 = cowboy_req::reply(200, headers, json, req);
-    (:ok, req2, state)
+    let json = serde_json::to_string_value({
+        data: for (id, name) <- data { User::new(id, name) }
+    });
+
+    let req = cowboy_req::reply(200, headers, json, req);
+
+    (:ok, req, state)
 }

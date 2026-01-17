@@ -1,18 +1,15 @@
 // Handler for GET /api/hello
 
-/// Convert a string (charlist) to binary for JSON encoding
-fn to_binary(s: String) -> Any {
-    :erlang::iolist_to_binary([s])
-}
-
 pub fn init(req: Any, state: Any) -> (Atom, Any, Any) {
-    // Build a map for JSON response
-    let message = to_binary("Hello from Dream!");
-    let data = {message: message};
+    let headers = {
+        "content-type": "application/json"
+    };
 
-    // Encode to JSON using serde_json
-    let json = serde_json::to_string_value(data);
-    let headers = {"content-type": "application/json"};
-    let req2 = cowboy_req::reply(200, headers, json, req);
-    (:ok, req2, state)
+    let json = serde_json::to_string_value({
+        message: "Hello from Dream!"
+    });
+
+    let req = cowboy_req::reply(200, headers, json, req);
+
+    (:ok, req, state)
 }
