@@ -1537,32 +1537,26 @@ impl TypeChecker {
                     return;
                 }
 
-                // Check if the module path refers to an extern module
+                // Check if the module path refers to an extern module or stdlib module
                 // e.g., `use jason::encode;` where `jason` is an extern module
+                // e.g., `use logger::info;` where `logger` is a stdlib module
                 if module.segments.len() >= 1 && module.prefix == PathPrefix::None {
                     let first_segment = &module.segments[0];
-                    // Skip if this is a Dream stdlib module - those are handled differently
-                    if Self::is_stdlib_module(first_segment) {
-                        return;
-                    }
-                    if self.env.is_extern_module(first_segment) {
-                        // This is an import from an extern module
+                    // Register imports from both extern and stdlib modules
+                    if Self::is_stdlib_module(first_segment) || self.env.is_extern_module(first_segment) {
                         let local_name = rename.clone().unwrap_or_else(|| name.clone());
                         self.env.add_extern_import(local_name, first_segment.clone(), name.clone());
                     }
                 }
             }
             UseTree::Group { module, items } => {
-                // Check if the module path refers to an extern module
+                // Check if the module path refers to an extern module or stdlib module
                 // e.g., `use jason::{encode, decode};`
+                // e.g., `use logger::{info, warn};`
                 if module.segments.len() >= 1 && module.prefix == PathPrefix::None {
                     let first_segment = &module.segments[0];
-                    // Skip if this is a Dream stdlib module - those are handled differently
-                    if Self::is_stdlib_module(first_segment) {
-                        return;
-                    }
-                    if self.env.is_extern_module(first_segment) {
-                        // This is a group import from an extern module
+                    // Register imports from both extern and stdlib modules
+                    if Self::is_stdlib_module(first_segment) || self.env.is_extern_module(first_segment) {
                         for item in items {
                             let local_name = item.rename.clone().unwrap_or_else(|| item.name.clone());
                             self.env.add_extern_import(local_name, first_segment.clone(), item.name.clone());
@@ -1571,16 +1565,12 @@ impl TypeChecker {
                 }
             }
             UseTree::Glob { module } => {
-                // Glob imports from extern modules aren't supported yet
-                // e.g., `use jason::*;` - we'd need to know all functions in the extern module
+                // Glob imports from extern/stdlib modules aren't fully supported yet
+                // e.g., `use jason::*;` - we'd need to know all functions in the module
                 if module.segments.len() >= 1 && module.prefix == PathPrefix::None {
                     let first_segment = &module.segments[0];
-                    // Skip if this is a Dream stdlib module
-                    if Self::is_stdlib_module(first_segment) {
-                        return;
-                    }
-                    if self.env.is_extern_module(first_segment) {
-                        // TODO: Could iterate over all registered extern functions for this module
+                    if Self::is_stdlib_module(first_segment) || self.env.is_extern_module(first_segment) {
+                        // TODO: Could iterate over all registered functions for this module
                         // and add them all as imports
                     }
                 }
@@ -2592,7 +2582,46 @@ impl TypeChecker {
                     // Apply substitutions to return type
                     Ok(self.apply_substitutions(&instantiated.ret))
                 } else if let Some((module, func_name)) = self.env.get_extern_import(name).cloned() {
-                    // This is an imported extern function: `use jason::encode; encode(data)`
+                    // This is an imported function: `use logger::info; info(msg)` or `use jason::encode; encode(data)`
+
+                    // For stdlib imports, look up as a Dream function
+                    if Self::is_stdlib_module(&module) {
+                        let qualified_name = format!("{}::{}", module, func_name);
+                        if let Some(info) = self.env.get_function(&qualified_name).cloned() {
+                            let instantiated = if !type_args.is_empty() {
+                                self.instantiate_function_with_args(&info, type_args, &qualified_name)?
+                            } else {
+                                self.instantiate_function(&info)
+                            };
+
+                            // Check argument count
+                            if args.len() != instantiated.params.len() {
+                                self.error(TypeError::new(format!(
+                                    "function '{}' expects {} arguments, got {}",
+                                    qualified_name,
+                                    instantiated.params.len(),
+                                    args.len()
+                                )));
+                            }
+
+                            // Check argument types
+                            for (arg, (_, param_ty)) in args.iter().zip(instantiated.params.iter()) {
+                                let arg_ty = self.infer_expr(arg)?;
+                                if self.unify(&arg_ty, param_ty).is_err()
+                                    && !self.types_compatible(&arg_ty, param_ty)
+                                {
+                                    self.error(TypeError::with_help(
+                                        format!("type mismatch in call to '{}'", name),
+                                        format!("expected {}, found {}", param_ty, arg_ty),
+                                    ));
+                                }
+                            }
+
+                            return Ok(self.apply_substitutions(&instantiated.ret));
+                        }
+                    }
+
+                    // For extern imports, look up as an extern function
                     let arity = args.len();
                     if let Some(info) = self.env.get_extern_function(&module, &func_name, arity).cloned() {
                         let instantiated = self.instantiate_function(&info);
@@ -2613,7 +2642,7 @@ impl TypeChecker {
                         return Ok(self.apply_substitutions(&instantiated.ret));
                     }
 
-                    // Unknown extern function - treat as any
+                    // Unknown function - treat as any
                     for arg in args {
                         self.infer_expr(arg)?;
                     }
@@ -3494,9 +3523,23 @@ impl TypeChecker {
                     }
                 }
 
-                // Check if this is an imported extern function: `use jason::encode; encode(data)`
+                // Check if this is an imported function: `use logger::info; info(msg)`
+                // or `use jason::encode; encode(data)`
                 if let Expr::Ident(name) = func.as_ref() {
                     if let Some((module, func_name)) = self.env.get_extern_import(name).cloned() {
+                        // If this is a stdlib module import, transform to Path call
+                        // so it gets the dream:: prefix in codegen
+                        if Self::is_stdlib_module(&module) {
+                            return Expr::Call {
+                                func: Box::new(Expr::Path {
+                                    segments: vec![module, func_name],
+                                }),
+                                type_args: type_args.clone(),
+                                inferred_type_args: vec![],
+                                args: annotated_args,
+                            };
+                        }
+
                         // Transform to ExternCall with Result wrapping if needed
                         let arity = args.len();
                         if let Some(info) = self.env.get_extern_function(&module, &func_name, arity).cloned() {

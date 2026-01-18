@@ -1629,7 +1629,14 @@ fn stdlib_beam_dir() -> PathBuf {
         if let Some(exe_dir) = exe_path.parent() {
             // Executable is at target/release/dream or target/debug/dream
             // Stdlib should be at target/stdlib
-            return exe_dir.join("../stdlib");
+            let stdlib_path = exe_dir.join("../stdlib");
+            // Canonicalize to resolve .. and ensure consistent path comparison
+            if let Ok(canonical) = stdlib_path.canonicalize() {
+                return canonical;
+            }
+            // If canonicalize fails (dir doesn't exist yet), create it and return the path
+            let _ = fs::create_dir_all(&stdlib_path);
+            return stdlib_path.canonicalize().unwrap_or(stdlib_path);
         }
     }
     // Fallback to relative path
@@ -1735,7 +1742,13 @@ fn collect_dream_files_recursive(dir: &Path) -> Vec<PathBuf> {
 
 /// Convert a stdlib file path to its module name.
 /// e.g., stdlib/erlang/std/logger.dream -> dream::erlang::std::logger
+/// Returns None for mod.dream files (module declaration files, not module sources).
 fn stdlib_path_to_module_name(stdlib_dir: &Path, path: &Path) -> Option<String> {
+    // Skip mod.dream files - they're module declaration files, not module sources
+    if path.file_stem().and_then(|s| s.to_str()) == Some("mod") {
+        return None;
+    }
+
     let relative = path.strip_prefix(stdlib_dir).ok()?;
     let stem = relative.with_extension("");
     let module_path = stem

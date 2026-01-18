@@ -6007,4 +6007,57 @@ mod tests {
             result
         );
     }
+
+    #[test]
+    fn test_stdlib_import_gets_dream_prefix() {
+        // `use logger::info; info(msg)` should compile to 'dream::logger':'info'
+        // just like `logger::info(msg)` does.
+        let source = r#"
+            mod test {
+                use logger::info;
+
+                pub fn log_message(msg: String) -> Atom {
+                    info(msg)
+                }
+            }
+        "#;
+
+        let result = emit_core_erlang(source).unwrap();
+
+        // Should call dream::logger, NOT bare logger
+        assert!(
+            result.contains("call 'dream::logger':'info'"),
+            "Expected 'dream::logger':'info' for stdlib import but got:\n{}",
+            result
+        );
+        // Make sure it's NOT calling the bare Erlang logger module
+        assert!(
+            !result.contains("call 'logger':'info'("),
+            "Should NOT call bare 'logger':'info', got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_stdlib_group_import_gets_dream_prefix() {
+        // `use io::{println, print}; println(msg)` should compile to 'dream::io':'println'
+        let source = r#"
+            mod test {
+                use io::{println};
+
+                pub fn log_message(msg: String) -> Atom {
+                    println(msg)
+                }
+            }
+        "#;
+
+        let result = emit_core_erlang(source).unwrap();
+
+        // Should call dream::io
+        assert!(
+            result.contains("call 'dream::io':'println'"),
+            "Expected 'dream::io':'println' for stdlib group import but got:\n{}",
+            result
+        );
+    }
 }
