@@ -7,6 +7,15 @@ impl Application {
     /// OTP Application start callback
     /// Called automatically when the application starts
     pub fn start(_type: Atom, _args: Any) -> Result<Pid, Any> {
+        // Configure logger with clean single-line format
+        :logger::set_primary_config(:level, :info);
+        let formatter_config = :maps::from_list([
+            (:single_line, true),
+            (:legacy_header, false),
+            (:template, [:time, " [", :level, "] ", :msg, "\n"])
+        ]);
+        :logger::update_handler_config(:default, :formatter, (:logger_formatter, formatter_config));
+
         let opts = {
             env: {
                 dispatch: compile_routes(),

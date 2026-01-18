@@ -196,3 +196,40 @@ pub fn unset_module_level(modules: [Atom]) -> Atom {
 pub fn reset_module_levels() -> Atom {
     erl_logger::unset_module_level()
 }
+
+// ============== Formatter Configuration ==============
+
+/// Configure the default handler with a clean, single-line format.
+/// Call this at application startup for nicer log output.
+///
+/// Example output:
+///   2026-01-17T22:15:30.123 [info] Server started on http://localhost:8080
+pub fn setup() -> Atom {
+    // Set level to info (default is notice)
+    :logger::set_primary_config(:level, :info);
+
+    // Configure formatter for single-line output
+    // Using maps:from_list to ensure atom keys
+    let formatter_config = :maps::from_list([
+        (:single_line, true),
+        (:legacy_header, false),
+        (:template, [:time, " [", :level, "] ", :msg, "\n"])
+    ]);
+
+    :logger::update_handler_config(:default, :formatter, (:logger_formatter, formatter_config));
+    :ok
+}
+
+/// Configure logger with debug level and clean format.
+pub fn setup_debug() -> Atom {
+    :logger::set_primary_config(:level, :debug);
+
+    let formatter_config = :maps::from_list([
+        (:single_line, true),
+        (:legacy_header, false),
+        (:template, [:time, " [", :level, "] ", :msg, "\n"])
+    ]);
+
+    :logger::update_handler_config(:default, :formatter, (:logger_formatter, formatter_config));
+    :ok
+}
