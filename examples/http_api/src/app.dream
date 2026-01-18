@@ -25,14 +25,14 @@ impl Application {
         // Start cowboy HTTP listener
         match :cowboy::start_clear(:http_listener, [(:port, 8080)], opts) {
             (:ok, pid) => {
-                logger::info("Server started on http://localhost:8080");
-                logger::info("Try: curl http://localhost:8080/api/hello");
-                logger::info("     curl http://localhost:8080/api/users");
+                :logger::info("Server started on http://localhost:8080");
+                :logger::info("Try: curl http://localhost:8080/api/hello");
+                :logger::info("     curl http://localhost:8080/api/users");
 
                 Ok(pid)
             },
             (:error, reason) => {
-                logger::error("Failed to start server");
+                :logger::error("Failed to start server");
                 Err(reason)
             },
             _ => Err(:unknown_error)
@@ -41,7 +41,7 @@ impl Application {
 
     /// OTP Application stop callback
     pub fn stop(_state: Pid) -> Atom {
-        logger::info("Stopping HTTP listener");
+        :logger::info("Stopping HTTP listener");
         :cowboy::stop_listener(:http_listener);
         :ok
     }

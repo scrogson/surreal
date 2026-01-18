@@ -14,5 +14,9 @@ pub fn init(req: Map, state: Any) -> (Atom, Map, Any) {
 
     let req = cowboy_req::reply(200, headers, json, req);
 
+    let count = list::len(data);
+    let msg = :io_lib::format("Responded with user list JSON with ~B users", [count]);
+    :logger::info(msg);
+
     (:ok, req, state)
 }
