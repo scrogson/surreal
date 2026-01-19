@@ -406,8 +406,8 @@ mod tests {
             name: "Point".to_string(),
             type_params: vec![],
             fields: vec![
-                ("x".to_string(), Type::Int),
-                ("y".to_string(), Type::Int),
+                ("x".to_string(), SpannedType::unspanned(Type::Int)),
+                ("y".to_string(), SpannedType::unspanned(Type::Int)),
             ],
             attrs: vec![],
             span: 0..0,

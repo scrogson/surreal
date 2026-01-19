@@ -346,6 +346,56 @@ impl std::ops::DerefMut for SpannedExpr {
     }
 }
 
+// =============================================================================
+// SpannedType - Type with source location
+// =============================================================================
+
+/// A type annotation with its span in the source code.
+/// This enables LSP features like hover on type annotations and go-to-definition.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpannedType {
+    pub ty: Type,
+    pub span: Span,
+}
+
+impl SpannedType {
+    /// Create a new spanned type.
+    pub fn new(ty: Type, span: Span) -> Self {
+        Self { ty, span }
+    }
+
+    /// Create a spanned type with a dummy span.
+    /// Used during AST transformations or when span is not available.
+    pub fn unspanned(ty: Type) -> Self {
+        Self { ty, span: 0..0 }
+    }
+
+    /// Get the inner type.
+    pub fn inner(&self) -> &Type {
+        &self.ty
+    }
+
+    /// Convert into the inner type, discarding the span.
+    pub fn into_inner(self) -> Type {
+        self.ty
+    }
+}
+
+// Implement Deref to allow using SpannedType like Type in most contexts
+impl std::ops::Deref for SpannedType {
+    type Target = Type;
+
+    fn deref(&self) -> &Self::Target {
+        &self.ty
+    }
+}
+
+impl std::ops::DerefMut for SpannedType {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.ty
+    }
+}
+
 /// A module declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Module {
@@ -395,7 +445,7 @@ pub struct TypeAlias {
     /// Generic type parameters (e.g., `<T, E>`)
     pub type_params: Vec<TypeParam>,
     /// The aliased type
-    pub ty: Type,
+    pub ty: SpannedType,
     pub is_pub: bool,
 }
 
@@ -433,8 +483,8 @@ pub struct ExternFn {
     pub attrs: Vec<Attribute>,
     pub name: String,
     pub type_params: Vec<TypeParam>,
-    pub params: Vec<(String, Type)>,
-    pub return_type: Type,
+    pub params: Vec<(String, SpannedType)>,
+    pub return_type: SpannedType,
 }
 
 /// External opaque type declaration.
@@ -474,7 +524,7 @@ pub struct TraitMethod {
     /// Generic type parameters with optional bounds
     pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
-    pub return_type: Option<Type>,
+    pub return_type: Option<SpannedType>,
     /// Optional default implementation body
     pub body: Option<Block>,
 }
@@ -493,10 +543,10 @@ pub struct TypeParam {
 pub struct TraitImpl {
     pub trait_name: String,
     /// Type arguments for parameterized traits (e.g., `int` in `impl From<int> for MyType`)
-    pub trait_type_args: Vec<Type>,
+    pub trait_type_args: Vec<SpannedType>,
     pub type_name: String,
     /// Associated type bindings (e.g., `type State = int;`)
-    pub type_bindings: Vec<(String, Type)>,
+    pub type_bindings: Vec<(String, SpannedType)>,
     pub methods: Vec<Function>,
     /// Source span for LSP features
     pub span: Span,
@@ -511,7 +561,7 @@ pub struct TraitDecl {
     /// The trait being implemented (possibly module-qualified)
     pub trait_name: String,
     /// Associated type bindings (e.g., `type State = int;`)
-    pub type_bindings: Vec<(String, Type)>,
+    pub type_bindings: Vec<(String, SpannedType)>,
 }
 
 /// External module declaration.
@@ -565,7 +615,7 @@ pub struct Function {
     pub params: Vec<Param>,
     /// Guard clause: `when <expr>`
     pub guard: Option<Box<SpannedExpr>>,
-    pub return_type: Option<Type>,
+    pub return_type: Option<SpannedType>,
     pub body: Block,
     pub is_pub: bool,
     /// Source span for error reporting
@@ -576,7 +626,7 @@ pub struct Function {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Param {
     pub pattern: Pattern,
-    pub ty: Type,
+    pub ty: SpannedType,
 }
 
 /// A block of statements with optional trailing expression.
@@ -594,7 +644,7 @@ pub enum Stmt {
     /// Let binding: `let pattern: type = value;` or `let pattern = value else { ... };`
     Let {
         pattern: Pattern,
-        ty: Option<Type>,
+        ty: Option<SpannedType>,
         value: SpannedExpr,
         /// Optional else block for `let else` syntax (must diverge)
         else_block: Option<Block>,
@@ -1057,7 +1107,7 @@ pub struct StructDef {
     pub name: String,
     /// Generic type parameters with optional bounds (e.g., `<T: Display>`)
     pub type_params: Vec<TypeParam>,
-    pub fields: Vec<(String, Type)>,
+    pub fields: Vec<(String, SpannedType)>,
     pub is_pub: bool,
     /// Source span for LSP features
     pub span: Span,
@@ -1083,9 +1133,9 @@ pub enum VariantKind {
     /// Unit variant: `None`
     Unit,
     /// Tuple variant: `Some(T)`
-    Tuple(Vec<Type>),
+    Tuple(Vec<SpannedType>),
     /// Struct variant: `Move { x: Int, y: Int }`
-    Struct(Vec<(String, Type)>),
+    Struct(Vec<(String, SpannedType)>),
 }
 
 /// Arguments for enum variant construction expressions.

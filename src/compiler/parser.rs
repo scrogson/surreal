@@ -174,7 +174,7 @@ impl<'source> Parser<'source> {
             type_params: vec![],
             params: vec![],
             guard: None,
-            return_type: Some(Type::Any),
+            return_type: Some(SpannedType::unspanned(Type::Any)),
             body: Block { stmts, expr, span: start_span.start..self.current_span().end },
             is_pub: true,
             span: Span {
@@ -433,7 +433,7 @@ impl<'source> Parser<'source> {
         };
 
         self.expect(&Token::Eq)?;
-        let ty = self.parse_type()?;
+        let ty = self.parse_spanned_type()?;
         self.expect(&Token::Semi)?;
 
         Ok(TypeAlias {
@@ -511,7 +511,7 @@ impl<'source> Parser<'source> {
             while !self.check(&Token::RParen) {
                 let param_name = self.expect_ident()?;
                 self.expect(&Token::Colon)?;
-                let param_type = self.parse_type()?;
+                let param_type = self.parse_spanned_type()?;
                 params.push((param_name, param_type));
                 if !self.check(&Token::RParen) {
                     self.expect(&Token::Comma)?;
@@ -521,9 +521,9 @@ impl<'source> Parser<'source> {
 
             let return_type = if self.check(&Token::Arrow) {
                 self.advance();
-                self.parse_type()?
+                self.parse_spanned_type()?
             } else {
-                Type::Unit
+                SpannedType::unspanned(Type::Unit)
             };
 
             self.expect(&Token::Semi)?;
@@ -553,7 +553,7 @@ impl<'source> Parser<'source> {
         let first_name = self.parse_possibly_qualified_type_name()?;
 
         // Parse optional type arguments for parameterized traits: impl From<int> for ...
-        let trait_type_args = self.parse_type_args()?;
+        let trait_type_args = self.parse_spanned_type_args()?;
 
         // Check for module-level trait declaration: `impl Trait;` or `impl Trait { type X = T; }`
         if self.check(&Token::Semi) {
@@ -726,11 +726,11 @@ impl<'source> Parser<'source> {
     }
 
     /// Parse a type binding in a trait impl: `type State = int;`
-    fn parse_type_binding(&mut self) -> ParseResult<(String, Type)> {
+    fn parse_type_binding(&mut self) -> ParseResult<(String, SpannedType)> {
         self.expect(&Token::Type)?;
         let name = self.expect_type_ident()?;
         self.expect(&Token::Eq)?;
-        let ty = self.parse_type()?;
+        let ty = self.parse_spanned_type()?;
         self.expect(&Token::Semi)?;
         Ok((name, ty))
     }
@@ -758,7 +758,7 @@ impl<'source> Parser<'source> {
 
         let return_type = if self.check(&Token::Arrow) {
             self.advance();
-            Some(self.parse_type()?)
+            Some(self.parse_spanned_type()?)
         } else {
             None
         };
@@ -994,7 +994,7 @@ impl<'source> Parser<'source> {
 
         let return_type = if self.check(&Token::Arrow) {
             self.advance();
-            Some(self.parse_type()?)
+            Some(self.parse_spanned_type()?)
         } else {
             None
         };
@@ -1027,13 +1027,13 @@ impl<'source> Parser<'source> {
             // Optional type annotation for self
             let ty = if self.check(&Token::Colon) {
                 self.advance();
-                self.parse_type()?
+                self.parse_spanned_type()?
             } else {
                 // Use `Self` as placeholder type (resolved during codegen)
-                Type::Named {
+                SpannedType::unspanned(Type::Named {
                     name: "Self".to_string(),
                     type_args: vec![],
-                }
+                })
             };
 
             return Ok(Param { pattern, ty });
@@ -1044,10 +1044,10 @@ impl<'source> Parser<'source> {
         // Type is optional for literal patterns (type can be inferred)
         let ty = if self.check(&Token::Colon) {
             self.advance();
-            self.parse_type()?
+            self.parse_spanned_type()?
         } else {
             // Infer type from pattern for literals
-            match &pattern {
+            let inferred_ty = match &pattern {
                 Pattern::Int(_) => Type::Named {
                     name: "int".to_string(),
                     type_args: vec![],
@@ -1084,7 +1084,8 @@ impl<'source> Parser<'source> {
                         span,
                     ));
                 }
-            }
+            };
+            SpannedType::unspanned(inferred_ty)
         };
 
         Ok(Param { pattern, ty })
@@ -1119,7 +1120,7 @@ impl<'source> Parser<'source> {
                 self.expect_ident()?
             };
             self.expect(&Token::Colon)?;
-            let field_type = self.parse_type()?;
+            let field_type = self.parse_spanned_type()?;
             fields.push((field_name, field_type));
 
             if self.check(&Token::Comma) {
@@ -1160,7 +1161,7 @@ impl<'source> Parser<'source> {
                 let mut fs = Vec::new();
                 if !self.check(&Token::RParen) {
                     loop {
-                        fs.push(self.parse_type()?);
+                        fs.push(self.parse_spanned_type()?);
                         if !self.check(&Token::Comma) {
                             break;
                         }
@@ -1176,7 +1177,7 @@ impl<'source> Parser<'source> {
                 while !self.check(&Token::RBrace) && !self.is_at_end() {
                     let field_name = self.expect_ident()?;
                     self.expect(&Token::Colon)?;
-                    let field_type = self.parse_type()?;
+                    let field_type = self.parse_spanned_type()?;
                     fields.push((field_name, field_type));
 
                     if self.check(&Token::Comma) {
@@ -1376,7 +1377,7 @@ impl<'source> Parser<'source> {
 
         let ty = if self.check(&Token::Colon) {
             self.advance();
-            Some(self.parse_type()?)
+            Some(self.parse_spanned_type()?)
         } else {
             None
         };
@@ -3381,6 +3382,36 @@ impl<'source> Parser<'source> {
         Ok(args)
     }
 
+    /// Parse optional type arguments with span information: `<int, String>`.
+    /// Returns empty Vec if no type arguments present.
+    fn parse_spanned_type_args(&mut self) -> ParseResult<Vec<SpannedType>> {
+        if !self.check(&Token::Lt) {
+            return Ok(Vec::new());
+        }
+        self.advance(); // consume '<'
+
+        let mut args = Vec::new();
+        loop {
+            args.push(self.parse_spanned_type()?);
+
+            if !self.check(&Token::Comma) {
+                break;
+            }
+            self.advance(); // consume ','
+        }
+
+        self.expect_gt()?; // Use expect_gt to handle >> as two > tokens
+        Ok(args)
+    }
+
+    /// Parse a type with span information.
+    fn parse_spanned_type(&mut self) -> ParseResult<SpannedType> {
+        let start = self.current_span().start;
+        let ty = self.parse_type()?;
+        let end = self.previous_span().end;
+        Ok(SpannedType::new(ty, start..end))
+    }
+
     /// Parse a type.
     fn parse_type(&mut self) -> ParseResult<Type> {
         // Parse primary type, then check for union (|)
@@ -4447,7 +4478,7 @@ mod tests {
             assert_eq!(e.variants[0].name, "Some");
             // The field type should be a TypeVar "T"
             if let VariantKind::Tuple(fields) = &e.variants[0].kind {
-                if let Type::Named { name, type_args } = &fields[0] {
+                if let Type::Named { name, type_args } = &fields[0].ty {
                     assert_eq!(name, "T");
                     assert!(type_args.is_empty());
                 } else {
@@ -4510,7 +4541,7 @@ mod tests {
             assert_eq!(f.params.len(), 2);
 
             // First param should have type Option<T>
-            if let Type::Named { name, type_args } = &f.params[0].ty {
+            if let Type::Named { name, type_args } = &f.params[0].ty.ty {
                 assert_eq!(name, "Option");
                 assert_eq!(type_args.len(), 1);
             } else {
@@ -4518,9 +4549,13 @@ mod tests {
             }
 
             // Return type should be Option<U>
-            if let Some(Type::Named { name, type_args }) = &f.return_type {
-                assert_eq!(name, "Option");
-                assert_eq!(type_args.len(), 1);
+            if let Some(rt) = &f.return_type {
+                if let Type::Named { name, type_args } = &rt.ty {
+                    assert_eq!(name, "Option");
+                    assert_eq!(type_args.len(), 1);
+                } else {
+                    panic!("expected Named return type");
+                }
             } else {
                 panic!("expected return type");
             }
@@ -4654,7 +4689,7 @@ mod tests {
 
         if let Item::Function(f) = first_user_item(&module) {
             // Param type should be Result<Option<int>, String>
-            if let Type::Named { name, type_args } = &f.params[0].ty {
+            if let Type::Named { name, type_args } = &f.params[0].ty.ty {
                 assert_eq!(name, "Result");
                 assert_eq!(type_args.len(), 2);
 
@@ -5061,7 +5096,7 @@ mod tests {
 
         if let Item::Function(f) = first_user_item(&module) {
             assert_eq!(f.name, "returns_ok");
-            assert!(matches!(f.return_type, Some(Type::AtomLiteral(ref s)) if s == "ok"));
+            assert!(matches!(&f.return_type, Some(rt) if matches!(&rt.ty, Type::AtomLiteral(s) if s == "ok")));
         } else {
             panic!("expected function");
         }
@@ -5081,12 +5116,16 @@ mod tests {
 
         if let Item::Function(f) = first_user_item(&module) {
             assert_eq!(f.name, "maybe_fail");
-            if let Some(Type::Union(variants)) = &f.return_type {
-                assert_eq!(variants.len(), 2);
-                assert!(matches!(&variants[0], Type::AtomLiteral(s) if s == "ok"));
-                assert!(matches!(&variants[1], Type::AtomLiteral(s) if s == "error"));
+            if let Some(rt) = &f.return_type {
+                if let Type::Union(variants) = &rt.ty {
+                    assert_eq!(variants.len(), 2);
+                    assert!(matches!(&variants[0], Type::AtomLiteral(s) if s == "ok"));
+                    assert!(matches!(&variants[1], Type::AtomLiteral(s) if s == "error"));
+                } else {
+                    panic!("expected union type, got {:?}", rt.ty);
+                }
             } else {
-                panic!("expected union type, got {:?}", f.return_type);
+                panic!("expected return type");
             }
         } else {
             panic!("expected function");
@@ -5106,12 +5145,16 @@ mod tests {
         let module = parser.parse_module().unwrap();
 
         if let Item::Function(f) = first_user_item(&module) {
-            if let Some(Type::Union(variants)) = &f.return_type {
-                assert_eq!(variants.len(), 2);
-                assert!(matches!(&variants[0], Type::Int));
-                assert!(matches!(&variants[1], Type::String));
+            if let Some(rt) = &f.return_type {
+                if let Type::Union(variants) = &rt.ty {
+                    assert_eq!(variants.len(), 2);
+                    assert!(matches!(&variants[0], Type::Int));
+                    assert!(matches!(&variants[1], Type::String));
+                } else {
+                    panic!("expected union type, got {:?}", rt.ty);
+                }
             } else {
-                panic!("expected union type, got {:?}", f.return_type);
+                panic!("expected return type");
             }
         } else {
             panic!("expected function");
@@ -5131,13 +5174,17 @@ mod tests {
         let module = parser.parse_module().unwrap();
 
         if let Item::Function(f) = first_user_item(&module) {
-            if let Some(Type::Union(variants)) = &f.return_type {
-                assert_eq!(variants.len(), 3);
-                assert!(matches!(&variants[0], Type::AtomLiteral(s) if s == "a"));
-                assert!(matches!(&variants[1], Type::AtomLiteral(s) if s == "b"));
-                assert!(matches!(&variants[2], Type::AtomLiteral(s) if s == "c"));
+            if let Some(rt) = &f.return_type {
+                if let Type::Union(variants) = &rt.ty {
+                    assert_eq!(variants.len(), 3);
+                    assert!(matches!(&variants[0], Type::AtomLiteral(s) if s == "a"));
+                    assert!(matches!(&variants[1], Type::AtomLiteral(s) if s == "b"));
+                    assert!(matches!(&variants[2], Type::AtomLiteral(s) if s == "c"));
+                } else {
+                    panic!("expected union type, got {:?}", rt.ty);
+                }
             } else {
-                panic!("expected union type, got {:?}", f.return_type);
+                panic!("expected return type");
             }
         } else {
             panic!("expected function");
@@ -5163,7 +5210,7 @@ mod tests {
 
             let (status_name, status_type) = &s.fields[0];
             assert_eq!(status_name, "status");
-            if let Type::Union(variants) = status_type {
+            if let Type::Union(variants) = &status_type.ty {
                 assert_eq!(variants.len(), 2);
             } else {
                 panic!("expected union type for status field");
@@ -5190,7 +5237,7 @@ mod tests {
             assert!(!alias.is_pub);
             assert!(alias.type_params.is_empty());
             // int is a primitive type, not a Named type
-            assert_eq!(alias.ty, Type::Int);
+            assert_eq!(alias.ty.ty, Type::Int);
         } else {
             panic!("expected type alias");
         }
@@ -5209,7 +5256,7 @@ mod tests {
         if let Item::TypeAlias(alias) = first_user_item(&module) {
             assert_eq!(alias.name, "ApiResponse");
             assert!(alias.is_pub);
-            if let Type::Union(variants) = &alias.ty {
+            if let Type::Union(variants) = &alias.ty.ty {
                 assert_eq!(variants.len(), 2);
             } else {
                 panic!("expected union type");
@@ -5231,7 +5278,7 @@ mod tests {
 
         if let Item::TypeAlias(alias) = first_user_item(&module) {
             assert_eq!(alias.name, "Status");
-            if let Type::Union(variants) = &alias.ty {
+            if let Type::Union(variants) = &alias.ty.ty {
                 assert_eq!(variants.len(), 3);
             } else {
                 panic!("expected union type");
@@ -5253,7 +5300,7 @@ mod tests {
 
         if let Item::TypeAlias(alias) = first_user_item(&module) {
             assert_eq!(alias.name, "Point");
-            if let Type::Tuple(elems) = &alias.ty {
+            if let Type::Tuple(elems) = &alias.ty.ty {
                 assert_eq!(elems.len(), 2);
             } else {
                 panic!("expected tuple type");
@@ -5277,7 +5324,7 @@ mod tests {
             assert_eq!(alias.name, "MyResult");
             assert_eq!(alias.type_params.len(), 1);
             assert_eq!(alias.type_params[0].name, "T");
-            if let Type::Union(_) = &alias.ty {
+            if let Type::Union(_) = &alias.ty.ty {
                 // Good - it's a union type
             } else {
                 panic!("expected union type");
@@ -5319,7 +5366,7 @@ mod tests {
 
         if let Item::TypeAlias(alias) = first_user_item(&module) {
             assert_eq!(alias.name, "Handler");
-            if let Type::Fn { params, ret } = &alias.ty {
+            if let Type::Fn { params, ret } = &alias.ty.ty {
                 assert_eq!(params.len(), 1);
                 assert_eq!(params[0], Type::Int);
                 // string is a primitive type
@@ -5936,10 +5983,14 @@ mod repl_edit {
             if let Some(Expr::QuoteItem(item)) = f.body.expr.as_deref().map(|e| e.inner()) {
                 if let Item::Function(quoted_func) = item.as_ref() {
                     // The return type should be an unquote marker
-                    if let Some(Type::Named { name, .. }) = &quoted_func.return_type {
-                        assert_eq!(name, "$UNQUOTE:ret_type");
+                    if let Some(rt) = &quoted_func.return_type {
+                        if let Type::Named { name, .. } = &rt.ty {
+                            assert_eq!(name, "$UNQUOTE:ret_type");
+                        } else {
+                            panic!("expected named type with unquote marker, got {:?}", rt.ty);
+                        }
                     } else {
-                        panic!("expected named type with unquote marker, got {:?}", quoted_func.return_type);
+                        panic!("expected return type");
                     }
                 } else {
                     panic!("expected quoted function, got {:?}", item);

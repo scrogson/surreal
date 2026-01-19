@@ -1551,7 +1551,7 @@ fn term_to_stmt(term: &Term) -> TermParseResult<Stmt> {
             let ty = if is_none(&tuple[2]) {
                 None
             } else {
-                Some(term_to_type(&tuple[2])?)
+                Some(SpannedType::unspanned(term_to_type(&tuple[2])?))
             };
             let value = SpannedExpr::unspanned(term_to_expr(&tuple[3])?);
             let else_block = if tuple.len() > 4 && !is_none(&tuple[4]) {
@@ -1799,7 +1799,7 @@ pub fn term_to_function(term: &Term) -> TermParseResult<Function> {
     let return_type = if is_none(&tuple[4]) {
         None
     } else {
-        Some(term_to_type(&tuple[4])?)
+        Some(SpannedType::unspanned(term_to_type(&tuple[4])?))
     };
     let body = term_to_block(&tuple[5])?;
 
@@ -1820,7 +1820,7 @@ pub fn term_to_function(term: &Term) -> TermParseResult<Function> {
 fn term_to_param(term: &Term) -> TermParseResult<Param> {
     let tuple = expect_tuple(term)?;
     let pattern = term_to_pattern(&tuple[0])?;
-    let ty = term_to_type(&tuple[1])?;
+    let ty = SpannedType::unspanned(term_to_type(&tuple[1])?);
     Ok(Param { pattern, ty })
 }
 
@@ -1975,8 +1975,8 @@ mod tests {
             name: "Point".to_string(),
             type_params: vec![],
             fields: vec![
-                ("x".to_string(), Type::Int),
-                ("y".to_string(), Type::Int),
+                ("x".to_string(), SpannedType::unspanned(Type::Int)),
+                ("y".to_string(), SpannedType::unspanned(Type::Int)),
             ],
             attrs: vec![],
             span: 0..0,
@@ -2165,8 +2165,8 @@ mod tests {
             name: "User".to_string(),
             type_params: vec![],
             fields: vec![
-                ("id".to_string(), Type::Int),
-                ("name".to_string(), Type::String),
+                ("id".to_string(), SpannedType::unspanned(Type::Int)),
+                ("name".to_string(), SpannedType::unspanned(Type::String)),
             ],
             attrs: vec![],
             span: 0..0,
@@ -2191,7 +2191,7 @@ mod tests {
                 TypeParam { name: "T".to_string(), bounds: vec![] },
             ],
             fields: vec![
-                ("value".to_string(), Type::TypeVar("T".to_string())),
+                ("value".to_string(), SpannedType::unspanned(Type::TypeVar("T".to_string()))),
             ],
             attrs: vec![],
             span: 0..0,
@@ -2212,7 +2212,7 @@ mod tests {
                 TypeParam { name: "T".to_string(), bounds: vec![] },
             ],
             variants: vec![
-                EnumVariant { name: "Some".to_string(), kind: VariantKind::Tuple(vec![Type::TypeVar("T".to_string())]) },
+                EnumVariant { name: "Some".to_string(), kind: VariantKind::Tuple(vec![SpannedType::unspanned(Type::TypeVar("T".to_string()))]) },
                 EnumVariant { name: "None".to_string(), kind: VariantKind::Unit },
             ],
             attrs: vec![],

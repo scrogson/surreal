@@ -1130,7 +1130,7 @@ fn make_method(
         type_params: vec![],
         params,
         guard: None,
-        return_type,
+        return_type: return_type.map(SpannedType::unspanned),
         body: Block {
             stmts: vec![],
             expr: Some(SpannedExpr::boxed(body_expr)),
@@ -1145,7 +1145,7 @@ fn make_method(
 fn make_self_param() -> Param {
     Param {
         pattern: Pattern::Ident("self".to_string()),
-        ty: Type::Any, // Type will be inferred
+        ty: SpannedType::unspanned(Type::Any), // Type will be inferred
     }
 }
 
@@ -1153,7 +1153,7 @@ fn make_self_param() -> Param {
 fn make_param(name: &str, ty: Type) -> Param {
     Param {
         pattern: Pattern::Ident(name.to_string()),
-        ty,
+        ty: SpannedType::unspanned(ty),
     }
 }
 
@@ -1176,7 +1176,7 @@ mod tests {
             type_params: vec![],
             fields: fields
                 .into_iter()
-                .map(|(n, t)| (n.to_string(), t))
+                .map(|(n, t)| (n.to_string(), SpannedType::unspanned(t)))
                 .collect(),
             is_pub: true,
             span: 0..0,
@@ -1241,7 +1241,7 @@ mod tests {
 
         assert_eq!(method.name, "debug");
         assert_eq!(method.params.len(), 1);
-        assert!(matches!(method.return_type, Some(Type::String)));
+        assert!(matches!(method.return_type, Some(ref rt) if matches!(rt.ty, Type::String)));
     }
 
     #[test]
@@ -1269,7 +1269,7 @@ mod tests {
 
         assert_eq!(method.name, "eq");
         assert_eq!(method.params.len(), 2); // self and other
-        assert!(matches!(method.return_type, Some(Type::Bool)));
+        assert!(matches!(method.return_type, Some(ref rt) if matches!(rt.ty, Type::Bool)));
     }
 
     #[test]
@@ -1278,7 +1278,7 @@ mod tests {
 
         assert_eq!(method.name, "hash");
         assert_eq!(method.params.len(), 1);
-        assert!(matches!(method.return_type, Some(Type::Int)));
+        assert!(matches!(method.return_type, Some(ref rt) if matches!(rt.ty, Type::Int)));
     }
 
     #[test]

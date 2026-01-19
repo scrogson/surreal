@@ -69,7 +69,7 @@ pub type SharedGenericRegistry = Arc<RwLock<GenericFunctionRegistry>>;
 use crate::compiler::ast::{
     BinOp, BitEndianness, BitSegmentType, BitSignedness, BitStringSegment, Block,
     EnumPatternFields, EnumVariant, EnumVariantArgs, Expr, ForClause, Function, Item, MatchArm,
-    Module, ModuleContext, ModulePath, PathPrefix, Pattern, SpannedExpr, Stmt, StringPart, TraitDef, TraitImpl,
+    Module, ModuleContext, ModulePath, PathPrefix, Pattern, SpannedExpr, SpannedType, Stmt, StringPart, TraitDef, TraitImpl,
     Type, UnaryOp, UseDecl, UseTree, VariantKind,
 };
 use crate::compiler::typeck::StructInfo;
@@ -391,13 +391,13 @@ impl CoreErlangEmitter {
     }
 
     /// Check if a return type is Result<T, E>.
-    fn is_result_type(ty: &Option<Type>) -> bool {
-        matches!(ty, Some(Type::Named { name, .. }) if name == "Result")
+    fn is_result_type(ty: &Option<SpannedType>) -> bool {
+        matches!(ty.as_ref().map(|t| &t.ty), Some(Type::Named { name, .. }) if name == "Result")
     }
 
     /// Check if a return type is Option<T>.
-    fn is_option_type(ty: &Option<Type>) -> bool {
-        matches!(ty, Some(Type::Named { name, .. }) if name == "Option")
+    fn is_option_type(ty: &Option<SpannedType>) -> bool {
+        matches!(ty.as_ref().map(|t| &t.ty), Some(Type::Named { name, .. }) if name == "Option")
     }
 
     /// Find all types that have a method with the given name in their impl block.
@@ -1151,7 +1151,8 @@ impl CoreErlangEmitter {
 
         let simple_trait = Self::simple_trait_name(&trait_impl.trait_name);
         // Format trait type args for mangling: From<int> -> "From_int"
-        let trait_type_args_suffix = self.format_trait_type_args(&trait_impl.trait_type_args);
+        let trait_type_args: Vec<Type> = trait_impl.trait_type_args.iter().map(|st| st.ty.clone()).collect();
+        let trait_type_args_suffix = self.format_trait_type_args(&trait_type_args);
 
         // Emit explicitly implemented methods (filtered by cfg)
         for method in &trait_impl.methods {
@@ -1380,8 +1381,9 @@ impl CoreErlangEmitter {
                     let simple_trait =
                         Self::simple_trait_name(&trait_impl.trait_name).to_string();
                     // Format trait type args for registration: From<int> -> "_int"
+                    let trait_type_args: Vec<Type> = trait_impl.trait_type_args.iter().map(|st| st.ty.clone()).collect();
                     let trait_type_args_suffix =
-                        self.format_trait_type_args(&trait_impl.trait_type_args);
+                        self.format_trait_type_args(&trait_type_args);
 
                     // Register trait impl methods for dispatch (filtered by cfg)
                     for method in &trait_impl.methods {
@@ -1538,8 +1540,9 @@ impl CoreErlangEmitter {
                     let simple_trait =
                         Self::simple_trait_name(&trait_impl.trait_name);
                     // Format trait type args for mangling: From<int> -> "_int"
+                    let trait_type_args: Vec<Type> = trait_impl.trait_type_args.iter().map(|st| st.ty.clone()).collect();
                     let trait_type_args_suffix =
-                        self.format_trait_type_args(&trait_impl.trait_type_args);
+                        self.format_trait_type_args(&trait_type_args);
 
                     // Export explicitly implemented methods (filtered by cfg)
                     // Trait impl methods are always exported (visibility comes from trait/type)
