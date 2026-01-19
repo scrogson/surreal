@@ -6,7 +6,7 @@ pub fn init(req: Map, state: Any) -> (Atom, Map, Any) {
     };
 
     let json = serde_json::to_string_value({
-        message: "Hello from Dream!"
+        message: "Hello from Surreal!"
     });
 
     let req = cowboy_req::reply(200, headers, json, req);

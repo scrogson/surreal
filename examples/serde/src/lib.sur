@@ -1,4 +1,4 @@
-// Serde - Serialization framework for Dream
+// Serde - Serialization framework for Surreal
 //
 // Provides the Serialize and Deserialize traits for converting data structures
 // to/from JSON-compatible representations, with automatic recursive handling.
@@ -57,7 +57,7 @@ fn build_serialize_field_stmts(fields: [Field]) -> [any] {
             // Use quote { } to build the statement tuple
             // quote { let x = y; } produces ([stmt], :none) at runtime
             let stmt_block = quote {
-                let map = :maps::put(:#field_name, :"dream::serde::serialize"::serialize_value(self.#field_name), map);
+                let map = :maps::put(:#field_name, :"surreal::serde::serialize"::serialize_value(self.#field_name), map);
             };
             // Extract the first statement from the block tuple (stmts, expr)
             let stmt = :hd(:erlang::element(1, stmt_block));
@@ -85,7 +85,7 @@ pub fn deserialize_derive(input: any) -> any {
     let field_stmts = build_deserialize_field_stmts(fields);
 
     // Use quote with repetition to generate the entire trait impl
-    // Build struct as a map (since Dream structs are maps on BEAM)
+    // Build struct as a map (since Surreal structs are maps on BEAM)
     quote {
         impl Deserialize for #name {
             fn deserialize(data: any) -> #name {

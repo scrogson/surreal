@@ -3,12 +3,12 @@
 //
 // Project structure:
 //   src/
-//     lib.dream           - This file (root module)
-//     app.dream           - Application trait implementation
+//     lib.sur             - This file (root module)
+//     app.sur             - Application trait implementation
 //     handlers/
-//       hello.dream       - GET /api/hello handler
-//       users.dream       - GET /api/users handler
-//       not_found.dream   - 404 handler
+//       hello.sur         - GET /api/hello handler
+//       users.sur         - GET /api/users handler
+//       not_found.sur     - 404 handler
 //
 // Dependencies:
 //   cowboy      - HTTP server
@@ -17,7 +17,7 @@
 
 mod app;
 mod bindings;
-mod cowboy;  // Auto-generated from _build/bindings/cowboy.dream
+mod cowboy;  // Auto-generated from _build/bindings/cowboy.surt
 mod handlers;
 mod models;  // Data models (User, etc.)
 mod tests;

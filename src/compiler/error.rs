@@ -62,7 +62,7 @@ pub type ParseResult<T> = Result<T, ParseError>;
 /// A type error with source location.
 #[derive(Error, Debug, Diagnostic, Clone)]
 #[error("{message}")]
-#[diagnostic(code(dream::type_error))]
+#[diagnostic(code(surreal::type_error))]
 pub struct TypeError {
     pub message: String,
 
@@ -159,7 +159,7 @@ impl Warning {
 /// A compiler warning with source context for rich diagnostics.
 #[derive(Error, Debug, Diagnostic)]
 #[error("{message}")]
-#[diagnostic(severity(warning), code(dream::warning))]
+#[diagnostic(severity(warning), code(surreal::warning))]
 pub struct CompilerWarning {
     pub message: String,
 
@@ -193,7 +193,7 @@ impl CompilerWarning {
 /// A compiler error that can include source code context.
 #[derive(Error, Debug, Diagnostic)]
 #[error("{message}")]
-#[diagnostic(code(dream::compiler_error))]
+#[diagnostic(code(surreal::compiler_error))]
 pub struct CompilerError {
     pub message: String,
 

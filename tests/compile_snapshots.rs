@@ -3,7 +3,7 @@
 //! These tests use insta to snapshot compiler output, ensuring we don't
 //! accidentally break error messages or introduce regressions.
 
-use dream::compiler::{check_module, Parser, TypeError};
+use surreal::compiler::{check_module, Parser, TypeError};
 use std::fs;
 use std::path::Path;
 
@@ -44,7 +44,7 @@ fn test_error_snapshots() {
         let entry = entry.expect("Failed to read directory entry");
         let path = entry.path();
 
-        if path.extension().map(|s| s == "dream").unwrap_or(false) {
+        if path.extension().map(|s| s == "sur").unwrap_or(false) {
             let source = fs::read_to_string(&path).expect("Failed to read fixture");
             let filename = path.file_stem().unwrap().to_str().unwrap();
 
@@ -67,7 +67,7 @@ fn test_valid_snapshots() {
         let entry = entry.expect("Failed to read directory entry");
         let path = entry.path();
 
-        if path.extension().map(|s| s == "dream").unwrap_or(false) {
+        if path.extension().map(|s| s == "sur").unwrap_or(false) {
             let source = fs::read_to_string(&path).expect("Failed to read fixture");
             let filename = path.file_stem().unwrap().to_str().unwrap();
 

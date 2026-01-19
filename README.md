@@ -45,20 +45,20 @@ Dream combines the best of two worlds:
 
 ```bash
 # Create a new project
-dream new my_app
+surrealc new my_app
 cd my_app
 
 # Build the project
-dream build
+surrealc build
 
 # Run the project
-dream run
+surrealc run
 
 # Run tests
-dream test
+surrealc test
 
 # Start the REPL
-dream shell
+surrealc shell
 ```
 
 ## Compilation
@@ -494,17 +494,17 @@ A Dream project looks like this:
 
 ```
 my_app/
-├── dream.toml           # Project configuration
+├── surreal.toml           # Project configuration
 ├── src/
-│   ├── lib.dream        # Root module
-│   ├── app.dream        # Application entry point
+│   ├── lib.sur        # Root module
+│   ├── app.sur        # Application entry point
 │   └── handlers/
-│       ├── mod.dream    # Submodule declarations
-│       └── api.dream    # Handler implementation
+│       ├── mod.sur    # Submodule declarations
+│       └── api.sur    # Handler implementation
 └── _build/              # Build artifacts
 ```
 
-### dream.toml
+### surreal.toml
 
 ```toml
 [package]
@@ -528,9 +528,9 @@ full = ["json"]
 Dream uses a Rust-like module system:
 
 ```rust
-// src/lib.dream - root module
-mod app;           // Loads src/app.dream
-mod handlers;      // Loads src/handlers/mod.dream
+// src/lib.sur - root module
+mod app;           // Loads src/app.sur
+mod handlers;      // Loads src/handlers/mod.sur
 
 pub fn version() -> string {
     "1.0.0"
@@ -538,8 +538,8 @@ pub fn version() -> string {
 ```
 
 ```rust
-// src/handlers/mod.dream
-mod api;           // Loads src/handlers/api.dream
+// src/handlers/mod.sur
+mod api;           // Loads src/handlers/api.sur
 mod websocket;
 ```
 
@@ -547,21 +547,21 @@ mod websocket;
 
 | Command | Description |
 |---------|-------------|
-| `dream new <name>` | Create a new project |
-| `dream build` | Build the project |
-| `dream run` | Build and run |
-| `dream test` | Run tests |
-| `dream test "pattern"` | Run tests matching pattern |
-| `dream shell` | Interactive REPL |
-| `dream deps get` | Fetch dependencies |
-| `dream deps update` | Update dependencies |
-| `dream bindgen` | Generate type stubs from Erlang |
+| `surrealc new <name>` | Create a new project |
+| `surrealc build` | Build the project |
+| `surrealc run` | Build and run |
+| `surrealc test` | Run tests |
+| `surrealc test "pattern"` | Run tests matching pattern |
+| `surrealc shell` | Interactive REPL |
+| `surrealc deps get` | Fetch dependencies |
+| `surrealc deps update` | Update dependencies |
+| `surrealc bindgen` | Generate type stubs from Erlang |
 
 ### Build Options
 
 ```bash
-dream build --features json      # Enable features
-dream test --features json       # Test with features
+surrealc build --features json      # Enable features
+surrealc test --features json       # Test with features
 ```
 
 ## Building from Source

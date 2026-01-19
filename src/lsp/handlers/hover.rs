@@ -52,7 +52,7 @@ fn hover_for_symbol(
                     return Some(Hover {
                         contents: HoverContents::Markup(MarkupContent {
                             kind: MarkupKind::Markdown,
-                            value: format!("```dream\nlet {}: {}\n```", name, type_info),
+                            value: format!("```surreal\nlet {}: {}\n```", name, type_info),
                         }),
                         range,
                     });
@@ -63,7 +63,7 @@ fn hover_for_symbol(
             Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
                     kind: MarkupKind::Markdown,
-                    value: format!("```dream\n{}\n```\n\nLocal variable", name),
+                    value: format!("```surreal\n{}\n```\n\nLocal variable", name),
                 }),
                 range: None,
             })
@@ -91,7 +91,7 @@ fn hover_for_symbol(
                 return Some(Hover {
                     contents: HoverContents::Markup(MarkupContent {
                         kind: MarkupKind::Markdown,
-                        value: format!("```dream\n{}\n```", sig),
+                        value: format!("```surreal\n{}\n```", sig),
                     }),
                     range,
                 });
@@ -108,7 +108,7 @@ fn hover_for_symbol(
                 return Some(Hover {
                     contents: HoverContents::Markup(MarkupContent {
                         kind: MarkupKind::Markdown,
-                        value: format!("```dream\n{}\n```", sig),
+                        value: format!("```surreal\n{}\n```", sig),
                     }),
                     range,
                 });
@@ -129,7 +129,7 @@ fn hover_for_symbol(
                     contents: HoverContents::Markup(MarkupContent {
                         kind: MarkupKind::Markdown,
                         value: format!(
-                            "```dream\nstruct {} {{\n{}\n}}\n```",
+                            "```surreal\nstruct {} {{\n{}\n}}\n```",
                             name,
                             fields.join(",\n")
                         ),
@@ -145,7 +145,7 @@ fn hover_for_symbol(
             Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
                     kind: MarkupKind::Markdown,
-                    value: format!("```dream\n.{}\n```\n\nField access", field),
+                    value: format!("```surreal\n.{}\n```\n\nField access", field),
                 }),
                 range,
             })
@@ -212,7 +212,7 @@ fn find_function_in_modules<'a>(
     func_name: &str,
 ) -> Option<&'a Function> {
     for module in modules {
-        if module.name.ends_with(mod_name) || module.name == format!("dream::{}", mod_name) {
+        if module.name.ends_with(mod_name) || module.name == format!("surreal::{}", mod_name) {
             if let Some(func) = find_function(module, func_name) {
                 return Some(func);
             }
@@ -259,7 +259,7 @@ fn hover_for_function(func: &Function, offset: usize, line_index: &LineIndex) ->
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
             value: format!(
-                "```dream\n{}\n```\n\nInside function `{}`",
+                "```surreal\n{}\n```\n\nInside function `{}`",
                 signature, func.name
             ),
         }),

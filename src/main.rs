@@ -1,4 +1,4 @@
-//! Dream CLI - Build and run Dream programs.
+//! Surreal CLI - Build and run Surreal programs.
 
 use std::fs;
 use std::io::{self, Write};
@@ -7,14 +7,14 @@ use std::process::{Command, ExitCode};
 
 use clap::{Parser, Subcommand};
 
-use dream::{
+use surreal::{
     compiler::{
         cfg, check_modules_with_metadata, expand_derives_with_registry, expand_quotes,
         get_derive_macro_name, is_derive_macro, is_macro, resolve_stdlib_methods,
         CompilerError, CompilerWarning, CoreErlangEmitter, GenericFunctionRegistry, Item, MacroRegistry,
         Module, ModuleContext, ModuleLoader, Parser as DreamParser, SharedGenericRegistry,
     },
-    config::{generate_dream_toml, generate_main_dream, ApplicationConfig, CompileOptions, ProjectConfig},
+    config::{generate_surreal_toml, generate_main_sur, ApplicationConfig, CompileOptions, ProjectConfig},
     deps::DepsManager,
 };
 use std::collections::HashSet;
@@ -49,8 +49,8 @@ fn load_stdlib_uncached() -> StdlibData {
         }
     };
 
-    // Use package-aware loader with "dream" as the package name
-    let mut loader = ModuleLoader::with_package("dream".to_string(), stdlib_dir.clone());
+    // Use package-aware loader with "surreal" as the package name
+    let mut loader = ModuleLoader::with_package("surreal".to_string(), stdlib_dir.clone());
     if loader.load_all_in_dir(&stdlib_dir).is_err() {
         return StdlibData {
             modules: Vec::new(),
@@ -82,8 +82,8 @@ fn load_stdlib_uncached() -> StdlibData {
 }
 
 #[derive(Parser)]
-#[command(name = "dream")]
-#[command(author, version, about = "Dream programming language", long_about = None)]
+#[command(name = "surrealc")]
+#[command(author, version, about = "Surreal programming language", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -157,7 +157,7 @@ enum Commands {
         #[arg(long, value_delimiter = ',')]
         features: Vec<String>,
     },
-    /// Generate .dreamt type stubs from Erlang source files
+    /// Generate .surt type stubs from Erlang source files
     Bindgen {
         /// Erlang source files (.erl) to parse
         #[arg(required = true)]
@@ -226,7 +226,7 @@ fn main() -> ExitCode {
             module,
         } => bindgen::cmd_bindgen(&files, output.as_deref(), module.as_deref()),
         Commands::Version => {
-            println!("dream {}", env!("CARGO_PKG_VERSION"));
+            println!("surreal {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
         Commands::Shell => {
@@ -240,7 +240,7 @@ fn main() -> ExitCode {
         Commands::Stdlib { force } => cmd_stdlib(force),
         Commands::Lsp => {
             let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-            rt.block_on(dream::lsp::run_server());
+            rt.block_on(surreal::lsp::run_server());
             ExitCode::SUCCESS
         }
     }
@@ -288,25 +288,25 @@ fn cmd_new(name: &str) -> ExitCode {
         return ExitCode::from(1);
     }
 
-    // Write dream.toml
-    let toml_path = project_dir.join("dream.toml");
-    if let Err(e) = fs::write(&toml_path, generate_dream_toml(name)) {
-        eprintln!("Error writing dream.toml: {}", e);
+    // Write surreal.toml
+    let toml_path = project_dir.join("surreal.toml");
+    if let Err(e) = fs::write(&toml_path, generate_surreal_toml(name)) {
+        eprintln!("Error writing surreal.toml: {}", e);
         return ExitCode::from(1);
     }
 
-    // Write src/main.dream
-    let main_path = src_dir.join("main.dream");
-    if let Err(e) = fs::write(&main_path, generate_main_dream(name)) {
-        eprintln!("Error writing main.dream: {}", e);
+    // Write src/main.sur
+    let main_path = src_dir.join("main.sur");
+    if let Err(e) = fs::write(&main_path, generate_main_sur(name)) {
+        eprintln!("Error writing main.sur: {}", e);
         return ExitCode::from(1);
     }
 
     println!("Created project '{}'", name);
     println!();
     println!("  cd {}", name);
-    println!("  dream build");
-    println!("  dream run");
+    println!("  surrealc build");
+    println!("  surrealc run");
 
     ExitCode::SUCCESS
 }
@@ -401,7 +401,7 @@ fn cmd_build(file: Option<&Path>, target: &str, output: Option<&Path>, features:
 
     println!("Compiling {}...", config.package.name);
 
-    // Load all .dream files in src/ directory with package context
+    // Load all .sur files in src/ directory with package context
     // This enables Rust-style module naming (e.g., my_app::users::auth)
     let mut loader = ModuleLoader::with_package(
         config.package.name.clone(),
@@ -453,16 +453,16 @@ fn cmd_build(file: Option<&Path>, target: &str, output: Option<&Path>, features:
     result
 }
 
-/// Build a standalone .dream file.
+/// Build a standalone .sur file.
 fn build_standalone_file(source_file: &Path, target: &str, output: Option<&Path>, features: &[String]) -> ExitCode {
     if !source_file.exists() {
         eprintln!("Error: file not found: {}", source_file.display());
         return ExitCode::from(1);
     }
 
-    // Check if this file is part of a project (dream.toml in parent directories)
+    // Check if this file is part of a project (surreal.toml in parent directories)
     if let Some(project_root) = find_project_root(source_file) {
-        if let Ok(config) = ProjectConfig::load(&project_root.join("dream.toml")) {
+        if let Ok(config) = ProjectConfig::load(&project_root.join("surreal.toml")) {
             // This is a project file - use project mode
             let src_dir = config.src_dir(&project_root);
             let build_dir = output
@@ -552,19 +552,19 @@ fn build_standalone_file(source_file: &Path, target: &str, output: Option<&Path>
     compile_and_emit(source_file, &build_dir, target, features)
 }
 
-/// Find the project root by looking for dream.toml in current and parent directories.
+/// Find the project root by looking for surreal.toml in current and parent directories.
 fn find_project_root(start: &Path) -> Option<PathBuf> {
     let mut current = start.canonicalize().ok()?;
 
     // If start is a directory, check it first
-    if current.is_dir() && current.join("dream.toml").exists() {
+    if current.is_dir() && current.join("surreal.toml").exists() {
         return Some(current);
     }
 
     // Then check parent directories
     while let Some(parent) = current.parent() {
         current = parent.to_path_buf();
-        if current.join("dream.toml").exists() {
+        if current.join("surreal.toml").exists() {
             return Some(current);
         }
     }
@@ -766,7 +766,7 @@ fn compile_modules_with_registry(
 
     // Collect local module short names for module resolution
     // These are the short names (e.g., "hello_handler") that can be referenced
-    // as atoms like :hello_handler and should resolve to dream::package::hello_handler
+    // as atoms like :hello_handler and should resolve to surreal::package::hello_handler
     let local_module_names: std::collections::HashSet<String> = if let Some(pkg) = package_name {
         modules
             .iter()
@@ -846,10 +846,10 @@ fn compile_modules_with_registry(
                 ) {
                     Ok(_) => {
                         // Get the BEAM module name
-                        let beam_module_name = if module.name.starts_with("dream::") {
+                        let beam_module_name = if module.name.starts_with("surreal::") {
                             module.name.clone()
                         } else {
-                            format!("dream::{}", module.name)
+                            format!("surreal::{}", module.name)
                         };
                         println!("  Compiled macro module {}.beam", beam_module_name);
 
@@ -883,7 +883,7 @@ fn compile_modules_with_registry(
     // Compile each module to Core Erlang
     let mut core_files = Vec::new();
     // Collect generics for batch registration (reduces lock contention)
-    let mut pending_generics: Vec<(String, Vec<dream::compiler::Function>)> = Vec::new();
+    let mut pending_generics: Vec<(String, Vec<surreal::compiler::Function>)> = Vec::new();
 
     for module in &modules {
         // Create module-specific context for path resolution (crate::/super::/self::)
@@ -914,11 +914,11 @@ fn compile_modules_with_registry(
         // Collect generics for deferred batch registration
         pending_generics.push(emitter.get_generics_for_registration());
 
-        // All Dream modules are prefixed with dream:: (like Elixir uses Elixir.)
-        let beam_module_name = if module.name.starts_with("dream::") {
+        // All Surreal modules are prefixed with surreal:: (like Elixir uses Elixir.)
+        let beam_module_name = if module.name.starts_with("surreal::") {
             module.name.clone()
         } else {
-            format!("dream::{}", module.name)
+            format!("surreal::{}", module.name)
         };
 
         let core_file = build_dir.join(format!("{}.core", &beam_module_name));
@@ -1062,10 +1062,10 @@ fn compile_modules_with_registry_and_options(
     // Early check: if no modules need recompilation, skip type checking entirely
     // This is a significant optimization for incremental builds
     let any_needs_recompile = modules.iter().any(|m| {
-        let beam_module_name = if m.name.starts_with("dream::") {
+        let beam_module_name = if m.name.starts_with("surreal::") {
             m.name.clone()
         } else {
-            format!("dream::{}", m.name)
+            format!("surreal::{}", m.name)
         };
         let beam_file = build_dir.join(format!("{}.beam", &beam_module_name));
         needs_recompilation(m, &beam_file)
@@ -1177,7 +1177,7 @@ fn compile_modules_with_registry_and_options(
 
     // Collect local module short names for module resolution
     // These are the short names (e.g., "hello_handler") that can be referenced
-    // as atoms like :hello_handler and should resolve to dream::package::hello_handler
+    // as atoms like :hello_handler and should resolve to surreal::package::hello_handler
     let local_module_names: std::collections::HashSet<String> = if let Some(pkg) = package_name {
         modules
             .iter()
@@ -1257,10 +1257,10 @@ fn compile_modules_with_registry_and_options(
                 ) {
                     Ok(_) => {
                         // Get the BEAM module name
-                        let beam_module_name = if module.name.starts_with("dream::") {
+                        let beam_module_name = if module.name.starts_with("surreal::") {
                             module.name.clone()
                         } else {
-                            format!("dream::{}", module.name)
+                            format!("surreal::{}", module.name)
                         };
                         println!("  Compiled macro module {}.beam", beam_module_name);
 
@@ -1296,14 +1296,14 @@ fn compile_modules_with_registry_and_options(
     let mut core_files = Vec::new();
     let mut skipped_count = 0;
     // Collect generics for batch registration (reduces lock contention)
-    let mut pending_generics: Vec<(String, Vec<dream::compiler::Function>)> = Vec::new();
+    let mut pending_generics: Vec<(String, Vec<surreal::compiler::Function>)> = Vec::new();
 
     for module in &modules {
-        // All Dream modules are prefixed with dream:: (like Elixir uses Elixir.)
-        let beam_module_name = if module.name.starts_with("dream::") {
+        // All Surreal modules are prefixed with surreal:: (like Elixir uses Elixir.)
+        let beam_module_name = if module.name.starts_with("surreal::") {
             module.name.clone()
         } else {
-            format!("dream::{}", module.name)
+            format!("surreal::{}", module.name)
         };
 
         let beam_file = build_dir.join(format!("{}.beam", &beam_module_name));
@@ -1439,25 +1439,25 @@ fn compile_modules_with_registry_and_options(
     ExitCode::SUCCESS
 }
 
-/// Generate an OTP .app file for the Dream application.
+/// Generate an OTP .app file for the Surreal application.
 fn generate_app_file(
     build_dir: &Path,
     config: &ProjectConfig,
     module_names: &[String],
 ) -> Result<(), String> {
-    // OTP application name is just the package name (no dream:: prefix)
+    // OTP application name is just the package name (no surreal:: prefix)
     let app_name = &config.package.name;
     let version = &config.package.version;
 
-    // Format module list as Erlang atoms with dream:: prefix
-    // Module names are fully qualified (e.g., dream::http_api::hello_handler)
+    // Format module list as Erlang atoms with surreal:: prefix
+    // Module names are fully qualified (e.g., surreal::http_api::hello_handler)
     let modules_str = module_names
         .iter()
         .map(|m| {
-            if m.starts_with("dream::") {
+            if m.starts_with("surreal::") {
                 format!("'{}'", m)
             } else {
-                format!("'dream::{}'", m)
+                format!("\'surreal::{}\'", m)
             }
         })
         .collect::<Vec<_>>()
@@ -1487,9 +1487,9 @@ fn generate_app_file(
     // Build the mod entry if an application module is configured
     let mod_entry = if let Some(ref app_config) = config.application {
         if let Some(ref module) = app_config.module {
-            // Build fully qualified module name: dream::module
+            // Build fully qualified module name: surreal::module
             // The module name in config already includes the package prefix (e.g., "http_api::app")
-            let full_module = format!("dream::{}", module);
+            let full_module = format!("surreal::{}", module);
             format!("  {{mod, {{'{}', []}}}},\n", full_module)
         } else {
             String::new()
@@ -1500,7 +1500,7 @@ fn generate_app_file(
 
     let app_content = format!(
         r#"{{application, {app_name}, [
-  {{description, "A Dream application"}},
+  {{description, "A Surreal application"}},
   {{vsn, "{version}"}},
 {mod_entry}  {{modules, [{modules}]}},
   {{registered, []}},
@@ -1527,7 +1527,7 @@ fn generate_app_file(
 struct MacroMetadata {
     /// Derive name (e.g., "Serialize")
     derive_name: String,
-    /// Module containing the macro (e.g., "dream::serde::serde")
+    /// Module containing the macro (e.g., "surreal::serde::serde")
     module: String,
     /// Function name (e.g., "serialize_derive")
     function: String,
@@ -1629,7 +1629,7 @@ fn find_stdlib_dir() -> Option<PathBuf> {
     // Try relative to executable first
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            // Check ../../stdlib (for target/debug/dream -> stdlib/)
+            // Check ../../stdlib (for target/debug/surrealc -> stdlib/)
             let stdlib = exe_dir.join("../../stdlib");
             if stdlib.exists() {
                 return Some(stdlib.canonicalize().unwrap_or(stdlib));
@@ -1669,7 +1669,7 @@ fn find_stubs_dir() -> Option<PathBuf> {
     // Try relative to executable first
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            // Check ../../stubs (for target/debug/dream -> stubs/)
+            // Check ../../stubs (for target/debug/surrealc -> stubs/)
             let stubs = exe_dir.join("../../stubs");
             if stubs.exists() {
                 return Some(stubs.canonicalize().unwrap_or(stubs));
@@ -1743,7 +1743,7 @@ fn find_elixir_ebin_dirs() -> Vec<PathBuf> {
     ebin_dirs
 }
 
-/// Load .dreamt stub files and parse them into modules.
+/// Load .surt stub files and parse them into modules.
 /// These provide type information for FFI calls to external libraries.
 fn load_stub_modules() -> Vec<Module> {
     let stubs_dir = match find_stubs_dir() {
@@ -1760,7 +1760,7 @@ fn load_stub_modules() -> Vec<Module> {
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("dreamt") {
+        if path.extension().and_then(|s| s.to_str()) != Some("surt") {
             continue;
         }
 
@@ -1772,12 +1772,12 @@ fn load_stub_modules() -> Vec<Module> {
 
         // Wrap in a module since parser expects that
         // Add _stubs suffix to avoid name conflicts with Dream stdlib modules
-        // (stubs are for FFI to external BEAM modules, stdlib compiles to dream::*)
+        // (stubs are for FFI to external BEAM modules, stdlib compiles to surreal::*)
         let stub_name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("stubs");
         let stub_module_name = format!("{}_stubs", stub_name);
         let wrapped = format!("mod {} {{\n{}\n}}", stub_module_name, source);
 
-        let mut parser = dream::compiler::Parser::new(&wrapped);
+        let mut parser = surreal::compiler::Parser::new(&wrapped);
         match parser.parse_module() {
             Ok(module) => stub_modules.push(module),
             Err(e) => {
@@ -1795,7 +1795,7 @@ fn stdlib_beam_dir() -> PathBuf {
     // This ensures stdlib is found regardless of working directory
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            // Executable is at target/release/dream or target/debug/dream
+            // Executable is at target/release/surrealc or target/debug/surrealc
             // Stdlib should be at target/stdlib
             let stdlib_path = exe_dir.join("../stdlib");
             // Canonicalize to resolve .. and ensure consistent path comparison
@@ -1820,14 +1820,14 @@ fn compile_stdlib() -> Result<PathBuf, String> {
     fs::create_dir_all(&output_dir)
         .map_err(|e| format!("Failed to create stdlib output directory: {}", e))?;
 
-    // Recursively collect all .dream files in stdlib
-    let dream_files = collect_dream_files_recursive(&stdlib_dir);
+    // Recursively collect all .sur files in stdlib
+    let surreal_files = collect_surreal_files_recursive(&stdlib_dir);
 
     // Check if any stdlib files need recompilation
     let mut needs_compile = false;
-    for path in &dream_files {
+    for path in &surreal_files {
         // Compute module name from path relative to stdlib_dir
-        // e.g., stdlib/erlang/std/logger.dream -> dream::erlang::std::logger
+        // e.g., stdlib/erlang/std/logger.sur -> surreal::erlang::std::logger
         if let Some(module_name) = stdlib_path_to_module_name(&stdlib_dir, path) {
             let beam_file = output_dir.join(format!("{}.beam", module_name));
 
@@ -1849,14 +1849,14 @@ fn compile_stdlib() -> Result<PathBuf, String> {
     }
 
     if needs_compile {
-        // Load all stdlib modules with "dream" as the package name
-        let mut loader = ModuleLoader::with_package("dream".to_string(), stdlib_dir.clone());
+        // Load all stdlib modules with "surreal" as the package name
+        let mut loader = ModuleLoader::with_package("surreal".to_string(), stdlib_dir.clone());
         if let Err(e) = loader.load_all_in_dir(&stdlib_dir) {
             return Err(format!("Failed to load stdlib modules: {}", e));
         }
 
         // Compile all stdlib modules
-        let result = compile_modules(loader.into_modules(), &output_dir, "beam", Some("dream"));
+        let result = compile_modules(loader.into_modules(), &output_dir, "beam", Some("surreal"));
         if result != ExitCode::SUCCESS {
             return Err("Failed to compile stdlib".to_string());
         }
@@ -1865,15 +1865,15 @@ fn compile_stdlib() -> Result<PathBuf, String> {
     Ok(output_dir)
 }
 
-/// Recursively collect all .dream files in a directory.
-fn collect_dream_files_recursive(dir: &Path) -> Vec<PathBuf> {
+/// Recursively collect all .sur files in a directory.
+fn collect_surreal_files_recursive(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                files.extend(collect_dream_files_recursive(&path));
-            } else if path.extension().and_then(|s| s.to_str()) == Some("dream") {
+                files.extend(collect_surreal_files_recursive(&path));
+            } else if path.extension().and_then(|s| s.to_str()) == Some("sur") {
                 files.push(path);
             }
         }
@@ -1882,10 +1882,10 @@ fn collect_dream_files_recursive(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// Convert a stdlib file path to its module name.
-/// e.g., stdlib/erlang/std/logger.dream -> dream::erlang::std::logger
-/// Returns None for mod.dream files (module declaration files, not module sources).
+/// e.g., stdlib/erlang/std/logger.sur -> surreal::erlang::std::logger
+/// Returns None for mod.sur files (module declaration files, not module sources).
 fn stdlib_path_to_module_name(stdlib_dir: &Path, path: &Path) -> Option<String> {
-    // Skip mod.dream files - they're module declaration files, not module sources
+    // Skip mod.sur files - they're module declaration files, not module sources
     if path.file_stem().and_then(|s| s.to_str()) == Some("mod") {
         return None;
     }
@@ -1897,7 +1897,7 @@ fn stdlib_path_to_module_name(stdlib_dir: &Path, path: &Path) -> Option<String> 
         .filter_map(|c| c.as_os_str().to_str())
         .collect::<Vec<_>>()
         .join("::");
-    Some(format!("dream::{}", module_path))
+    Some(format!("surreal::{}", module_path))
 }
 
 /// Extract the module name(s) from a Dream source file.
@@ -1986,22 +1986,22 @@ fn cmd_run(
         let app_config = config.application.clone();
 
         // Determine module name: use application module or package name
-        // Module names are prefixed with dream:: and package:: (e.g., "dream::http_api::http_api")
+        // Module names are prefixed with surreal:: and package:: (e.g., "surreal::http_api::http_api")
         let base_module = if let Some(ref app) = app_config {
             app.module.clone().unwrap_or_else(|| config.package.name.clone())
         } else {
-            // Use package name as the default module (corresponds to lib.dream)
+            // Use package name as the default module (corresponds to lib.sur)
             config.package.name.clone()
         };
 
-        // Build the full module path: dream::package::module
+        // Build the full module path: surreal::package::module
         let package_name = &config.package.name;
-        let module_name = if base_module.starts_with("dream::") {
+        let module_name = if base_module.starts_with("surreal::") {
             base_module
         } else if base_module.starts_with(&format!("{}::", package_name)) {
-            format!("dream::{}", base_module)
+            format!("surreal::{}", base_module)
         } else {
-            format!("dream::{}::{}", package_name, base_module)
+            format!("surreal::{}::{}", package_name, base_module)
         };
 
         (beam_dir, module_name, app_config)
@@ -2372,7 +2372,7 @@ fn compile_module_to_beam(
     build_dir: &Path,
     generic_registry: &SharedGenericRegistry,
     extern_module_names: &std::collections::HashMap<String, String>,
-    struct_info: &std::collections::HashMap<String, dream::compiler::typeck::StructInfo>,
+    struct_info: &std::collections::HashMap<String, surreal::compiler::typeck::StructInfo>,
     package_name: Option<&str>,
     local_module_names: &std::collections::HashSet<String>,
     dependencies: &std::collections::HashSet<String>,
@@ -2401,11 +2401,11 @@ fn compile_module_to_beam(
         emitter.register_generics(&mut registry);
     }
 
-    // All Dream modules are prefixed with dream::
-    let beam_module_name = if module.name.starts_with("dream::") {
+    // All Surreal modules are prefixed with surreal::
+    let beam_module_name = if module.name.starts_with("surreal::") {
         module.name.clone()
     } else {
-        format!("dream::{}", module.name)
+        format!("surreal::{}", module.name)
     };
 
     let core_file = build_dir.join(format!("{}.core", &beam_module_name));
@@ -2478,7 +2478,7 @@ fn cmd_test(filter: Option<&str>, features: &[String]) -> ExitCode {
 
     println!("Compiling {} in test mode...", config.package.name);
 
-    // Load all .dream files in src/ directory with package context
+    // Load all .sur files in src/ directory with package context
     let mut loader = ModuleLoader::with_package(
         config.package.name.clone(),
         src_dir.clone(),
@@ -2584,11 +2584,11 @@ fn cmd_test(filter: Option<&str>, features: &[String]) -> ExitCode {
     let mut failures: Vec<(String, String, String)> = Vec::new(); // (module, function, error)
 
     for (module_name, func_name) in &test_functions {
-        // Build the full module name with dream:: prefix
-        let beam_module = if module_name.starts_with("dream::") {
+        // Build the full module name with surreal:: prefix
+        let beam_module = if module_name.starts_with("surreal::") {
             module_name.clone()
         } else {
-            format!("dream::{}", module_name)
+            format!("surreal::{}", module_name)
         };
 
         // Build eval expression to run the test and catch any errors

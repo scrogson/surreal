@@ -446,7 +446,7 @@ impl<'source> Parser<'source> {
     }
 
     /// Parse an external module declaration: `extern mod erlang { ... }`
-    /// Used in .dreamt files to declare types for FFI modules.
+    /// Used in .surt files to declare types for FFI modules.
     /// Supports `#[name = "Actual.Module.Name"]` attribute for module name mapping.
     fn parse_extern_mod(&mut self, attrs: Vec<Attribute>) -> ParseResult<Item> {
         self.expect(&Token::Extern)?;
@@ -4885,9 +4885,9 @@ mod tests {
 
     #[test]
     fn test_parse_binary_example_file() {
-        let source = include_str!("../../examples/binary_example.dream");
+        let source = include_str!("../../examples/binary_example.sur");
         let mut parser = Parser::new(source);
-        let modules = parser.parse_file_modules("binary_example").expect("binary_example.dream should parse successfully");
+        let modules = parser.parse_file_modules("binary_example").expect("binary_example.sur should parse successfully");
 
         // Should have 1 module with 2 items (1 use import + 1 main function)
         assert_eq!(modules.len(), 1);
@@ -5050,11 +5050,11 @@ mod tests {
     #[test]
     fn test_parse_stdlib_binding_file() {
         // Test parsing an stdlib binding file (lists module)
-        let lists_source = include_str!("../../stdlib/erlang/std/lists.dream");
+        let lists_source = include_str!("../../stdlib/erlang/std/lists.sur");
         // Wrap in a module since parser expects a top-level module
         let source = format!("mod test {{\n{}\n}}", lists_source);
         let mut parser = Parser::new(&source);
-        let module = parser.parse_module().expect("lists.dream should parse");
+        let module = parser.parse_module().expect("lists.sur should parse");
 
         // Count extern mods
         let extern_mods: Vec<_> = user_items(&module)

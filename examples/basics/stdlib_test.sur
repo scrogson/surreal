@@ -7,7 +7,7 @@ pub fn main() -> atom {
     io::format("Items: ~p~n", [items]);
     io::format("Reversed list: ~p~n", [reversed]);
 
-    io::println("Hello from dream!");
+    io::println("Hello from surreal!");
 
     :io::format("Sum of 10 and 20 is ~p~n", [10 + 20]);
 

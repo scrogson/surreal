@@ -61,28 +61,28 @@ When Dream code calls external Erlang/Elixir functions like `jason::encode(data,
 2. The actual Erlang/Elixir module name to call (e.g., `'Elixir.Jason'`)
 3. The function signatures for type checking
 
-Without bindings, calls like `jason::encode` would compile to `'dream::project::jason':encode/2` which doesn't exist.
+Without bindings, calls like `jason::encode` would compile to `'surreal::project::jason':encode/2` which doesn't exist.
 
 ### Generating Bindings
 
-After fetching dependencies with `dream deps get`, generate bindings:
+After fetching dependencies with `surrealc deps get`, generate bindings:
 
 ```bash
-dream deps bindgen
+surrealc deps bindgen
 ```
 
-This creates `.dreamt` files in `_build/bindings/` by scanning dependency source files (`.erl` and `.ex` files) and extracting:
+This creates `.surt` files in `_build/bindings/` by scanning dependency source files (`.erl` and `.ex` files) and extracting:
 - Module names
 - Function specs/signatures
 - Type definitions
 - Struct definitions
 
-### The `.dreamt` File Format
+### The `.surt` File Format
 
 Generated bindings use `extern mod` declarations with a `#[name]` attribute:
 
-```dream
-// _build/bindings/jason.dreamt
+```surreal
+// _build/bindings/jason.surt
 #[name = "Elixir.Jason"]
 extern mod jason {
     fn decode(arg0: Any, arg1: [Any]) -> Result<Any, Any>;
@@ -99,31 +99,31 @@ Key elements:
 
 ### Using Bindings in Dream Code
 
-1. **Declare the module** in your `lib.dream`:
-   ```dream
-   mod jason;  // Loads from _build/bindings/jason.dreamt
+1. **Declare the module** in your `lib.sur`:
+   ```surreal
+   mod jason;  // Loads from _build/bindings/jason.surt
    ```
 
 2. **Call functions** using the Dream module name:
-   ```dream
+   ```surreal
    // Compiles to 'Elixir.Jason':encode(data, [])
    let result = jason::encode(data, []);
    ```
 
 ### Troubleshooting
 
-**"undefined function 'dream::project::module':function/N"**
-- Bindings weren't generated. Run `dream deps bindgen`
+**"undefined function 'surreal::project::module':function/N"**
+- Bindings weren't generated. Run `surrealc deps bindgen`
 
 **"cannot find module `module`"**
-- The `.dreamt` file doesn't exist in `_build/bindings/`
-- Run `dream deps bindgen` to generate it
+- The `.surt` file doesn't exist in `_build/bindings/`
+- Run `surrealc deps bindgen` to generate it
 
 ### Manual Extern Declarations
 
 For one-off external calls without generating full bindings, use the `:` prefix:
 
-```dream
+```surreal
 // Direct extern call - no binding needed
 let result = :erlang::system_info(:process_count);
 let json = :"Elixir.Jason"::encode(data);
@@ -137,7 +137,7 @@ let json = :"Elixir.Jason"::encode(data);
 
 Dream has two types of module calls that look similar but compile differently:
 
-1. **Stdlib module calls** (`io::println`, `logger::info`) - Compile to `'dream::io':'println'`
+1. **Stdlib module calls** (`io::println`, `logger::info`) - Compile to `'surreal::io':'println'`
 2. **Direct extern calls** (`:io::format`, `:logger::info`) - Compile to `'io':'format'` (Erlang directly)
 
 ### How It Works
@@ -145,7 +145,7 @@ Dream has two types of module calls that look similar but compile differently:
 The typechecker's `annotate_expr` function (in `typeck.rs`) transforms calls based on these rules:
 
 ```
-module::func(args)    →  If module is in STDLIB_MODULES: stays as Path, gets dream:: prefix
+module::func(args)    →  If module is in STDLIB_MODULES: stays as Path, gets surreal:: prefix
                          If module is extern mod: transforms to ExternCall
 
 :module::func(args)   →  Always ExternCall (direct Erlang/Elixir call)
@@ -167,17 +167,17 @@ const STDLIB_MODULES: &'static [&'static str] = &[
 
 ### Common Bug Pattern
 
-If a stdlib module also has an extern binding (e.g., `stdlib/erlang/std/io.dream` defines `extern mod io`), the typechecker might incorrectly treat `io::println` as an extern call. The fix is to check `is_stdlib_module()` BEFORE checking `is_extern_module()`.
+If a stdlib module also has an extern binding (e.g., `stdlib/erlang/std/io.sur` defines `extern mod io`), the typechecker might incorrectly treat `io::println` as an extern call. The fix is to check `is_stdlib_module()` BEFORE checking `is_extern_module()`.
 
 ### Debugging Module Resolution
 
 1. Build with `--target core` to see generated Core Erlang:
    ```bash
-   dream build project --target core
+   surrealc build project --target core
    ```
 
 2. Check the output for correct module prefixes:
-   - `call 'dream::io':'println'` ✓ (stdlib call)
+   - `call 'surreal::io':'println'` ✓ (stdlib call)
    - `call 'io':'println'` ✗ (wrong - would fail at runtime)
 
 3. Add debug output to `core_erlang.rs` emit functions to trace code paths.
@@ -188,7 +188,7 @@ Tests for code generation live in `src/compiler/core_erlang.rs` in the `mod test
 
 ```rust
 #[test]
-fn test_stdlib_module_call_gets_dream_prefix() {
+fn test_stdlib_module_call_gets_surreal_prefix() {
     let source = r#"
         mod test {
             pub fn log(msg: String) -> Atom {
@@ -197,7 +197,7 @@ fn test_stdlib_module_call_gets_dream_prefix() {
         }
     "#;
     let result = emit_core_erlang(source).unwrap();
-    assert!(result.contains("call 'dream::io':'println'"));
+    assert!(result.contains("call 'surreal::io':'println'"));
 }
 ```
 
@@ -216,21 +216,21 @@ just stdlib
 ```
 
 This command:
-1. Builds all `stdlib/*.dream` files
+1. Builds all `stdlib/*.sur` files
 2. Copies the resulting `.beam` files to `target/stdlib/`
 
 **IMPORTANT**: The typechecker loads stdlib source files directly for type information, but runtime execution uses the `.beam` files in `target/stdlib/`. Both must be in sync.
 
 ### Key Points
 
-1. **Macro expander uses `target/stdlib/`**: When derive macros run, they load modules like `dream::syn` from `target/stdlib/`. If these .beam files are stale, macros will malfunction.
+1. **Macro expander uses `target/stdlib/`**: When derive macros run, they load modules like `surreal::syn` from `target/stdlib/`. If these .beam files are stale, macros will malfunction.
 
-2. **Building standalone stdlib files outputs to current directory**: Running `dream build stdlib/syn.dream` creates `dream::syn.beam` in the *current directory*, NOT in `target/stdlib/`.
+2. **Building standalone stdlib files outputs to current directory**: Running `surrealc build stdlib/syn.sur` creates `surreal::syn.beam` in the *current directory*, NOT in `target/stdlib/`.
 
 3. **After modifying stdlib, use `just stdlib`** (preferred) or manually copy .beam files:
    ```bash
-   dream build stdlib/syn.dream
-   cp "dream::syn.beam" target/stdlib/
+   surrealc build stdlib/syn.sur
+   cp "surreal::syn.beam" target/stdlib/
    ```
 
 ### Symptoms of Stale Stdlib
@@ -243,20 +243,20 @@ This command:
 
 1. Check timestamps:
    ```bash
-   ls -la target/stdlib/dream::syn.beam stdlib/syn.dream
+   ls -la target/stdlib.sur::syn.beam stdlib/syn.sur
    ```
 
 2. Force rebuild and copy:
    ```bash
-   touch stdlib/syn.dream
-   dream build stdlib/syn.dream
-   cp "dream::syn.beam" target/stdlib/
+   touch stdlib/syn.sur
+   surrealc build stdlib/syn.sur
+   cp "surreal::syn.beam" target/stdlib/
    ```
 
 3. Test directly with erl:
    ```bash
    erl -noshell -pa target/stdlib -eval "
-   {module, _} = code:load_file('dream::syn'),
+   {module, _} = code:load_file('surreal::syn'),
    % test your function
    halt()."
    ```

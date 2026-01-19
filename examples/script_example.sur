@@ -1,4 +1,4 @@
-// Example: Script-style execution in Dream
+// Example: Script-style execution in Surreal
 //
 // This file demonstrates top-level expressions that run when the script loads.
 // Similar to Elixir's .exs files, you can define modules and then execute code

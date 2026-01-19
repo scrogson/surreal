@@ -137,14 +137,14 @@ pub enum AttributeArg {
 /// Context for module resolution during compilation.
 #[derive(Debug, Clone, Default)]
 pub struct ModuleContext {
-    /// Package name from dream.toml (e.g., "my_app")
+    /// Package name from surreal.toml (e.g., "my_app")
     pub package_name: Option<String>,
-    /// Current module's path relative to src/ (e.g., ["users", "auth"] for src/users/auth.dream)
+    /// Current module's path relative to src/ (e.g., ["users", "auth"] for src/users/auth.sur)
     pub current_path: Vec<String>,
     /// Set of local module names (short names only, e.g., "hello_handler")
     /// Used to resolve atom literals that reference local modules
     pub local_modules: std::collections::HashSet<String>,
-    /// If true, don't add the dream:: prefix to module names (for REPL modules)
+    /// If true, don't add the surreal:: prefix to module names (for REPL modules)
     pub skip_stdlib_prefix: bool,
     /// Set of external dependency names (e.g., "serde_json", "cowboy")
     /// Used to resolve crate::function calls to crate::crate::function
@@ -205,11 +205,11 @@ impl ModuleContext {
     /// Resolve an atom to its fully qualified module name if it's a local module.
     /// Returns None if the atom is not a local module.
     /// For example, if package is "http_api" and atom is "hello_handler",
-    /// returns Some("dream::http_api::hello_handler").
+    /// returns Some("surreal::http_api::hello_handler").
     pub fn resolve_local_module(&self, atom: &str) -> Option<String> {
         if let Some(ref pkg) = self.package_name {
             if self.local_modules.contains(atom) {
-                return Some(format!("dream::{}::{}", pkg, atom));
+                return Some(format!("surreal::{}::{}", pkg, atom));
             }
         }
         None
@@ -450,7 +450,7 @@ pub struct TypeAlias {
 }
 
 // =============================================================================
-// External Module Declarations (for .dreamt type stub files)
+// External Module Declarations (for .surt type stub files)
 // =============================================================================
 
 /// External module declaration for FFI type stubs.

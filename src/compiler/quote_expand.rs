@@ -6,7 +6,7 @@
 //!
 //! ## Example
 //!
-//! ```dream
+//! ```surreal
 //! quote {
 //!     impl Serialize for #name {
 //!         fn serialize(self) -> any { ... }
@@ -15,7 +15,7 @@
 //! ```
 //!
 //! Expands to code that creates a tuple like:
-//! ```dream
+//! ```surreal
 //! (:traitimpl, :Serialize, name, [...])
 //! ```
 

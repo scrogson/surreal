@@ -1,7 +1,11 @@
 [package]
-name = "dream"
+name = "surreal"
 version = "0.1.0"
 edition = "2024"
+
+[[bin]]
+name = "surrealc"
+path = "src/main.rs"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

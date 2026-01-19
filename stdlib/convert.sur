@@ -5,7 +5,7 @@
 /// Trait for converting from type T to Self.
 ///
 /// # Example
-/// ```dream
+/// ```surreal
 /// struct UserId {
 ///     id: int
 /// }
@@ -25,7 +25,7 @@ pub trait From<T> {
 /// Trait for converting from Self to type T.
 ///
 /// # Example
-/// ```dream
+/// ```surreal
 /// struct UserId {
 ///     id: int
 /// }
@@ -46,7 +46,7 @@ pub trait Into<T> {
 /// Trait for fallible conversions from type T to Self.
 ///
 /// # Example
-/// ```dream
+/// ```surreal
 /// struct PositiveInt {
 ///     value: int
 /// }

@@ -1,8 +1,8 @@
-// Example Dream Application
+// Example Surreal Application
 //
 // Demonstrates an OTP-style application lifecycle.
-// Run with: dream run (starts the application)
-// Run with: dream run --eval (just calls main() and exits)
+// Run with: surrealc run (starts the application)
+// Run with: surrealc run --eval (just calls main() and exits)
 
 // ============== Application Entry Point ==============
 
@@ -56,10 +56,10 @@ fn worker_loop(count: int) -> atom {
 
 /// For testing without the full application
 pub fn main() -> atom {
-    :erlang::display("=== Dream Application Example ===");
+    :erlang::display("=== Surreal Application Example ===");
     :erlang::display("This project is configured as an application.");
     :erlang::display("Usage:");
-    :erlang::display("  dream run         - Start the application");
-    :erlang::display("  dream run --eval  - Just call main() and exit");
+    :erlang::display("  surrealc run         - Start the application");
+    :erlang::display("  surrealc run --eval  - Just call main() and exit");
     :ok
 }

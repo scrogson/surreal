@@ -97,7 +97,7 @@ impl ModuleLoader {
     }
 
     /// Create a module loader with package context for Rust-style module naming.
-    /// - `package_name`: The package name from dream.toml (e.g., "my_app")
+    /// - `package_name`: The package name from surreal.toml (e.g., "my_app")
     /// - `src_root`: The source directory root (e.g., "/path/to/project/src")
     pub fn with_package(package_name: String, src_root: PathBuf) -> Self {
         Self {
@@ -111,7 +111,7 @@ impl ModuleLoader {
     }
 
     /// Add a directory to search for bindings (e.g., _build/bindings/).
-    /// Bindings files use .dream extension (also supports legacy .dreamt).
+    /// .sur extension (also supports legacy .surt).
     pub fn add_bindings_dir(&mut self, dir: PathBuf) {
         if dir.exists() {
             self.bindings_dirs.push(dir);
@@ -119,9 +119,9 @@ impl ModuleLoader {
     }
 
     /// Derive the full module name from a file path.
-    /// For Rust-style projects: `src/users/auth.dream` -> `my_app::users::auth`
-    /// For lib.dream at src root: `src/lib.dream` -> `my_app`
-    /// For bindings files: `_build/bindings/cowboy.dream` -> `cowboy`
+    /// For Rust-style projects: `src/users/auth.sur` -> `my_app::users::auth`
+    /// For lib.sur at src root: `src/lib.sur` -> `my_app`
+    /// For bindings files: `_build/bindings/cowboy.surt` -> `cowboy`
     /// For standalone files (no package): uses just the filename stem
     fn derive_module_name(&self, path: &Path) -> String {
         // Check if this is a bindings file - use just the filename
@@ -143,13 +143,13 @@ impl ModuleLoader {
         let (package, src_root) = match (&self.package_name, &self.src_root) {
             (Some(pkg), Some(root)) => (pkg.clone(), root.clone()),
             _ => {
-                // For standalone files, use filename or directory name for mod.dream
+                // For standalone files, use filename or directory name for mod.sur
                 let stem = path
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or("unknown");
 
-                // For mod.dream files, use the parent directory name
+                // For mod.sur files, use the parent directory name
                 if stem == "mod" {
                     if let Some(parent) = path.parent() {
                         if let Some(dir_name) = parent.file_name().and_then(|s| s.to_str()) {
@@ -184,7 +184,7 @@ impl ModuleLoader {
             }
         }
 
-        // Add filename (without extension), unless it's lib.dream or mod.dream
+        // Add filename (without extension), unless it's lib.sur or mod.sur
         let stem = relative
             .file_stem()
             .and_then(|s| s.to_str())
@@ -198,21 +198,21 @@ impl ModuleLoader {
     }
 
     /// Resolve module path for a mod declaration.
-    /// Looks for `<dir>/<name>.dream` or `<dir>/<name>/mod.dream`.
-    /// Also searches in bindings directories for .dream and .dreamt files.
+    /// Looks for `<dir>/<name>.sur` or `<dir>/<name>/mod.sur`.
+    /// Also searches in bindings directories for .sur and .surt files.
     pub fn resolve_module_path(&self, name: &str, from: &Path) -> LoadResult<PathBuf> {
         let parent = from.parent().unwrap_or(Path::new("."));
         let mut searched = Vec::new();
 
-        // Try <dir>/<name>.dream (local)
-        let file_path = parent.join(format!("{}.dream", name));
+        // Try <dir>/<name>.sur (local)
+        let file_path = parent.join(format!("{}.sur", name));
         if file_path.exists() {
             return Ok(file_path);
         }
         searched.push(file_path);
 
-        // Try <dir>/<name>/mod.dream (local subdirectory)
-        let dir_path = parent.join(name).join("mod.dream");
+        // Try <dir>/<name>/mod.sur (local subdirectory)
+        let dir_path = parent.join(name).join("mod.sur");
         if dir_path.exists() {
             return Ok(dir_path);
         }
@@ -220,22 +220,22 @@ impl ModuleLoader {
 
         // Search in bindings directories
         for bindings_dir in &self.bindings_dirs {
-            // Try <bindings>/<name>.dream
-            let binding_path = bindings_dir.join(format!("{}.dream", name));
+            // Try <bindings>/<name>.sur
+            let binding_path = bindings_dir.join(format!("{}.sur", name));
             if binding_path.exists() {
                 return Ok(binding_path);
             }
             searched.push(binding_path);
 
-            // Try <bindings>/<name>.dreamt (legacy extension, for backwards compatibility)
-            let dreamt_path = bindings_dir.join(format!("{}.dreamt", name));
-            if dreamt_path.exists() {
-                return Ok(dreamt_path);
+            // Try <bindings>/<name>.surt (legacy extension, for backwards compatibility)
+            let surt_path = bindings_dir.join(format!("{}.surt", name));
+            if surt_path.exists() {
+                return Ok(surt_path);
             }
-            searched.push(dreamt_path);
+            searched.push(surt_path);
 
-            // Try <bindings>/<name>/mod.dream
-            let binding_mod_path = bindings_dir.join(name).join("mod.dream");
+            // Try <bindings>/<name>/mod.sur
+            let binding_mod_path = bindings_dir.join(name).join("mod.sur");
             if binding_mod_path.exists() {
                 return Ok(binding_mod_path);
             }
@@ -370,12 +370,12 @@ impl ModuleLoader {
     }
 
     /// Load a project from an entry point.
-    /// If path is a directory, looks for dream.toml to determine source directory,
-    /// then looks for main.dream or lib.dream.
+    /// If path is a directory, looks for surreal.toml to determine source directory,
+    /// then looks for main.sur or lib.sur.
     pub fn load_project(&mut self, path: &Path) -> LoadResult<Module> {
         let entry = if path.is_dir() {
-            // Check for dream.toml to determine project structure
-            let config_path = path.join("dream.toml");
+            // Check for surreal.toml to determine project structure
+            let config_path = path.join("surreal.toml");
             let src_dir = if config_path.exists() {
                 match ProjectConfig::load(&config_path) {
                     Ok(config) => config.src_dir(path),
@@ -385,8 +385,8 @@ impl ModuleLoader {
                 path.to_path_buf()
             };
 
-            let main_path = src_dir.join("main.dream");
-            let lib_path = src_dir.join("lib.dream");
+            let main_path = src_dir.join("main.sur");
+            let lib_path = src_dir.join("lib.sur");
 
             if main_path.exists() {
                 main_path
@@ -394,7 +394,7 @@ impl ModuleLoader {
                 lib_path
             } else {
                 return Err(LoadError::with_path(
-                    "no main.dream or lib.dream found in directory",
+                    "no main.sur or lib.sur found in directory",
                     src_dir,
                 ));
             }
@@ -420,11 +420,11 @@ impl ModuleLoader {
         self.loaded.values().map(|m| m.name.clone()).collect()
     }
 
-    /// Load all .dream files in a directory (recursively).
+    /// Load all .sur files in a directory (recursively).
     /// This is used for Elixir-style project compilation where all files
     /// in src/ are compiled automatically.
     pub fn load_all_in_dir(&mut self, dir: &Path) -> LoadResult<Vec<Module>> {
-        let files = Self::find_dream_files(dir)?;
+        let files = Self::find_surreal_files(dir)?;
 
         for file in &files {
             // Skip if already loaded
@@ -441,16 +441,16 @@ impl ModuleLoader {
         Ok(self.loaded.values().cloned().collect())
     }
 
-    /// Find all .dream files in a directory recursively.
-    fn find_dream_files(dir: &Path) -> LoadResult<Vec<PathBuf>> {
+    /// Find all .sur files in a directory recursively.
+    fn find_surreal_files(dir: &Path) -> LoadResult<Vec<PathBuf>> {
         let mut files = Vec::new();
-        Self::find_dream_files_recursive(dir, &mut files)?;
+        Self::find_surreal_files_recursive(dir, &mut files)?;
         // Sort for deterministic ordering
         files.sort();
         Ok(files)
     }
 
-    fn find_dream_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) -> LoadResult<()> {
+    fn find_surreal_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) -> LoadResult<()> {
         if !dir.is_dir() {
             return Ok(());
         }
@@ -464,10 +464,10 @@ impl ModuleLoader {
             let path = entry.path();
 
             if path.is_dir() {
-                Self::find_dream_files_recursive(&path, files)?;
+                Self::find_surreal_files_recursive(&path, files)?;
             } else if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-                // Support both .dream and .dreamt (legacy extension)
-                if ext == "dream" || ext == "dreamt" {
+                // Support both .sur and .surt (legacy extension)
+                if ext == "sur" || ext == "surt" {
                     files.push(path);
                 }
             }
@@ -504,7 +504,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = create_temp_file(
             dir.path(),
-            "math.dream",
+            "math.sur",
             "pub fn add(x: int, y: int) -> int { x + y }",
         );
 
@@ -523,12 +523,12 @@ mod tests {
         // Create lib.tb that depends on math.tb
         create_temp_file(
             dir.path(),
-            "lib.dream",
+            "lib.sur",
             "mod math;\npub fn main() -> int { math::add(1, 2) }",
         );
         create_temp_file(
             dir.path(),
-            "math.dream",
+            "math.sur",
             "pub fn add(x: int, y: int) -> int { x + y }",
         );
 
@@ -548,12 +548,12 @@ mod tests {
         // Create lib.tb -> utils/mod.tb structure
         create_temp_file(
             dir.path(),
-            "lib.dream",
+            "lib.sur",
             "mod utils;",
         );
         create_temp_file(
             dir.path(),
-            "utils/mod.dream",
+            "utils/mod.sur",
             "pub fn helper() -> int { 42 }",
         );
 
@@ -569,11 +569,11 @@ mod tests {
     fn test_circular_dependency_detection() {
         let dir = TempDir::new().unwrap();
 
-        create_temp_file(dir.path(), "a.dream", "mod b;");
-        create_temp_file(dir.path(), "b.dream", "mod a;");
+        create_temp_file(dir.path(), "a.sur", "mod b;");
+        create_temp_file(dir.path(), "b.sur", "mod a;");
 
         let mut loader = ModuleLoader::new();
-        let result = loader.load(&dir.path().join("a.dream"));
+        let result = loader.load(&dir.path().join("a.sur"));
 
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -583,10 +583,10 @@ mod tests {
     #[test]
     fn test_module_not_found() {
         let dir = TempDir::new().unwrap();
-        create_temp_file(dir.path(), "lib.dream", "mod missing;");
+        create_temp_file(dir.path(), "lib.sur", "mod missing;");
 
         let mut loader = ModuleLoader::new();
-        let result = loader.load(&dir.path().join("lib.dream"));
+        let result = loader.load(&dir.path().join("lib.sur"));
 
         assert!(result.is_err());
         let err = result.unwrap_err();

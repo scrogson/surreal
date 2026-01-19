@@ -42,7 +42,7 @@ mod atoms {
 /// Returns: {:ok, %{name: atom, functions: [{name, arity}, ...]}} | {:error, reason}
 #[rustler::nif]
 fn parse<'a>(env: Env<'a>, source: String) -> Term<'a> {
-    use dream::compiler::Parser;
+    use surreal::compiler::Parser;
 
     let mut parser = Parser::new(&source);
 
@@ -52,7 +52,7 @@ fn parse<'a>(env: Env<'a>, source: String) -> Term<'a> {
             let module_infos: Vec<_> = modules.iter().map(|m| {
                 let name = m.name.as_str();
                 let funcs: Vec<_> = m.items.iter().filter_map(|item| {
-                    if let dream::compiler::Item::Function(f) = item {
+                    if let surreal::compiler::Item::Function(f) = item {
                         Some((f.name.as_str(), f.params.len()))
                     } else {
                         None
@@ -77,7 +77,7 @@ fn parse<'a>(env: Env<'a>, source: String) -> Term<'a> {
 /// The CoreErlangAST is in the format expected by compile:forms/2 with [from_core, binary].
 #[rustler::nif]
 fn generate_core_ast<'a>(env: Env<'a>, source: String) -> Term<'a> {
-    use dream::compiler::{Parser, check_modules};
+    use surreal::compiler::{Parser, check_modules};
 
     let mut parser = Parser::new(&source);
 
@@ -125,13 +125,13 @@ fn generate_core_ast<'a>(env: Env<'a>, source: String) -> Term<'a> {
 }
 
 /// Build Core Erlang AST as Erlang terms.
-fn build_core_ast<'a>(env: Env<'a>, module: &dream::compiler::Module) -> NifResult<Term<'a>> {
+fn build_core_ast<'a>(env: Env<'a>, module: &surreal::compiler::Module) -> NifResult<Term<'a>> {
     // Build module name as c_literal
     let module_name = build_c_literal(env, &module.name)?;
 
     // Build exports list
     let exports: Vec<Term<'a>> = module.items.iter().filter_map(|item| {
-        if let dream::compiler::Item::Function(f) = item {
+        if let surreal::compiler::Item::Function(f) = item {
             if f.is_pub {
                 Some(build_c_var(env, &f.name, f.params.len()))
             } else {
@@ -144,7 +144,7 @@ fn build_core_ast<'a>(env: Env<'a>, module: &dream::compiler::Module) -> NifResu
 
     // Build function definitions
     let fundefs: Vec<Term<'a>> = module.items.iter().filter_map(|item| {
-        if let dream::compiler::Item::Function(f) = item {
+        if let surreal::compiler::Item::Function(f) = item {
             match build_fundef(env, f) {
                 Ok(fundef) => Some(Ok(fundef)),
                 Err(e) => Some(Err(e)),
@@ -183,21 +183,21 @@ fn build_c_var<'a>(env: Env<'a>, name: &str, arity: usize) -> NifResult<Term<'a>
     Ok((atoms::c_var(), empty_list, (name_atom, arity)).encode(env))
 }
 
-fn build_fundef<'a>(env: Env<'a>, func: &dream::compiler::Function) -> NifResult<Term<'a>> {
+fn build_fundef<'a>(env: Env<'a>, func: &surreal::compiler::Function) -> NifResult<Term<'a>> {
     // {{c_var, [], {Name, Arity}}, {c_fun, [], Params, Body}}
     let var = build_c_var(env, &func.name, func.params.len())?;
     let fun = build_c_fun(env, func)?;
     Ok((var, fun).encode(env))
 }
 
-fn build_c_fun<'a>(env: Env<'a>, func: &dream::compiler::Function) -> NifResult<Term<'a>> {
+fn build_c_fun<'a>(env: Env<'a>, func: &surreal::compiler::Function) -> NifResult<Term<'a>> {
     // {c_fun, [], Params, Body}
     let empty_list: Vec<Term<'a>> = vec![];
 
     // Build params as c_var terms - extract name from pattern
     let params: Vec<Term<'a>> = func.params.iter().filter_map(|p| {
         // Extract variable name from pattern
-        if let dream::compiler::Pattern::Ident(name) = &p.pattern {
+        if let surreal::compiler::Pattern::Ident(name) = &p.pattern {
             Some(build_c_var_simple(env, name))
         } else {
             // For complex patterns, generate a placeholder name
@@ -218,7 +218,7 @@ fn build_c_var_simple<'a>(env: Env<'a>, name: &str) -> NifResult<Term<'a>> {
     Ok((atoms::c_var(), empty_list, name_atom).encode(env))
 }
 
-fn build_block<'a>(env: Env<'a>, block: &dream::compiler::Block) -> NifResult<Term<'a>> {
+fn build_block<'a>(env: Env<'a>, block: &surreal::compiler::Block) -> NifResult<Term<'a>> {
     let empty_list: Vec<Term<'a>> = vec![];
 
     // If block has a trailing expression, use that
@@ -229,7 +229,7 @@ fn build_block<'a>(env: Env<'a>, block: &dream::compiler::Block) -> NifResult<Te
     // Otherwise, try to get value from last statement
     if let Some(last_stmt) = block.stmts.last() {
         match last_stmt {
-            dream::compiler::Stmt::Expr { expr, .. } => {
+            surreal::compiler::Stmt::Expr { expr, .. } => {
                 return build_expr(env, expr);
             }
             _ => {}
@@ -241,8 +241,8 @@ fn build_block<'a>(env: Env<'a>, block: &dream::compiler::Block) -> NifResult<Te
     Ok((atoms::c_literal(), empty_list, atom).encode(env))
 }
 
-fn build_expr<'a>(env: Env<'a>, expr: &dream::compiler::Expr) -> NifResult<Term<'a>> {
-    use dream::compiler::Expr;
+fn build_expr<'a>(env: Env<'a>, expr: &surreal::compiler::Expr) -> NifResult<Term<'a>> {
+    use surreal::compiler::Expr;
 
     let empty_list: Vec<Term<'a>> = vec![];
 
@@ -293,7 +293,7 @@ fn build_expr<'a>(env: Env<'a>, expr: &dream::compiler::Expr) -> NifResult<Term<
     }
 }
 
-rustler::init!("dream_nif", load = on_load);
+rustler::init!("surreal_nif", load = on_load);
 
 fn on_load(_env: Env, _info: Term) -> bool {
     // Nothing to initialize, just return success

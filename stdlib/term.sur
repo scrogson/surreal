@@ -9,7 +9,7 @@ use erlang::std::erlang as erl;
 /// A dynamic Erlang term that can be pattern matched.
 ///
 /// Example:
-/// ```dream
+/// ```surreal
 /// fn handle_message(msg: Term) -> String {
 ///     match msg {
 ///         Term::Atom(a) => atom::to_string(a),

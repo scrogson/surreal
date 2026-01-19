@@ -45,8 +45,8 @@ pub fn handle_goto_definition(
 
                 // Search stdlib modules
                 for stdlib_mod in stdlib_modules {
-                    // Check for module name match (could be dream::io, io, etc.)
-                    if stdlib_mod.name.ends_with(mod_name) || stdlib_mod.name == format!("dream::{}", mod_name) {
+                    // Check for module name match (could be surreal::io, io, etc.)
+                    if stdlib_mod.name.ends_with(mod_name) || stdlib_mod.name == format!("surreal::{}", mod_name) {
                         if let Some(response) = find_function_in_module(stdlib_mod, &name, line_index, uri) {
                             return Some(response);
                         }

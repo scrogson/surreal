@@ -20,7 +20,7 @@ use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
 use rustyline::{Context, Editor, ExternalPrinter, Helper};
 
-use dream::compiler::{
+use surreal::compiler::{
     check_modules, resolve_stdlib_methods, CompilerError, CoreErlangEmitter,
     GenericFunctionRegistry, Item, ModuleContext, Parser,
 };
@@ -104,7 +104,7 @@ const RESULT_MARKER: &str = "\x00DREAM_RESULT\x00";
 ///   load:<filename> - load a Core Erlang file persistently
 ///   call:<module>:<function> - call a function in a loaded module
 ///   exports:<module> - get exports for a loaded module (in-memory)
-///   introspect:list_modules - list all dream:: modules
+///   introspect:list_modules - list all surreal:: modules
 ///   introspect:exports:<module> - get exports for a module (from .beam file)
 const EVAL_SERVER: &str = r#"
 Loop = fun Loop() ->
@@ -121,7 +121,7 @@ Loop = fun Loop() ->
                         [begin
                             Base = filename:basename(F, ".beam"),
                             list_to_atom(Base)
-                        end || F <- filelib:wildcard("dream::*.beam", Dir)]
+                        end || F <- filelib:wildcard("surreal::*.beam", Dir)]
                     || Dir <- Paths])),
                     io:format("~s~nok:~w~n", [<<0, "DREAM_RESULT", 0>>, Mods]),
                     Loop();
@@ -333,9 +333,9 @@ impl ModuleRegistry {
     fn add_module(&mut self, module_name: &str, exports: &[(String, u8)]) {
         let mut info = ModuleInfo::default();
 
-        // Extract the short module name (e.g., "dream::map" -> "map")
+        // Extract the short module name (e.g., "surreal::map" -> "map")
         let short_name = module_name
-            .strip_prefix("dream::")
+            .strip_prefix("surreal::")
             .unwrap_or(module_name);
 
         // Expected struct name for this module (e.g., "map" -> "Map")
@@ -704,10 +704,10 @@ impl ReplState {
 
     /// Load module registry by introspecting the BEAM
     fn load_registry(&mut self) -> Result<(), String> {
-        // Get list of dream:: modules
+        // Get list of surreal:: modules
         let modules_str = self.send_command("introspect:list_modules")?;
 
-        // Parse the module list: ['dream::map', 'dream::string', ...]
+        // Parse the module list: ['surreal::map', 'surreal::string', ...]
         let modules = parse_atom_list(&modules_str);
 
         for module in modules {
@@ -728,10 +728,10 @@ impl ReplState {
         let module_name = format!("__repl_{}", counter);
 
         // Generate Dream source (bindings will be injected into Core Erlang)
-        let (dream_source, expr_offset) = self.generate_dream_source(&module_name, expr_source);
+        let (surreal_source, expr_offset) = self.generate_surreal_source(&module_name, expr_source);
 
         // Parse
-        let mut parser = Parser::new(&dream_source);
+        let mut parser = Parser::new(&surreal_source);
         let modules = parser.parse_file_modules(&module_name).map_err(|e| {
             format_repl_error(expr_source, expr_offset, &e.message, e.span, e.help.as_deref())
         })?;
@@ -765,9 +765,9 @@ impl ReplState {
         // Compile to Core Erlang
         let registry = Arc::new(RwLock::new(GenericFunctionRegistry::new()));
 
-        // Prefix with dream::
+        // Prefix with surreal::
         let mut prefixed_module = module;
-        prefixed_module.name = format!("dream::{}", prefixed_module.name);
+        prefixed_module.name = format!("surreal::{}", prefixed_module.name);
 
         let module_context = ModuleContext::default();
         let mut emitter = CoreErlangEmitter::with_registry_and_context(registry, module_context);
@@ -796,7 +796,7 @@ impl ReplState {
 
         let _ = std::fs::remove_file(&core_file);
 
-        result.map(|v| format_dream_value(&v))
+        result.map(|v| format_surreal_value(&v))
     }
 
     /// Evaluate an expression and bind the result to a name
@@ -819,13 +819,13 @@ impl ReplState {
             self.add_binding(name.to_string());
         }
 
-        result.map(|v| format_dream_value(&v))
+        result.map(|v| format_surreal_value(&v))
     }
 
     /// Generate Dream source code wrapping an expression
     /// Uses an extern declaration for binding retrieval to get proper `any` type
     /// Returns (source, expr_offset) where expr_offset is the byte offset of the user expression
-    fn generate_dream_source(&self, module_name: &str, expr_source: &str) -> (String, usize) {
+    fn generate_surreal_source(&self, module_name: &str, expr_source: &str) -> (String, usize) {
         let bindings = self.bindings.borrow();
 
         let mut source = format!("mod {} {{\n", module_name);
@@ -997,20 +997,20 @@ fn capitalize_first(s: &str) -> String {
 }
 
 /// Format Erlang value as Dream syntax
-fn format_dream_value(value: &str) -> String {
+fn format_surreal_value(value: &str) -> String {
     let value = value.trim();
 
     if value == "none" {
         return "None".to_string();
     }
     if let Some(inner) = value.strip_prefix("{some,").and_then(|s| s.strip_suffix('}')) {
-        return format!("Some({})", format_dream_value(inner.trim()));
+        return format!("Some({})", format_surreal_value(inner.trim()));
     }
     if let Some(inner) = value.strip_prefix("{ok,").and_then(|s| s.strip_suffix('}')) {
-        return format!("Ok({})", format_dream_value(inner.trim()));
+        return format!("Ok({})", format_surreal_value(inner.trim()));
     }
     if let Some(inner) = value.strip_prefix("{error,").and_then(|s| s.strip_suffix('}')) {
-        return format!("Err({})", format_dream_value(inner.trim()));
+        return format!("Err({})", format_surreal_value(inner.trim()));
     }
 
     if let Some(inner) = value.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
@@ -1180,7 +1180,7 @@ fn format_single_field(field: &str) -> String {
         let clean_key = key.trim_matches('\'');
 
         // Format the value
-        let formatted_value = format_dream_value(value);
+        let formatted_value = format_surreal_value(value);
 
         format!("{}: {}", clean_key, formatted_value)
     } else {
@@ -1202,7 +1202,7 @@ fn print_help() {
     println!("  :bindings       Show current bindings");
     println!("  :reload         Reload module registry");
     println!("  :edit, :e       Open $EDITOR to write Dream code");
-    println!("  :load <file>    Compile and load a .dream file");
+    println!("  :load <file>    Compile and load a .sur file");
     println!();
     println!("Enter Dream expressions to evaluate them.");
     println!("Use 'let x = expr' to create bindings.");
@@ -1252,7 +1252,7 @@ pub fn run_shell() -> ExitCode {
     println!();
 
     loop {
-        let readline = rl.readline("dream> ");
+        let readline = rl.readline("surreal> ");
         match readline {
             Ok(line) => {
                 let line = line.trim();
@@ -1311,7 +1311,7 @@ pub fn run_shell() -> ExitCode {
                         cmd if cmd.starts_with(":load ") => {
                             let file = cmd.strip_prefix(":load ").unwrap().trim();
                             if file.is_empty() {
-                                eprintln!("Usage: :load <file.dream>");
+                                eprintln!("Usage: :load <file.sur>");
                             } else {
                                 match load_and_compile(&mut state, file) {
                                     Ok(msg) => println!("{}", msg),
@@ -1402,7 +1402,7 @@ pub fn run_shell_with_app(
 
     // Main REPL loop (same as run_shell)
     loop {
-        let readline = rl.readline("dream> ");
+        let readline = rl.readline("surreal> ");
         match readline {
             Ok(line) => {
                 let line = line.trim();
@@ -1461,7 +1461,7 @@ pub fn run_shell_with_app(
                         cmd if cmd.starts_with(":load ") => {
                             let file = cmd.strip_prefix(":load ").unwrap().trim();
                             if file.is_empty() {
-                                eprintln!("Usage: :load <file.dream>");
+                                eprintln!("Usage: :load <file.sur>");
                             } else {
                                 match load_and_compile(&mut state, file) {
                                     Ok(msg) => println!("{}", msg),
@@ -1514,8 +1514,8 @@ mod repl_edit {
 
 /// Open a temp file in the user's editor and compile/run it
 fn edit_and_eval(state: &mut ReplState) -> Result<Option<String>, String> {
-    // Create a temporary file with .dream extension
-    let temp_file = state.temp_dir.join("dream_repl_edit.dream");
+    // Create a temporary file with .sur extension
+    let temp_file = state.temp_dir.join("surreal_repl_edit.sur");
 
     // Use last edit if available, otherwise use template
     let initial_content = state.last_edit.as_deref().unwrap_or(EDIT_TEMPLATE);
@@ -1562,7 +1562,7 @@ fn edit_and_eval(state: &mut ReplState) -> Result<Option<String>, String> {
     compile_and_run_source(state, content, "repl_edit")
 }
 
-/// Load and compile a .dream file
+/// Load and compile a .sur file
 fn load_and_compile(state: &mut ReplState, path: &str) -> Result<String, String> {
     let path = std::path::Path::new(path);
     if !path.exists() {
@@ -1620,7 +1620,7 @@ fn compile_and_run_source(
         let prefixed_module = module.clone();
 
         let mut module_context = ModuleContext::default();
-        module_context.skip_stdlib_prefix = true;  // REPL modules don't get dream:: prefix
+        module_context.skip_stdlib_prefix = true;  // REPL modules don't get surreal:: prefix
         let mut emitter = CoreErlangEmitter::with_registry_and_context(registry.clone(), module_context);
 
         let core_erlang = emitter
@@ -1723,7 +1723,7 @@ mod tests {
             ("module_info".to_string(), 0),
             ("module_info".to_string(), 1),
         ];
-        registry.add_module("dream::math", &exports);
+        registry.add_module("surreal::math", &exports);
 
         let info = registry.modules.get("math").unwrap();
         assert!(info.functions.contains_key("add"));
@@ -1737,7 +1737,7 @@ mod tests {
             ("add".to_string(), 2),
             ("multiply".to_string(), 2),
         ];
-        registry.add_module("dream::math", &exports);
+        registry.add_module("surreal::math", &exports);
 
         // Should be stored under short name "math"
         assert!(registry.modules.contains_key("math"));
@@ -1754,7 +1754,7 @@ mod tests {
             ("add_all".to_string(), 1),
             ("multiply".to_string(), 2),
         ];
-        registry.add_module("dream::math", &exports);
+        registry.add_module("surreal::math", &exports);
 
         let completions = registry.get_completions("math");
         assert_eq!(completions.len(), 3);
@@ -1766,8 +1766,8 @@ mod tests {
     #[test]
     fn test_module_registry_get_module_names() {
         let mut registry = ModuleRegistry::new();
-        registry.add_module("dream::string", &[("reverse".to_string(), 1)]);
-        registry.add_module("dream::io", &[("println".to_string(), 1)]);
+        registry.add_module("surreal::string", &[("reverse".to_string(), 1)]);
+        registry.add_module("surreal::io", &[("println".to_string(), 1)]);
 
         let names = registry.get_module_names();
         assert!(names.contains(&"string".to_string()));
@@ -1783,43 +1783,43 @@ mod tests {
     }
 
     #[test]
-    fn test_format_dream_value_quoted_atoms() {
+    fn test_format_surreal_value_quoted_atoms() {
         // Atoms come from Erlang with single quotes
-        assert_eq!(format_dream_value("'ok'"), "ok");
-        assert_eq!(format_dream_value("'error'"), "error");
-        assert_eq!(format_dream_value("'true'"), "true");
-        assert_eq!(format_dream_value("'false'"), "false");
-        assert_eq!(format_dream_value("'my_atom'"), ":my_atom");
+        assert_eq!(format_surreal_value("'ok'"), "ok");
+        assert_eq!(format_surreal_value("'error'"), "error");
+        assert_eq!(format_surreal_value("'true'"), "true");
+        assert_eq!(format_surreal_value("'false'"), "false");
+        assert_eq!(format_surreal_value("'my_atom'"), ":my_atom");
     }
 
     #[test]
-    fn test_format_dream_value_numbers() {
-        assert_eq!(format_dream_value("42"), "42");
-        assert_eq!(format_dream_value("-123"), "-123");
+    fn test_format_surreal_value_numbers() {
+        assert_eq!(format_surreal_value("42"), "42");
+        assert_eq!(format_surreal_value("-123"), "-123");
     }
 
     #[test]
-    fn test_format_dream_value_strings() {
-        assert_eq!(format_dream_value("<<\"hello\">>"), "\"hello\"");
+    fn test_format_surreal_value_strings() {
+        assert_eq!(format_surreal_value("<<\"hello\">>"), "\"hello\"");
     }
 
     #[test]
-    fn test_format_dream_value_result_types() {
+    fn test_format_surreal_value_result_types() {
         // {ok, value} and {error, value} are formatted as Ok/Err
-        assert_eq!(format_dream_value("{ok,42}"), "Ok(42)");
-        assert_eq!(format_dream_value("{error,42}"), "Err(42)");
+        assert_eq!(format_surreal_value("{ok,42}"), "Ok(42)");
+        assert_eq!(format_surreal_value("{error,42}"), "Err(42)");
     }
 
     #[test]
-    fn test_format_dream_value_option_types() {
-        assert_eq!(format_dream_value("none"), "None");
-        assert_eq!(format_dream_value("{some,42}"), "Some(42)");
+    fn test_format_surreal_value_option_types() {
+        assert_eq!(format_surreal_value("none"), "None");
+        assert_eq!(format_surreal_value("{some,42}"), "Some(42)");
     }
 
     #[test]
-    fn test_format_dream_value_lists() {
+    fn test_format_surreal_value_lists() {
         // Lists pass through as-is
-        assert_eq!(format_dream_value("[1,2,3]"), "[1,2,3]");
-        assert_eq!(format_dream_value("[]"), "[]");
+        assert_eq!(format_surreal_value("[1,2,3]"), "[1,2,3]");
+        assert_eq!(format_surreal_value("[]"), "[]");
     }
 }

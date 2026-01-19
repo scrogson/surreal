@@ -1,6 +1,6 @@
 // Tests for the enumerable module and Iter trait
 //
-// Uses Dream stdlib modules for idiomatic code.
+// Uses Surreal stdlib modules for idiomatic code.
 
 use io::{format};
 

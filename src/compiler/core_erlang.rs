@@ -51,9 +51,9 @@ impl GenericFunctionRegistry {
                     // Register with full module name
                     self.functions
                         .insert((module_name.clone(), func.name.clone()), func.clone());
-                    // Also register without the dream:: prefix for easier lookup
+                    // Also register without the surreal:: prefix for easier lookup
                     let short_name = module_name
-                        .strip_prefix("dream::")
+                        .strip_prefix("surreal::")
                         .unwrap_or(&module_name);
                     self.functions
                         .insert((short_name.to_string(), func.name.clone()), func);
@@ -160,7 +160,7 @@ pub struct CoreErlangEmitter {
     /// Maps Dream extern module name -> BEAM module name
     /// Used for #[name = "Elixir.Enum"] attribute support
     extern_module_names: HashMap<String, String>,
-    /// Maps (module, dream_name, arity) -> BEAM function name
+    /// Maps (module, surreal_name, arity) -> BEAM function name
     /// Used for #[name = "encode!"] attribute support on functions
     extern_function_names: HashMap<(String, String, usize), String>,
     /// Struct metadata including record names (struct_name -> StructInfo)
@@ -257,7 +257,7 @@ impl CoreErlangEmitter {
         self.extern_module_names = mappings;
     }
 
-    /// Set the extern function name mappings ((module, dream_name, arity) -> BEAM name).
+    /// Set the extern function name mappings ((module, surreal_name, arity) -> BEAM name).
     /// Used for #[name = "encode!"] attribute support on functions.
     pub fn set_extern_function_names(
         &mut self,
@@ -277,7 +277,7 @@ impl CoreErlangEmitter {
     pub fn register_generics(&self, registry: &mut GenericFunctionRegistry) {
         for (_name, func) in &self.generic_functions {
             registry.register(&self.module_name, func);
-            // Also register without the dream:: prefix for easier lookup (stdlib modules)
+            // Also register without the surreal:: prefix for easier lookup (stdlib modules)
             let short_name = self.module_name
                 .strip_prefix(Self::STDLIB_PREFIX)
                 .unwrap_or(&self.module_name);
@@ -292,21 +292,21 @@ impl CoreErlangEmitter {
         (self.module_name.clone(), funcs)
     }
 
-    /// Known stdlib modules that live under the dream:: namespace.
+    /// Known stdlib modules that live under the surreal:: namespace.
     const STDLIB_MODULES: &'static [&'static str] = &[
         "io", "list", "enumerable", "iterator", "option", "result",
         "string", "map", "file", "timer", "display", "convert",
         "process", "genserver", "supervisor", "application", "logger",
     ];
 
-    /// Resolve a simple module name string, adding dream:: prefix for Dream modules.
-    /// All Dream modules (both stdlib and user modules) get the dream:: prefix.
+    /// Resolve a simple module name string, adding surreal:: prefix for Dream modules.
+    /// All Surreal modules (both stdlib and user modules) get the surreal:: prefix.
     fn resolve_module_name(module: &str) -> String {
-        // If already has dream:: prefix, use as-is
+        // If already has surreal:: prefix, use as-is
         if module.starts_with(Self::STDLIB_PREFIX) {
             module.to_string()
         } else {
-            // Add dream:: prefix for all Dream modules
+            // Add surreal:: prefix for all Dream modules
             format!("{}{}", Self::STDLIB_PREFIX, module)
         }
     }
@@ -321,8 +321,8 @@ impl CoreErlangEmitter {
                 if module.segments.len() > 1 {
                     path_str
                 } else if Self::STDLIB_MODULES.contains(&path_str.as_str()) {
-                    // Stdlib module - add dream:: prefix
-                    format!("dream::{}", path_str)
+                    // Stdlib module - add surreal:: prefix
+                    format!("surreal::{}", path_str)
                 } else {
                     // User module - use as-is
                     path_str
@@ -335,7 +335,7 @@ impl CoreErlangEmitter {
                     resolved
                 } else {
                     // Fall back to unresolved string if context is not available
-                    // (e.g., standalone files without dream.toml)
+                    // (e.g., standalone files without surreal.toml)
                     module.to_unresolved_string()
                 }
             }
@@ -349,8 +349,8 @@ impl CoreErlangEmitter {
         // First check if it's a stdlib module by looking at the first segment
         let first_segment = path.split("::").next().unwrap_or(path);
         if Self::STDLIB_MODULES.contains(&first_segment) {
-            // Stdlib module - add dream:: prefix to first segment
-            format!("dream::{}", path)
+            // Stdlib module - add surreal:: prefix to first segment
+            format!("surreal::{}", path)
         } else if let Some(pkg) = &self.module_context.package_name {
             // User module in a package - prepend package name
             format!("{}::{}", pkg, path)
@@ -752,7 +752,7 @@ impl CoreErlangEmitter {
         let key = (trait_name.to_string(), method_name.to_string());
         let impl_types = self.trait_impls.get(&key).cloned().unwrap_or_default();
 
-        // Get current module name without dream:: prefix (for stdlib)
+        // Get current module name without surreal:: prefix (for stdlib)
         let current_module = self
             .module_name
             .strip_prefix(Self::STDLIB_PREFIX)
@@ -866,7 +866,7 @@ impl CoreErlangEmitter {
     }
 
     /// Emit universal trait dispatch that works for any struct from any module.
-    /// Parses the struct tag (e.g., 'module::Type') and calls dream::module:Trait_Type_method
+    /// Parses the struct tag (e.g., 'module::Type') and calls surreal::module:Trait_Type_method
     /// using erlang:apply/3 for dynamic dispatch.
     fn emit_universal_trait_dispatch(
         &mut self,
@@ -876,9 +876,9 @@ impl CoreErlangEmitter {
         receiver_var: &str,
         args: &[SpannedExpr],
     ) -> CoreErlangResult<()> {
-        // The struct tag is an atom like 'dream::module::Type'
+        // The struct tag is an atom like 'surreal::module::Type'
         // We need to parse it at runtime to get the module and type
-        // Then call dream::module:Trait_Type_method(receiver, args...)
+        // Then call surreal::module:Trait_Type_method(receiver, args...)
 
         // Convert atom to list for parsing
         let tag_list_var = self.fresh_var();
@@ -888,7 +888,7 @@ impl CoreErlangEmitter {
         ));
         self.newline();
 
-        // Split on "::" to get parts like ["dream", "http_api", "models", "user", "User"]
+        // Split on "::" to get parts like ["surreal", "http_api", "models", "user", "User"]
         let parts_var = self.fresh_var();
         self.emit(&format!(
             "let <{}> = call 'string':'split'({}, \"::\",'all') in",
@@ -912,7 +912,7 @@ impl CoreErlangEmitter {
         ));
         self.newline();
 
-        // Join module parts with "::" to get full module name (e.g., "dream::http_api::models::user")
+        // Join module parts with "::" to get full module name (e.g., "surreal::http_api::models::user")
         let full_module_var = self.fresh_var();
         self.emit(&format!(
             "let <{}> = call 'erlang':'list_to_atom'(call 'lists':'flatten'(call 'lists':'join'(\"::\", {}))) in",
@@ -977,7 +977,7 @@ impl CoreErlangEmitter {
         for (i, (actual_type, func_prefix)) in impl_types.iter().enumerate() {
             let mangled_name = format!("{}_{}", func_prefix, method_name);
 
-            // Match on fully qualified atom 'module::Type' (includes dream:: prefix)
+            // Match on fully qualified atom 'module::Type' (includes surreal:: prefix)
             // Use actual_type for the pattern (not func_prefix which may include trait name)
             self.emit(&format!("<'{}::{}'>", self.module_name, actual_type));
             self.emit(" when 'true' ->");
@@ -1022,9 +1022,9 @@ impl CoreErlangEmitter {
     /// Uses the __struct__ tag 'module::Type' atom to dispatch to the correct module.
     ///
     /// The __struct__ tag format is 'beam_module::TypeName', e.g.:
-    ///   'dream::http_api::models::user::User'
+    ///   'surreal::http_api::models::user::User'
     /// We need to:
-    ///   - Module: all parts except last joined by "::" -> 'dream::http_api::models::user'
+    ///   - Module: all parts except last joined by "::" -> 'surreal::http_api::models::user'
     ///   - Type: last part -> 'User'
     ///   - Function: Type_method -> 'User_to_json'
     fn emit_dynamic_method_dispatch(
@@ -1059,7 +1059,7 @@ impl CoreErlangEmitter {
         self.newline();
         self.emit("in ");
 
-        // Split on "::" using string:split/3 -> ["dream", "http_api", "models", "user", "User"]
+        // Split on "::" using string:split/3 -> ["surreal", "http_api", "models", "user", "User"]
         // "::" is [58, 58] in character codes
         let parts_var = self.fresh_var();
         self.emit(&format!(
@@ -1078,7 +1078,7 @@ impl CoreErlangEmitter {
         self.newline();
         self.emit("in ");
 
-        // Extract module parts: lists:droplast(Parts) -> ["dream", "http_api", "models", "user"]
+        // Extract module parts: lists:droplast(Parts) -> ["surreal", "http_api", "models", "user"]
         let mod_parts_var = self.fresh_var();
         self.emit(&format!(
             "let <{}> = call 'lists':'droplast'({})",
@@ -1087,7 +1087,7 @@ impl CoreErlangEmitter {
         self.newline();
         self.emit("in ");
 
-        // Join module parts with "::" -> "dream::http_api::models::user"
+        // Join module parts with "::" -> "surreal::http_api::models::user"
         // lists:join("::", ModParts) returns a nested list, flatten it
         let mod_str_var = self.fresh_var();
         self.emit(&format!(
@@ -1295,10 +1295,10 @@ impl CoreErlangEmitter {
     }
 
     /// Prefix for Dream stdlib modules in the BEAM.
-    pub const STDLIB_PREFIX: &'static str = "dream::";
+    pub const STDLIB_PREFIX: &'static str = "surreal::";
 
     /// Get the BEAM module name for a Dream module.
-    /// Resolves stdlib module names to their full dream:: prefixed names.
+    /// Resolves stdlib module names to their full surreal:: prefixed names.
     pub fn beam_module_name(name: &str) -> String {
         Self::resolve_module_name(name)
     }
@@ -1311,7 +1311,7 @@ impl CoreErlangEmitter {
 
     /// Emit a complete Core Erlang module.
     pub fn emit_module(&mut self, module: &Module) -> CoreErlangResult<String> {
-        // All Dream modules are prefixed with dream:: (like Elixir uses Elixir.)
+        // All Surreal modules are prefixed with surreal:: (like Elixir uses Elixir.)
         // This ensures Dream modules are properly namespaced on the BEAM
         // Unless skip_stdlib_prefix is set (for REPL modules)
         self.module_name = if self.module_context.skip_stdlib_prefix {
@@ -2573,7 +2573,7 @@ impl CoreErlangEmitter {
                         StringPart::Expr(e) => {
                             // Convert expression to string using display::to_string
                             // (doesn't add quotes around strings)
-                            self.emit("call 'dream::display':'to_string'(");
+                            self.emit("call 'surreal::display':'to_string'(");
                             self.emit_expr(e)?;
                             self.emit(")");
                         }
@@ -2739,7 +2739,7 @@ impl CoreErlangEmitter {
                             self.emit_args(args)?;
                             self.emit(")");
                         } else if let Some((module, original_name)) = self.imports.get(name) {
-                            // Imported function call - add dream:: prefix for Dream stdlib modules
+                            // Imported function call - add surreal:: prefix for Dream stdlib modules
                             self.emit(&format!(
                                 "call '{}':'{}'(",
                                 Self::beam_module_name(&module.to_lowercase()),
@@ -2874,7 +2874,7 @@ impl CoreErlangEmitter {
                                 self.emit(")");
                             }
                         } else {
-                            // Module:Function call - add dream:: prefix for Dream modules
+                            // Module:Function call - add surreal:: prefix for Dream modules
                             // Check if this is a call with type args (explicit or inferred)
                             if !effective_type_args.is_empty() {
                                 // Cross-module generic call: genserver::start_typed::<Counter>()
@@ -2932,7 +2932,7 @@ impl CoreErlangEmitter {
                                 // Check if first segment is an imported type
                                 if let Some((module, _original_name)) = self.imports.get(first) {
                                     // Imported type impl method call: User::new() where User is imported
-                                    // Becomes: call 'dream::module':'Type_method'(args)
+                                    // Becomes: call 'surreal::module':'Type_method'(args)
                                     let mangled_name = format!("{}_{}", first, second);
                                     self.emit(&format!(
                                         "call '{}':'{}'",
@@ -2943,7 +2943,7 @@ impl CoreErlangEmitter {
                                     self.emit_args(args)?;
                                     self.emit(")");
                                 } else if Self::STDLIB_MODULES.contains(&first.as_str()) {
-                                    // Stdlib module call: io::println -> dream::io::println
+                                    // Stdlib module call: io::println -> surreal::io::println
                                     // These take precedence over extern modules with the same name
                                     self.emit(&format!(
                                         "call '{}':'{}'",
@@ -2966,10 +2966,10 @@ impl CoreErlangEmitter {
                                     self.emit(")");
                                 } else {
                                     // Check if this is an external crate call (e.g., serde_json::to_string_value)
-                                    // If so, resolve to the crate's lib module: dream::crate::crate
+                                    // If so, resolve to the crate's lib module: surreal::crate::crate
                                     let module_name = if self.module_context.dependencies.contains(&segments[0]) {
                                         // External crate - lib module is at crate::crate
-                                        format!("dream::{}::{}", segments[0], segments[0])
+                                        format!("surreal::{}::{}", segments[0], segments[0])
                                     } else {
                                         Self::beam_module_name(&segments[0].to_lowercase())
                                     };
@@ -2994,7 +2994,7 @@ impl CoreErlangEmitter {
 
                         if is_type && segments.len() == 3 {
                             // Cross-module impl method call: module::Type::method()
-                            // Becomes: call 'dream::module':'Type_method'(args)
+                            // Becomes: call 'surreal::module':'Type_method'(args)
                             let module = &segments[0];
                             let type_name = &segments[1];
                             let method = &segments[2];
@@ -3280,7 +3280,7 @@ impl CoreErlangEmitter {
                 }
                 // Priority 2: Check if it's an imported function
                 else if let Some((module, original_name)) = self.imports.get(method) {
-                    // Imported function call - add dream:: prefix for Dream stdlib modules
+                    // Imported function call - add surreal:: prefix for Dream stdlib modules
                     self.emit(&format!(
                         "call '{}':'{}'(",
                         Self::beam_module_name(&module.to_lowercase()),
@@ -5132,7 +5132,7 @@ impl CoreErlangEmitter {
                     let (module_name, type_name) = if let Some((module, original_name)) = self.imports.get(name) {
                         (module.to_lowercase(), original_name.clone())
                     } else {
-                        // Local struct - use current module name (strip dream:: prefix for stdlib)
+                        // Local struct - use current module name (strip surreal:: prefix for stdlib)
                         let module_prefix = self.module_name.strip_prefix(Self::STDLIB_PREFIX).unwrap_or(&self.module_name);
                         (module_prefix.to_string(), name.clone())
                     };
@@ -5379,8 +5379,8 @@ mod tests {
         "#;
 
         let result = emit_core_erlang(source).unwrap();
-        // All Dream modules are prefixed with dream:: (like Elixir uses Elixir.)
-        assert!(result.contains("module 'dream::test'"));
+        // All Surreal modules are prefixed with surreal:: (like Elixir uses Elixir.)
+        assert!(result.contains("module 'surreal::test'"));
         assert!(result.contains("'add'/2"));
         assert!(result.contains("call 'erlang':'+'"));
     }
@@ -5959,10 +5959,10 @@ mod tests {
     }
 
     #[test]
-    fn test_stdlib_module_call_gets_dream_prefix() {
-        // Stdlib modules like io, logger should be prefixed with dream::
+    fn test_stdlib_module_call_gets_surreal_prefix() {
+        // Stdlib modules like io, logger should be prefixed with surreal::
         // NOT treated as extern calls to Erlang's io/logger modules.
-        // This tests that io::println compiles to 'dream::io':'println'
+        // This tests that io::println compiles to 'surreal::io':'println'
         // rather than 'io':'println' (which would fail at runtime).
         let source = r#"
             mod test {
@@ -5974,10 +5974,10 @@ mod tests {
 
         let result = emit_core_erlang(source).unwrap();
 
-        // Should call dream::io, NOT bare io
+        // Should call surreal::io, NOT bare io
         assert!(
-            result.contains("call 'dream::io':'println'"),
-            "Expected 'dream::io':'println' but got:\n{}",
+            result.contains("call 'surreal::io':'println'"),
+            "Expected 'surreal::io':'println' but got:\n{}",
             result
         );
         // Make sure it's NOT calling the bare Erlang io module
@@ -5989,8 +5989,8 @@ mod tests {
     }
 
     #[test]
-    fn test_stdlib_logger_call_gets_dream_prefix() {
-        // Logger is also a stdlib module that should get the dream:: prefix
+    fn test_stdlib_logger_call_gets_surreal_prefix() {
+        // Logger is also a stdlib module that should get the surreal:: prefix
         let source = r#"
             mod test {
                 pub fn log_info(msg: String) -> Atom {
@@ -6001,10 +6001,10 @@ mod tests {
 
         let result = emit_core_erlang(source).unwrap();
 
-        // Should call dream::logger, NOT bare logger
+        // Should call surreal::logger, NOT bare logger
         assert!(
-            result.contains("call 'dream::logger':'info'"),
-            "Expected 'dream::logger':'info' but got:\n{}",
+            result.contains("call 'surreal::logger':'info'"),
+            "Expected 'surreal::logger':'info' but got:\n{}",
             result
         );
     }
@@ -6012,7 +6012,7 @@ mod tests {
     #[test]
     fn test_extern_call_with_colon_prefix_bypasses_stdlib() {
         // Direct extern calls with : prefix should call Erlang directly
-        // :logger::info should call 'logger':'info', not 'dream::logger':'info'
+        // :logger::info should call 'logger':'info', not 'surreal::logger':'info'
         let source = r#"
             mod test {
                 pub fn direct_log(msg: String) -> Atom {
@@ -6029,17 +6029,17 @@ mod tests {
             "Expected direct 'logger':'info' call but got:\n{}",
             result
         );
-        // Should NOT have dream:: prefix for direct extern calls
+        // Should NOT have surreal:: prefix for direct extern calls
         assert!(
-            !result.contains("call 'dream::logger':'info'"),
-            "Direct extern call should NOT have dream:: prefix, got:\n{}",
+            !result.contains("call 'surreal::logger':'info'"),
+            "Direct extern call should NOT have surreal:: prefix, got:\n{}",
             result
         );
     }
 
     #[test]
-    fn test_stdlib_import_gets_dream_prefix() {
-        // `use logger::info; info(msg)` should compile to 'dream::logger':'info'
+    fn test_stdlib_import_gets_surreal_prefix() {
+        // `use logger::info; info(msg)` should compile to 'surreal::logger':'info'
         // just like `logger::info(msg)` does.
         let source = r#"
             mod test {
@@ -6053,10 +6053,10 @@ mod tests {
 
         let result = emit_core_erlang(source).unwrap();
 
-        // Should call dream::logger, NOT bare logger
+        // Should call surreal::logger, NOT bare logger
         assert!(
-            result.contains("call 'dream::logger':'info'"),
-            "Expected 'dream::logger':'info' for stdlib import but got:\n{}",
+            result.contains("call 'surreal::logger':'info'"),
+            "Expected 'surreal::logger':'info' for stdlib import but got:\n{}",
             result
         );
         // Make sure it's NOT calling the bare Erlang logger module
@@ -6068,8 +6068,8 @@ mod tests {
     }
 
     #[test]
-    fn test_stdlib_group_import_gets_dream_prefix() {
-        // `use io::{println, print}; println(msg)` should compile to 'dream::io':'println'
+    fn test_stdlib_group_import_gets_surreal_prefix() {
+        // `use io::{println, print}; println(msg)` should compile to 'surreal::io':'println'
         let source = r#"
             mod test {
                 use io::{println};
@@ -6082,10 +6082,10 @@ mod tests {
 
         let result = emit_core_erlang(source).unwrap();
 
-        // Should call dream::io
+        // Should call surreal::io
         assert!(
-            result.contains("call 'dream::io':'println'"),
-            "Expected 'dream::io':'println' for stdlib group import but got:\n{}",
+            result.contains("call 'surreal::io':'println'"),
+            "Expected 'surreal::io':'println' for stdlib group import but got:\n{}",
             result
         );
     }
