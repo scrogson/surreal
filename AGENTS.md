@@ -65,24 +65,24 @@ Without bindings, calls like `jason::encode` would compile to `'surreal::project
 
 ### Generating Bindings
 
-After fetching dependencies with `surrealc deps get`, generate bindings:
+After fetching dependencies with `surreal deps get`, generate bindings:
 
 ```bash
-surrealc deps bindgen
+surreal deps bindgen
 ```
 
-This creates `.surt` files in `_build/bindings/` by scanning dependency source files (`.erl` and `.ex` files) and extracting:
+This creates `.surreal` files in `_build/bindings/` by scanning dependency source files (`.erl` and `.ex` files) and extracting:
 - Module names
 - Function specs/signatures
 - Type definitions
 - Struct definitions
 
-### The `.surt` File Format
+### The `.surreal` File Format
 
 Generated bindings use `extern mod` declarations with a `#[name]` attribute:
 
 ```surreal
-// _build/bindings/jason.surt
+// _build/bindings/jason.surreal
 #[name = "Elixir.Jason"]
 extern mod jason {
     fn decode(arg0: Any, arg1: [Any]) -> Result<Any, Any>;
@@ -99,9 +99,9 @@ Key elements:
 
 ### Using Bindings in Dream Code
 
-1. **Declare the module** in your `lib.sur`:
+1. **Declare the module** in your `lib.surreal`:
    ```surreal
-   mod jason;  // Loads from _build/bindings/jason.surt
+   mod jason;  // Loads from _build/bindings/jason.surreal
    ```
 
 2. **Call functions** using the Dream module name:
@@ -113,11 +113,11 @@ Key elements:
 ### Troubleshooting
 
 **"undefined function 'surreal::project::module':function/N"**
-- Bindings weren't generated. Run `surrealc deps bindgen`
+- Bindings weren't generated. Run `surreal deps bindgen`
 
 **"cannot find module `module`"**
-- The `.surt` file doesn't exist in `_build/bindings/`
-- Run `surrealc deps bindgen` to generate it
+- The `.surreal` file doesn't exist in `_build/bindings/`
+- Run `surreal deps bindgen` to generate it
 
 ### Manual Extern Declarations
 
@@ -167,13 +167,13 @@ const STDLIB_MODULES: &'static [&'static str] = &[
 
 ### Common Bug Pattern
 
-If a stdlib module also has an extern binding (e.g., `stdlib/erlang/std/io.sur` defines `extern mod io`), the typechecker might incorrectly treat `io::println` as an extern call. The fix is to check `is_stdlib_module()` BEFORE checking `is_extern_module()`.
+If a stdlib module also has an extern binding (e.g., `stdlib/erlang/std/io.surreal` defines `extern mod io`), the typechecker might incorrectly treat `io::println` as an extern call. The fix is to check `is_stdlib_module()` BEFORE checking `is_extern_module()`.
 
 ### Debugging Module Resolution
 
 1. Build with `--target core` to see generated Core Erlang:
    ```bash
-   surrealc build project --target core
+   surreal build project --target core
    ```
 
 2. Check the output for correct module prefixes:
@@ -216,7 +216,7 @@ just stdlib
 ```
 
 This command:
-1. Builds all `stdlib/*.sur` files
+1. Builds all `stdlib/*.surreal` files
 2. Copies the resulting `.beam` files to `target/stdlib/`
 
 **IMPORTANT**: The typechecker loads stdlib source files directly for type information, but runtime execution uses the `.beam` files in `target/stdlib/`. Both must be in sync.
@@ -225,11 +225,11 @@ This command:
 
 1. **Macro expander uses `target/stdlib/`**: When derive macros run, they load modules like `surreal::syn` from `target/stdlib/`. If these .beam files are stale, macros will malfunction.
 
-2. **Building standalone stdlib files outputs to current directory**: Running `surrealc build stdlib/syn.sur` creates `surreal::syn.beam` in the *current directory*, NOT in `target/stdlib/`.
+2. **Building standalone stdlib files outputs to current directory**: Running `surreal build stdlib/syn.surreal` creates `surreal::syn.beam` in the *current directory*, NOT in `target/stdlib/`.
 
 3. **After modifying stdlib, use `just stdlib`** (preferred) or manually copy .beam files:
    ```bash
-   surrealc build stdlib/syn.sur
+   surreal build stdlib/syn.surreal
    cp "surreal::syn.beam" target/stdlib/
    ```
 
@@ -243,13 +243,13 @@ This command:
 
 1. Check timestamps:
    ```bash
-   ls -la target/stdlib.sur::syn.beam stdlib/syn.sur
+   ls -la target/stdlib/surreal::syn.beam stdlib/syn.surreal
    ```
 
 2. Force rebuild and copy:
    ```bash
-   touch stdlib/syn.sur
-   surrealc build stdlib/syn.sur
+   touch stdlib/syn.surreal
+   surreal build stdlib/syn.surreal
    cp "surreal::syn.beam" target/stdlib/
    ```
 

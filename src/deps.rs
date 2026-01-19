@@ -900,7 +900,7 @@ impl DepsManager {
     }
 
     /// Generate bindings for all dependencies.
-    /// Creates .surt files in _build/bindings/ for each dependency with .erl source files.
+    /// Creates .surreal binding files in _build/bindings/ for each dependency with .erl source files.
     pub fn generate_bindings(&self) -> DepsResult<()> {
         let deps_dir = self.deps_dir();
 
@@ -986,7 +986,7 @@ impl DepsManager {
         bindings_dir: &Path,
     ) -> DepsResult<()> {
         // Use bindgen to process each .erl file
-        let output_file = bindings_dir.join(format!("{}.sur", pkg_name));
+        let output_file = bindings_dir.join(format!("{}.surreal", pkg_name));
 
         // Convert PathBuf to paths that bindgen expects
         let file_paths: Vec<std::path::PathBuf> = erl_files.to_vec();
@@ -1010,7 +1010,7 @@ impl DepsManager {
         ex_files: &[PathBuf],
         bindings_dir: &Path,
     ) -> DepsResult<()> {
-        let output_file = bindings_dir.join(format!("{}.sur", pkg_name));
+        let output_file = bindings_dir.join(format!("{}.surreal", pkg_name));
 
         // Skip if already generated (Erlang bindings take precedence)
         if output_file.exists() {
@@ -1034,7 +1034,7 @@ impl DepsManager {
     /// Generate stub bindings for an Elixir dependency when no @spec are found.
     /// Creates a basic extern mod declaration that allows using the module.
     fn generate_elixir_stub_bindings(&self, pkg_name: &str, bindings_dir: &Path) -> DepsResult<()> {
-        let output_file = bindings_dir.join(format!("{}.sur", pkg_name));
+        let output_file = bindings_dir.join(format!("{}.surreal", pkg_name));
 
         // Skip if already generated
         if output_file.exists() {

@@ -43,13 +43,13 @@ stubs: build
     KERNEL=$(echo "$ERL_ROOT"/lib/kernel-*/src)
 
     echo "Generating stubs from $ERL_ROOT..."
-    ./target/release/surrealc bindgen "$ERTS/erlang.erl" --output stubs/erlang.sur
-    ./target/release/surrealc bindgen "$STDLIB/lists.erl" --output stubs/lists.sur
-    ./target/release/surrealc bindgen "$STDLIB/maps.erl" --output stubs/maps.sur
-    ./target/release/surrealc bindgen "$STDLIB/io.erl" --output stubs/io.sur
-    ./target/release/surrealc bindgen "$KERNEL/file.erl" --output stubs/file.sur
+    ./target/release/surreal bindgen "$ERTS/erlang.erl" --output stubs/erlang.surreal
+    ./target/release/surreal bindgen "$STDLIB/lists.erl" --output stubs/lists.surreal
+    ./target/release/surreal bindgen "$STDLIB/maps.erl" --output stubs/maps.surreal
+    ./target/release/surreal bindgen "$STDLIB/io.erl" --output stubs/io.surreal
+    ./target/release/surreal bindgen "$KERNEL/file.erl" --output stubs/file.surreal
     echo "Generated stubs:"
-    wc -l stubs/*.sur
+    wc -l stubs/*.surreal
 
 # Clean build artifacts
 clean:
@@ -74,7 +74,7 @@ example name:
 
 # Run a single-file example
 example-run name:
-    cargo run --release -- run examples/{{name}}.sur
+    cargo run --release -- run examples/{{name}}.surreal
 
 # Rebuild all stdlib modules (compiles all files in a single pass)
 stdlib:

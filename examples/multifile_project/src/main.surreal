@@ -1,8 +1,8 @@
 /// Multi-file project example
 ///
 /// This demonstrates a Surreal project with multiple modules.
-/// Build with: surrealc build
-/// Run with: surrealc run
+/// Build with: surreal build
+/// Run with: surreal run
 
 pub fn main() -> atom {
     // Use the math module

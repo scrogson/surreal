@@ -3,5 +3,4 @@
 .beads/issues.jsonl merge=beads
 
 # GitHub Linguist override
-*.sur linguist-language=rust
-*.surt linguist-language=rust
+*.surreal linguist-language=rust

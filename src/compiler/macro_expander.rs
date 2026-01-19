@@ -361,11 +361,11 @@ mod tests {
     #[test]
     fn test_macro_error_with_full_context() {
         let err = MacroError::with_span("expected struct", 100..150)
-            .in_file("src/lib.sur")
+            .in_file("src/lib.surreal")
             .in_macro("my_derive");
         assert_eq!(
             format!("{}", err),
-            "Macro error in `my_derive` (src/lib.sur) at 100..150: expected struct"
+            "Macro error in `my_derive` (src/lib.surreal) at 100..150: expected struct"
         );
     }
 

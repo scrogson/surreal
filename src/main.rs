@@ -14,7 +14,7 @@ use surreal::{
         CompilerError, CompilerWarning, CoreErlangEmitter, GenericFunctionRegistry, Item, MacroRegistry,
         Module, ModuleContext, ModuleLoader, Parser as DreamParser, SharedGenericRegistry,
     },
-    config::{generate_surreal_toml, generate_main_sur, ApplicationConfig, CompileOptions, ProjectConfig},
+    config::{generate_surreal_toml, generate_main_surreal, ApplicationConfig, CompileOptions, ProjectConfig},
     deps::DepsManager,
 };
 use std::collections::HashSet;
@@ -82,7 +82,7 @@ fn load_stdlib_uncached() -> StdlibData {
 }
 
 #[derive(Parser)]
-#[command(name = "surrealc")]
+#[command(name = "surreal")]
 #[command(author, version, about = "Surreal programming language", long_about = None)]
 struct Cli {
     #[command(subcommand)]
@@ -157,7 +157,7 @@ enum Commands {
         #[arg(long, value_delimiter = ',')]
         features: Vec<String>,
     },
-    /// Generate .surt type stubs from Erlang source files
+    /// Generate .surreal binding files from Erlang source files
     Bindgen {
         /// Erlang source files (.erl) to parse
         #[arg(required = true)]
@@ -295,18 +295,18 @@ fn cmd_new(name: &str) -> ExitCode {
         return ExitCode::from(1);
     }
 
-    // Write src/main.sur
-    let main_path = src_dir.join("main.sur");
-    if let Err(e) = fs::write(&main_path, generate_main_sur(name)) {
-        eprintln!("Error writing main.sur: {}", e);
+    // Write src/main.surreal
+    let main_path = src_dir.join("main.surreal");
+    if let Err(e) = fs::write(&main_path, generate_main_surreal(name)) {
+        eprintln!("Error writing main.surreal: {}", e);
         return ExitCode::from(1);
     }
 
     println!("Created project '{}'", name);
     println!();
     println!("  cd {}", name);
-    println!("  surrealc build");
-    println!("  surrealc run");
+    println!("  surreal build");
+    println!("  surreal run");
 
     ExitCode::SUCCESS
 }
@@ -401,7 +401,7 @@ fn cmd_build(file: Option<&Path>, target: &str, output: Option<&Path>, features:
 
     println!("Compiling {}...", config.package.name);
 
-    // Load all .sur files in src/ directory with package context
+    // Load all .surreal files in src/ directory with package context
     // This enables Rust-style module naming (e.g., my_app::users::auth)
     let mut loader = ModuleLoader::with_package(
         config.package.name.clone(),
@@ -453,7 +453,7 @@ fn cmd_build(file: Option<&Path>, target: &str, output: Option<&Path>, features:
     result
 }
 
-/// Build a standalone .sur file.
+/// Build a standalone .surreal file.
 fn build_standalone_file(source_file: &Path, target: &str, output: Option<&Path>, features: &[String]) -> ExitCode {
     if !source_file.exists() {
         eprintln!("Error: file not found: {}", source_file.display());
@@ -1629,7 +1629,7 @@ fn find_stdlib_dir() -> Option<PathBuf> {
     // Try relative to executable first
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            // Check ../../stdlib (for target/debug/surrealc -> stdlib/)
+            // Check ../../stdlib (for target/debug/surreal -> stdlib/)
             let stdlib = exe_dir.join("../../stdlib");
             if stdlib.exists() {
                 return Some(stdlib.canonicalize().unwrap_or(stdlib));
@@ -1669,7 +1669,7 @@ fn find_stubs_dir() -> Option<PathBuf> {
     // Try relative to executable first
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            // Check ../../stubs (for target/debug/surrealc -> stubs/)
+            // Check ../../stubs (for target/debug/surreal -> stubs/)
             let stubs = exe_dir.join("../../stubs");
             if stubs.exists() {
                 return Some(stubs.canonicalize().unwrap_or(stubs));
@@ -1743,7 +1743,7 @@ fn find_elixir_ebin_dirs() -> Vec<PathBuf> {
     ebin_dirs
 }
 
-/// Load .surt stub files and parse them into modules.
+/// Load .surreal stub files and parse them into modules.
 /// These provide type information for FFI calls to external libraries.
 fn load_stub_modules() -> Vec<Module> {
     let stubs_dir = match find_stubs_dir() {
@@ -1760,7 +1760,7 @@ fn load_stub_modules() -> Vec<Module> {
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("surt") {
+        if path.extension().and_then(|s| s.to_str()) != Some("surreal") {
             continue;
         }
 
@@ -1795,7 +1795,7 @@ fn stdlib_beam_dir() -> PathBuf {
     // This ensures stdlib is found regardless of working directory
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            // Executable is at target/release/surrealc or target/debug/surrealc
+            // Executable is at target/release/surreal or target/debug/surreal
             // Stdlib should be at target/stdlib
             let stdlib_path = exe_dir.join("../stdlib");
             // Canonicalize to resolve .. and ensure consistent path comparison
@@ -1820,14 +1820,14 @@ fn compile_stdlib() -> Result<PathBuf, String> {
     fs::create_dir_all(&output_dir)
         .map_err(|e| format!("Failed to create stdlib output directory: {}", e))?;
 
-    // Recursively collect all .sur files in stdlib
+    // Recursively collect all .surreal files in stdlib
     let surreal_files = collect_surreal_files_recursive(&stdlib_dir);
 
     // Check if any stdlib files need recompilation
     let mut needs_compile = false;
     for path in &surreal_files {
         // Compute module name from path relative to stdlib_dir
-        // e.g., stdlib/erlang/std/logger.sur -> surreal::erlang::std::logger
+        // e.g., stdlib/erlang/std/logger.surreal -> surreal::erlang::std::logger
         if let Some(module_name) = stdlib_path_to_module_name(&stdlib_dir, path) {
             let beam_file = output_dir.join(format!("{}.beam", module_name));
 
@@ -1865,7 +1865,7 @@ fn compile_stdlib() -> Result<PathBuf, String> {
     Ok(output_dir)
 }
 
-/// Recursively collect all .sur files in a directory.
+/// Recursively collect all .surreal files in a directory.
 fn collect_surreal_files_recursive(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     if let Ok(entries) = fs::read_dir(dir) {
@@ -1873,7 +1873,7 @@ fn collect_surreal_files_recursive(dir: &Path) -> Vec<PathBuf> {
             let path = entry.path();
             if path.is_dir() {
                 files.extend(collect_surreal_files_recursive(&path));
-            } else if path.extension().and_then(|s| s.to_str()) == Some("sur") {
+            } else if path.extension().and_then(|s| s.to_str()) == Some("surreal") {
                 files.push(path);
             }
         }
@@ -1882,10 +1882,10 @@ fn collect_surreal_files_recursive(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// Convert a stdlib file path to its module name.
-/// e.g., stdlib/erlang/std/logger.sur -> surreal::erlang::std::logger
-/// Returns None for mod.sur files (module declaration files, not module sources).
+/// e.g., stdlib/erlang/std/logger.surreal -> surreal::erlang::std::logger
+/// Returns None for mod.surreal files (module declaration files, not module sources).
 fn stdlib_path_to_module_name(stdlib_dir: &Path, path: &Path) -> Option<String> {
-    // Skip mod.sur files - they're module declaration files, not module sources
+    // Skip mod.surreal files - they're module declaration files, not module sources
     if path.file_stem().and_then(|s| s.to_str()) == Some("mod") {
         return None;
     }
@@ -1990,7 +1990,7 @@ fn cmd_run(
         let base_module = if let Some(ref app) = app_config {
             app.module.clone().unwrap_or_else(|| config.package.name.clone())
         } else {
-            // Use package name as the default module (corresponds to lib.sur)
+            // Use package name as the default module (corresponds to lib.surreal)
             config.package.name.clone()
         };
 
@@ -2478,7 +2478,7 @@ fn cmd_test(filter: Option<&str>, features: &[String]) -> ExitCode {
 
     println!("Compiling {} in test mode...", config.package.name);
 
-    // Load all .sur files in src/ directory with package context
+    // Load all .surreal files in src/ directory with package context
     let mut loader = ModuleLoader::with_package(
         config.package.name.clone(),
         src_dir.clone(),

@@ -607,7 +607,7 @@ impl TypeEnv {
             .contains_key(&(trait_name.to_string(), type_name.to_string()))
     }
 
-    /// Get external function info (from .surt stubs).
+    /// Get external function info (from .surreal binding files).
     /// Resolves module aliases before lookup.
     pub fn get_extern_function(&self, module: &str, function: &str, arity: usize) -> Option<&FnInfo> {
         // Resolve module alias if present
@@ -1424,7 +1424,7 @@ impl TypeChecker {
                     }
                 }
                 Item::ExternMod(extern_mod) => {
-                    // Collect external function signatures from .surt stubs
+                    // Collect external function signatures from .surreal binding files
                     self.collect_extern_mod(extern_mod, &extern_mod.name);
                 }
                 Item::Use(use_decl) => {
@@ -2510,7 +2510,7 @@ impl TypeChecker {
 
             // External call
             Expr::ExternCall { module, function, args } => {
-                // Look up extern function signature from .surt stubs (by arity)
+                // Look up extern function signature from .surreal binding files (by arity)
                 let arity = args.len();
                 if let Some(info) = self.env.get_extern_function(module, function, arity).cloned() {
                     // Instantiate generic function

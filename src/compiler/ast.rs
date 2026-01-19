@@ -139,7 +139,7 @@ pub enum AttributeArg {
 pub struct ModuleContext {
     /// Package name from surreal.toml (e.g., "my_app")
     pub package_name: Option<String>,
-    /// Current module's path relative to src/ (e.g., ["users", "auth"] for src/users/auth.sur)
+    /// Current module's path relative to src/ (e.g., ["users", "auth"] for src/users/auth.surreal)
     pub current_path: Vec<String>,
     /// Set of local module names (short names only, e.g., "hello_handler")
     /// Used to resolve atom literals that reference local modules
@@ -450,7 +450,7 @@ pub struct TypeAlias {
 }
 
 // =============================================================================
-// External Module Declarations (for .surt type stub files)
+// External Module Declarations (for .surreal binding files)
 // =============================================================================
 
 /// External module declaration for FFI type stubs.

@@ -315,8 +315,8 @@ version = "0.1.0"
     )
 }
 
-/// Generate a default main.sur content for a new project.
-pub fn generate_main_sur(name: &str) -> String {
+/// Generate a default main.surreal content for a new project.
+pub fn generate_main_surreal(name: &str) -> String {
     format!(
         r#"// {} - A Dream project
 

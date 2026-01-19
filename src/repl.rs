@@ -1202,7 +1202,7 @@ fn print_help() {
     println!("  :bindings       Show current bindings");
     println!("  :reload         Reload module registry");
     println!("  :edit, :e       Open $EDITOR to write Dream code");
-    println!("  :load <file>    Compile and load a .sur file");
+    println!("  :load <file>    Compile and load a .surreal file");
     println!();
     println!("Enter Dream expressions to evaluate them.");
     println!("Use 'let x = expr' to create bindings.");
@@ -1311,7 +1311,7 @@ pub fn run_shell() -> ExitCode {
                         cmd if cmd.starts_with(":load ") => {
                             let file = cmd.strip_prefix(":load ").unwrap().trim();
                             if file.is_empty() {
-                                eprintln!("Usage: :load <file.sur>");
+                                eprintln!("Usage: :load <file.surreal>");
                             } else {
                                 match load_and_compile(&mut state, file) {
                                     Ok(msg) => println!("{}", msg),
@@ -1461,7 +1461,7 @@ pub fn run_shell_with_app(
                         cmd if cmd.starts_with(":load ") => {
                             let file = cmd.strip_prefix(":load ").unwrap().trim();
                             if file.is_empty() {
-                                eprintln!("Usage: :load <file.sur>");
+                                eprintln!("Usage: :load <file.surreal>");
                             } else {
                                 match load_and_compile(&mut state, file) {
                                     Ok(msg) => println!("{}", msg),
@@ -1514,8 +1514,8 @@ mod repl_edit {
 
 /// Open a temp file in the user's editor and compile/run it
 fn edit_and_eval(state: &mut ReplState) -> Result<Option<String>, String> {
-    // Create a temporary file with .sur extension
-    let temp_file = state.temp_dir.join("surreal_repl_edit.sur");
+    // Create a temporary file with .surreal extension
+    let temp_file = state.temp_dir.join("surreal_repl_edit.surreal");
 
     // Use last edit if available, otherwise use template
     let initial_content = state.last_edit.as_deref().unwrap_or(EDIT_TEMPLATE);
@@ -1562,7 +1562,7 @@ fn edit_and_eval(state: &mut ReplState) -> Result<Option<String>, String> {
     compile_and_run_source(state, content, "repl_edit")
 }
 
-/// Load and compile a .sur file
+/// Load and compile a .surreal file
 fn load_and_compile(state: &mut ReplState, path: &str) -> Result<String, String> {
     let path = std::path::Path::new(path);
     if !path.exists() {
