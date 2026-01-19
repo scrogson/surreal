@@ -184,6 +184,8 @@ enum Commands {
         #[arg(long, short)]
         force: bool,
     },
+    /// Start the Language Server Protocol (LSP) server
+    Lsp,
 }
 
 #[derive(Subcommand)]
@@ -236,6 +238,11 @@ fn main() -> ExitCode {
         }
         Commands::Deps { action } => cmd_deps(action),
         Commands::Stdlib { force } => cmd_stdlib(force),
+        Commands::Lsp => {
+            let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+            rt.block_on(dream::lsp::run_server());
+            ExitCode::SUCCESS
+        }
     }
 }
 

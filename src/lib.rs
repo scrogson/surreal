@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 //! Dream - A programming language with Rust-like syntax and Erlang-style concurrency.
 //!
 //! Dream compiles to Core Erlang for BEAM execution or to bytecode for the Dream VM.
@@ -15,6 +17,7 @@ pub mod bindgen;
 pub mod compiler;
 pub mod config;
 pub mod deps;
+pub mod lsp;
 mod instruction;
 mod message;
 mod module;
