@@ -123,11 +123,12 @@ impl LanguageServer for DreamLanguageServer {
         };
 
         let result = self.analyzer.analyze(&doc.content, doc.path.as_deref());
+        let stdlib = self.analyzer.stdlib_modules();
 
         let hover = result
             .module
             .as_ref()
-            .and_then(|module| handle_hover(module, &doc.line_index, position));
+            .and_then(|module| handle_hover(module, &doc.line_index, position, stdlib));
 
         Ok(hover)
     }
@@ -145,11 +146,11 @@ impl LanguageServer for DreamLanguageServer {
         };
 
         let result = self.analyzer.analyze(&doc.content, doc.path.as_deref());
+        let stdlib = self.analyzer.stdlib_modules();
 
-        let definition = result
-            .module
-            .as_ref()
-            .and_then(|module| handle_goto_definition(module, &doc.line_index, position, uri));
+        let definition = result.module.as_ref().and_then(|module| {
+            handle_goto_definition(module, &doc.line_index, position, uri, stdlib)
+        });
 
         Ok(definition)
     }

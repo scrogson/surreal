@@ -27,7 +27,7 @@ pub use core_erlang::{
     SharedGenericRegistry,
 };
 pub use error::{CompilerError, CompilerWarning, ParseError, ParseResult, TypeError, TypeResult, Warning};
-pub use lexer::Lexer;
+pub use lexer::{Lexer, Span};
 pub use loader::{LoadError, LoadResult, ModuleLoader};
 pub use parser::Parser;
 pub use token::Token;

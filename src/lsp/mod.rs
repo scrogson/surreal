@@ -7,6 +7,7 @@ mod analysis;
 mod backend;
 mod document;
 mod handlers;
+mod lookup;
 mod position;
 
 pub use backend::DreamLanguageServer;
