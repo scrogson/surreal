@@ -998,19 +998,27 @@ fn compile_modules_with_registry_and_options(
     dep_ebin_paths: &[PathBuf],
     dependencies: &std::collections::HashSet<String>,
 ) -> ExitCode {
+    use std::time::Instant;
+    let timing = std::env::var("DREAM_TIMING").is_ok();
+    let total_start = Instant::now();
+
     if modules.is_empty() {
         eprintln!("No modules to compile");
         return ExitCode::from(1);
     }
 
     // Load stub modules for FFI type checking
+    let t0 = Instant::now();
     let stub_modules = load_stub_modules();
+    if timing { eprintln!("  [timing] load_stub_modules: {:?}", t0.elapsed()); }
 
     // Use cached stdlib modules for type checking
     // This is needed even when compiling stdlib itself, because stdlib modules
     // may depend on extern modules defined in other stdlib files
+    let t1 = Instant::now();
     let stdlib_data = get_stdlib();
     let stdlib_modules_full = &stdlib_data.modules;
+    if timing { eprintln!("  [timing] get_stdlib: {:?}", t1.elapsed()); }
 
     // Check if we're compiling stdlib itself (by checking if any module shares a name with stdlib)
     let stdlib_module_names_raw: std::collections::HashSet<_> = stdlib_modules_full
@@ -1026,6 +1034,7 @@ fn compile_modules_with_registry_and_options(
 
     // When compiling stdlib itself, filter out modules being compiled to avoid duplicates
     // but keep other stdlib modules for type checking (e.g., extern module definitions)
+    let t2 = Instant::now();
     let stdlib_modules: Vec<Module> = if is_compiling_stdlib {
         stdlib_modules_full
             .iter()
@@ -1035,18 +1044,42 @@ fn compile_modules_with_registry_and_options(
     } else {
         stdlib_modules_full.clone()
     };
+    if timing { eprintln!("  [timing] clone_stdlib: {:?}", t2.elapsed()); }
+
+    // Early check: if no modules need recompilation, skip type checking entirely
+    // This is a significant optimization for incremental builds
+    let any_needs_recompile = modules.iter().any(|m| {
+        let beam_module_name = if m.name.starts_with("dream::") {
+            m.name.clone()
+        } else {
+            format!("dream::{}", m.name)
+        };
+        let beam_file = build_dir.join(format!("{}.beam", &beam_module_name));
+        needs_recompilation(m, &beam_file)
+    });
+
+    if !any_needs_recompile && target == "beam" {
+        println!();
+        println!("Build complete. All {} module(s) up to date.", modules.len());
+        if timing { eprintln!("  [timing] TOTAL (skipped): {:?}", total_start.elapsed()); }
+        return ExitCode::SUCCESS;
+    }
 
     // Combine user modules with stub modules and stdlib for type checking
+    let t3 = Instant::now();
     let mut all_modules_for_typeck: Vec<Module> = stub_modules;
     all_modules_for_typeck.extend(stdlib_modules.iter().cloned());
     all_modules_for_typeck.extend(modules.iter().cloned());
+    if timing { eprintln!("  [timing] combine_modules: {:?}", t3.elapsed()); }
 
     // Type check all modules together (allows cross-module type references)
     // This also annotates the AST with inferred type arguments
     let mut has_errors = false;
 
+    let t4 = Instant::now();
     let mut annotated_modules: Vec<Module> = Vec::new();
     let type_check_result = check_modules_with_metadata(&all_modules_for_typeck);
+    if timing { eprintln!("  [timing] type_check: {:?}", t4.elapsed()); }
     let extern_module_names = type_check_result.extern_module_names.clone();
     let struct_info = type_check_result.struct_info.clone();
 
@@ -1246,6 +1279,7 @@ fn compile_modules_with_registry_and_options(
     }
 
     // Compile each module to Core Erlang (with incremental compilation)
+    let t5 = Instant::now();
     let mut core_files = Vec::new();
     let mut skipped_count = 0;
 
@@ -1307,6 +1341,7 @@ fn compile_modules_with_registry_and_options(
         println!("  Compiled {}.core", &beam_module_name);
         core_files.push(core_file);
     }
+    if timing { eprintln!("  [timing] codegen: {:?}", t5.elapsed()); }
 
     // If target is "core", we're done
     if target == "core" {
@@ -1316,6 +1351,7 @@ fn compile_modules_with_registry_and_options(
         } else {
             println!("Build complete. Core Erlang files in {}", build_dir.display());
         }
+        if timing { eprintln!("  [timing] TOTAL: {:?}", total_start.elapsed()); }
         return ExitCode::SUCCESS;
     }
 
@@ -1333,6 +1369,7 @@ fn compile_modules_with_registry_and_options(
         }
 
         // Batch compile all .core files in a single erlc invocation
+        let t6 = Instant::now();
         let mut cmd = Command::new("erlc");
         cmd.arg("+from_core").arg("-o").arg(build_dir);
         for core_file in &core_files {
@@ -1340,6 +1377,7 @@ fn compile_modules_with_registry_and_options(
         }
 
         let status = cmd.status();
+        if timing { eprintln!("  [timing] erlc: {:?}", t6.elapsed()); }
         match status {
             Ok(s) if s.success() => {
                 for core_file in &core_files {
@@ -1359,6 +1397,8 @@ fn compile_modules_with_registry_and_options(
             }
         }
     }
+
+    if timing { eprintln!("  [timing] TOTAL: {:?}", total_start.elapsed()); }
 
     // Generate .macros file if we have macros and a package name
     if !project_macros.is_empty() {
