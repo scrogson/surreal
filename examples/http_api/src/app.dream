@@ -9,7 +9,7 @@ impl Application {
     /// Called automatically when the application starts
     pub fn start(_type: StartType, _args: Any) -> Result<Pid, Any> {
         // Configure logger with clean single-line format
-        logger::setup();
+        let :ok = logger::setup();
 
         let opts = {
             env: {
@@ -28,10 +28,10 @@ impl Application {
     }
 
     /// OTP Application stop callback
-    pub fn stop(_state: Pid) -> Atom {
+    pub fn stop(_state: Pid) -> Result<(), Any> {
         logger::info("Stopping HTTP listener");
-        cowboy::stop_listener(:http_listener);
-        :ok
+        cowboy::stop_listener(:http_listener)?;
+        Ok(())
     }
 }
 

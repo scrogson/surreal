@@ -207,13 +207,27 @@ Use `emit_core_erlang()` for simple tests, `emit_core_erlang_with_typecheck()` w
 
 The stdlib is precompiled to `target/stdlib/` when the compiler is built. **These files can become stale** if you modify stdlib source files.
 
+### Rebuilding Stdlib
+
+After modifying any stdlib source files, rebuild the stdlib:
+
+```bash
+just stdlib
+```
+
+This command:
+1. Builds all `stdlib/*.dream` files
+2. Copies the resulting `.beam` files to `target/stdlib/`
+
+**IMPORTANT**: The typechecker loads stdlib source files directly for type information, but runtime execution uses the `.beam` files in `target/stdlib/`. Both must be in sync.
+
 ### Key Points
 
 1. **Macro expander uses `target/stdlib/`**: When derive macros run, they load modules like `dream::syn` from `target/stdlib/`. If these .beam files are stale, macros will malfunction.
 
 2. **Building standalone stdlib files outputs to current directory**: Running `dream build stdlib/syn.dream` creates `dream::syn.beam` in the *current directory*, NOT in `target/stdlib/`.
 
-3. **After modifying stdlib, manually copy .beam files**:
+3. **After modifying stdlib, use `just stdlib`** (preferred) or manually copy .beam files:
    ```bash
    dream build stdlib/syn.dream
    cp "dream::syn.beam" target/stdlib/

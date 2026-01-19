@@ -52,8 +52,8 @@ pub trait Application {
 
     /// Called when the application stops (optional).
     /// The state is what was returned from prep_stop/1.
-    fn stop(state: Pid) -> Atom {
-        :ok
+    fn stop(state: Pid) -> Result<(), Any> {
+        Ok(())
     }
 }
 

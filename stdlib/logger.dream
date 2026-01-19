@@ -20,88 +20,88 @@ pub enum Level {
 // ============== Logging Functions ==============
 
 /// Log a debug message.
-pub fn debug(msg: String) -> Atom {
-    erl_logger::debug(msg)
+pub fn debug(msg: String) {
+    let _ = erl_logger::debug(msg);
 }
 
 /// Log a debug message with metadata.
-pub fn debug_meta(msg: String, meta: Map) -> Atom {
-    erl_logger::debug(msg, meta)
+pub fn debug_meta(msg: String, meta: Map) {
+    let _ = erl_logger::debug(msg, meta);
 }
 
 /// Log an info message.
-pub fn info(msg: String) -> Atom {
-    erl_logger::info(msg)
+pub fn info(msg: String) {
+    let _ = erl_logger::info(msg);
 }
 
 /// Log an info message with metadata.
-pub fn info_meta(msg: String, meta: Map) -> Atom {
-    erl_logger::info(msg, meta)
+pub fn info_meta(msg: String, meta: Map) {
+    let _ = erl_logger::info(msg, meta);
 }
 
 /// Log a notice message.
-pub fn notice(msg: String) -> Atom {
-    erl_logger::notice(msg)
+pub fn notice(msg: String) {
+    let _ = erl_logger::notice(msg);
 }
 
 /// Log a notice message with metadata.
-pub fn notice_meta(msg: String, meta: Map) -> Atom {
-    erl_logger::notice(msg, meta)
+pub fn notice_meta(msg: String, meta: Map) {
+    let _ = erl_logger::notice(msg, meta);
 }
 
 /// Log a warning message.
-pub fn warning(msg: String) -> Atom {
-    erl_logger::warning(msg)
+pub fn warning(msg: String) {
+    let _ = erl_logger::warning(msg);
 }
 
 /// Log a warning message with metadata.
-pub fn warning_meta(msg: String, meta: Map) -> Atom {
-    erl_logger::warning(msg, meta)
+pub fn warning_meta(msg: String, meta: Map) {
+    let _ = erl_logger::warning(msg, meta);
 }
 
 /// Log an error message.
-pub fn error(msg: String) -> Atom {
-    erl_logger::error(msg)
+pub fn error(msg: String) {
+    let _ = erl_logger::error(msg);
 }
 
 /// Log an error message with metadata.
-pub fn error_meta(msg: String, meta: Map) -> Atom {
-    erl_logger::error(msg, meta)
+pub fn error_meta(msg: String, meta: Map) {
+    let _ = erl_logger::error(msg, meta);
 }
 
 /// Log a critical message.
-pub fn critical(msg: String) -> Atom {
-    erl_logger::critical(msg)
+pub fn critical(msg: String) {
+    let _ = erl_logger::critical(msg);
 }
 
 /// Log a critical message with metadata.
-pub fn critical_meta(msg: String, meta: Map) -> Atom {
-    erl_logger::critical(msg, meta)
+pub fn critical_meta(msg: String, meta: Map) {
+    let _ = erl_logger::critical(msg, meta);
 }
 
 /// Log an alert message.
-pub fn alert(msg: String) -> Atom {
-    erl_logger::alert(msg)
+pub fn alert(msg: String) {
+    let _ = erl_logger::alert(msg);
 }
 
 /// Log an alert message with metadata.
-pub fn alert_meta(msg: String, meta: Map) -> Atom {
-    erl_logger::alert(msg, meta)
+pub fn alert_meta(msg: String, meta: Map) {
+    let _ = erl_logger::alert(msg, meta);
 }
 
 /// Log an emergency message.
-pub fn emergency(msg: String) -> Atom {
-    erl_logger::emergency(msg)
+pub fn emergency(msg: String) {
+    let _ = erl_logger::emergency(msg);
 }
 
 /// Log an emergency message with metadata.
-pub fn emergency_meta(msg: String, meta: Map) -> Atom {
-    erl_logger::emergency(msg, meta)
+pub fn emergency_meta(msg: String, meta: Map) {
+    let _ = erl_logger::emergency(msg, meta);
 }
 
 /// Log a message with an explicit level.
-pub fn log(level: Level, msg: String) -> Atom {
-    match level {
+pub fn log(level: Level, msg: String) {
+    let _ = match level {
         Level::Emergency => erl_logger::emergency(msg),
         Level::Alert => erl_logger::alert(msg),
         Level::Critical => erl_logger::critical(msg),
@@ -110,12 +110,12 @@ pub fn log(level: Level, msg: String) -> Atom {
         Level::Notice => erl_logger::notice(msg),
         Level::Info => erl_logger::info(msg),
         Level::Debug => erl_logger::debug(msg),
-    }
+    };
 }
 
 /// Log a message with an explicit level and metadata.
-pub fn log_meta(level: Level, msg: String, meta: Map) -> Atom {
-    match level {
+pub fn log_meta(level: Level, msg: String, meta: Map) {
+    let _ = match level {
         Level::Emergency => erl_logger::emergency(msg, meta),
         Level::Alert => erl_logger::alert(msg, meta),
         Level::Critical => erl_logger::critical(msg, meta),
@@ -124,7 +124,7 @@ pub fn log_meta(level: Level, msg: String, meta: Map) -> Atom {
         Level::Notice => erl_logger::notice(msg, meta),
         Level::Info => erl_logger::info(msg, meta),
         Level::Debug => erl_logger::debug(msg, meta),
-    }
+    };
 }
 
 // ============== Configuration ==============

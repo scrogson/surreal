@@ -2762,6 +2762,45 @@ impl TypeChecker {
                     let func_name = &segments[1];
                     let qualified_name = format!("{}::{}", module, func_name);
 
+                    // Check if this is a stdlib module - these take priority over extern modules
+                    // with the same name (e.g., `logger` is both a stdlib wrapper and an extern module)
+                    if Self::is_stdlib_module(module) {
+                        // Try looking up as dream::{module}::{func}
+                        let stdlib_qualified = format!("dream::{}::{}", module, func_name);
+                        if let Some(info) = self.env.get_function(&stdlib_qualified).cloned() {
+                            let instantiated = if !type_args.is_empty() {
+                                self.instantiate_function_with_args(&info, type_args, &stdlib_qualified)?
+                            } else {
+                                self.instantiate_function(&info)
+                            };
+
+                            // Check argument count
+                            if args.len() != instantiated.params.len() {
+                                self.error(TypeError::new(format!(
+                                    "function '{}' expects {} arguments, got {}",
+                                    stdlib_qualified,
+                                    instantiated.params.len(),
+                                    args.len()
+                                )));
+                            }
+
+                            // Check argument types
+                            for (arg, (_, param_ty)) in args.iter().zip(instantiated.params.iter()) {
+                                let arg_ty = self.infer_expr(arg)?;
+                                if self.unify(&arg_ty, param_ty).is_err()
+                                    && !self.types_compatible(&arg_ty, param_ty)
+                                {
+                                    self.error(TypeError::with_help(
+                                        format!("type mismatch in call to '{}'", stdlib_qualified),
+                                        format!("expected {}, found {}", param_ty, arg_ty),
+                                    ));
+                                }
+                            }
+
+                            return Ok(self.apply_substitutions(&instantiated.ret));
+                        }
+                    }
+
                     // Check if this is a call to an extern module
                     if self.env.is_extern_module(module) {
                         // Look up extern function signature
