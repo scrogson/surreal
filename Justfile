@@ -76,16 +76,6 @@ example name:
 example-run name:
     cargo run --release -- run examples/{{name}}.dream
 
-# Rebuild all stdlib modules and copy to target/stdlib
+# Rebuild all stdlib modules (compiles all files in a single pass)
 stdlib:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "Rebuilding stdlib..."
-    mkdir -p target/stdlib
-    for f in stdlib/*.dream; do
-        echo "  Building $f..."
-        cargo run --quiet -- build "$f" 2>&1 | grep -v "^dream::warning" || true
-    done
-    echo "Copying .beam files to target/stdlib/..."
-    mv -f dream::*.beam target/stdlib/ 2>/dev/null || true
-    echo "Done. Stdlib modules in target/stdlib/"
+    cargo run --release -- stdlib --force

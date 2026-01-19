@@ -178,6 +178,12 @@ enum Commands {
         #[command(subcommand)]
         action: DepsAction,
     },
+    /// Rebuild the stdlib (compiles all stdlib files in a single pass)
+    Stdlib {
+        /// Force rebuild even if up to date
+        #[arg(long, short)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -229,6 +235,33 @@ fn main() -> ExitCode {
             repl::run_shell()
         }
         Commands::Deps { action } => cmd_deps(action),
+        Commands::Stdlib { force } => cmd_stdlib(force),
+    }
+}
+
+/// Rebuild the stdlib.
+fn cmd_stdlib(force: bool) -> ExitCode {
+    println!("Rebuilding stdlib...");
+
+    if force {
+        // Remove existing stdlib beams to force recompilation
+        let output_dir = stdlib_beam_dir();
+        if output_dir.exists() {
+            if let Err(e) = fs::remove_dir_all(&output_dir) {
+                eprintln!("Warning: Failed to clean stdlib directory: {}", e);
+            }
+        }
+    }
+
+    match compile_stdlib() {
+        Ok(output_dir) => {
+            println!("Stdlib compiled to {}", output_dir.display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            ExitCode::from(1)
+        }
     }
 }
 
