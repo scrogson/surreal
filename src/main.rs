@@ -932,7 +932,7 @@ fn compile_modules_with_registry(
     }
 
     // For "beam" target, invoke erlc
-    if target == "beam" {
+    if target == "beam" && !core_files.is_empty() {
         // Check if erlc is available
         if !command_exists("erlc") {
             eprintln!();
@@ -944,29 +944,30 @@ fn compile_modules_with_registry(
             return ExitCode::from(1);
         }
 
+        // Batch compile all .core files in a single erlc invocation
+        let mut cmd = Command::new("erlc");
+        cmd.arg("+from_core").arg("-o").arg(build_dir);
         for core_file in &core_files {
-            let status = Command::new("erlc")
-                .arg("+from_core")
-                .arg("-o")
-                .arg(build_dir)
-                .arg(core_file)
-                .status();
+            cmd.arg(core_file);
+        }
 
-            match status {
-                Ok(s) if s.success() => {
+        let status = cmd.status();
+        match status {
+            Ok(s) if s.success() => {
+                for core_file in &core_files {
                     let beam_name = core_file.file_stem().unwrap().to_string_lossy();
                     println!("  Compiled {}.beam", beam_name);
                     // Clean up intermediate .core file
                     let _ = fs::remove_file(core_file);
                 }
-                Ok(s) => {
-                    eprintln!("erlc failed with exit code {:?}", s.code());
-                    return ExitCode::from(1);
-                }
-                Err(e) => {
-                    eprintln!("Error running erlc: {}", e);
-                    return ExitCode::from(1);
-                }
+            }
+            Ok(s) => {
+                eprintln!("erlc failed with exit code {:?}", s.code());
+                return ExitCode::from(1);
+            }
+            Err(e) => {
+                eprintln!("Error running erlc: {}", e);
+                return ExitCode::from(1);
             }
         }
     }
