@@ -2591,6 +2591,25 @@ impl TypeChecker {
         }
     }
 
+    /// Find the qualified name for a function that was found by simple name.
+    /// First checks if there's an extern import for this name (e.g., `use string::len`),
+    /// otherwise searches for any qualified name matching "module::name".
+    fn find_qualified_function_name(&self, simple_name: &str) -> Option<String> {
+        // First check if there's an explicit import for this function
+        if let Some((module, func_name)) = self.env.get_extern_import(simple_name) {
+            return Some(format!("{}::{}", module, func_name));
+        }
+
+        // Fall back to searching all qualified names
+        let suffix = format!("::{}", simple_name);
+        for key in self.env.functions.keys() {
+            if key.ends_with(&suffix) && key != simple_name {
+                return Some(key.clone());
+            }
+        }
+        None
+    }
+
     /// Infer type of a function call.
     fn infer_call(
         &mut self,
@@ -2604,16 +2623,32 @@ impl TypeChecker {
                 let local_qualified = self.current_module.as_ref()
                     .map(|m| format!("{}::{}", m, name));
 
-                let info = local_qualified
-                    .as_ref()
-                    .and_then(|qn| self.env.get_function(qn).cloned())
-                    .or_else(|| self.env.get_function(name).cloned());
+                // Track which name resolved so we can show it in error messages
+                // When we find a function by simple name, try to find the qualified version
+                // to show the full path in error messages
+                let (info, resolved_name) = if let Some(ref qn) = local_qualified {
+                    if let Some(info) = self.env.get_function(qn).cloned() {
+                        (Some(info), qn.clone())
+                    } else if let Some(info) = self.env.get_function(name).cloned() {
+                        // Found by simple name - try to find the qualified name for better errors
+                        let qualified = self.find_qualified_function_name(name);
+                        (Some(info), qualified.unwrap_or_else(|| name.clone()))
+                    } else {
+                        (None, name.clone())
+                    }
+                } else if let Some(info) = self.env.get_function(name).cloned() {
+                    // Found by simple name - try to find the qualified name for better errors
+                    let qualified = self.find_qualified_function_name(name);
+                    (Some(info), qualified.unwrap_or_else(|| name.clone()))
+                } else {
+                    (None, name.clone())
+                };
 
                 if let Some(info) = info {
                     // Instantiate generic function
                     let instantiated = if !type_args.is_empty() {
                         // Explicit type arguments (turbofish syntax)
-                        self.instantiate_function_with_args(&info, type_args, name)?
+                        self.instantiate_function_with_args(&info, type_args, &resolved_name)?
                     } else {
                         // Type inference - use fresh variables
                         self.instantiate_function(&info)
@@ -2623,7 +2658,7 @@ impl TypeChecker {
                     if args.len() != instantiated.params.len() {
                         self.error(TypeError::new(format!(
                             "function '{}' expects {} arguments, got {}",
-                            name,
+                            resolved_name,
                             instantiated.params.len(),
                             args.len()
                         )));
@@ -2637,7 +2672,7 @@ impl TypeChecker {
                             && !self.types_compatible(&arg_ty, param_ty)
                         {
                             self.error(TypeError::with_help(
-                                format!("type mismatch in call to '{}'", name),
+                                format!("type mismatch in call to '{}'", resolved_name),
                                 format!("expected {}, found {}", param_ty, arg_ty),
                             ));
                         }
@@ -2675,7 +2710,7 @@ impl TypeChecker {
                                     && !self.types_compatible(&arg_ty, param_ty)
                                 {
                                     self.error(TypeError::with_help(
-                                        format!("type mismatch in call to '{}'", name),
+                                        format!("type mismatch in call to '{}'", qualified_name),
                                         format!("expected {}, found {}", param_ty, arg_ty),
                                     ));
                                 }
@@ -2687,6 +2722,7 @@ impl TypeChecker {
 
                     // For extern imports, look up as an extern function
                     let arity = args.len();
+                    let extern_qualified_name = format!("{}::{}", module, func_name);
                     if let Some(info) = self.env.get_extern_function(&module, &func_name, arity).cloned() {
                         let instantiated = self.instantiate_function(&info);
 
@@ -2697,7 +2733,7 @@ impl TypeChecker {
                                 && !self.types_compatible(&arg_ty, param_ty)
                             {
                                 self.error(TypeError::with_help(
-                                    format!("type mismatch in call to '{}'", name),
+                                    format!("type mismatch in call to '{}'", extern_qualified_name),
                                     format!("expected {}, found {}", param_ty, arg_ty),
                                 ));
                             }

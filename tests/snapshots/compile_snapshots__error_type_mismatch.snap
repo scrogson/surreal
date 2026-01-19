@@ -1,6 +1,7 @@
 ---
 source: tests/compile_snapshots.rs
+assertion_line: 53
 expression: result
 ---
-error: type mismatch in call to 'add'
+error: type mismatch in call to 'test::add'
   help: expected int, found string
