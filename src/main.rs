@@ -875,6 +875,9 @@ fn compile_modules_with_registry(
 
     // Compile each module to Core Erlang
     let mut core_files = Vec::new();
+    // Collect generics for batch registration (reduces lock contention)
+    let mut pending_generics: Vec<(String, Vec<dream::compiler::Function>)> = Vec::new();
+
     for module in &modules {
         // Create module-specific context for path resolution (crate::/super::/self::)
         // Note: No external dependencies in stdlib compilation
@@ -901,11 +904,8 @@ fn compile_modules_with_registry(
             }
         };
 
-        // Register this module's generic functions for cross-module use
-        {
-            let mut registry = generic_registry.write().unwrap();
-            emitter.register_generics(&mut registry);
-        }
+        // Collect generics for deferred batch registration
+        pending_generics.push(emitter.get_generics_for_registration());
 
         // All Dream modules are prefixed with dream:: (like Elixir uses Elixir.)
         let beam_module_name = if module.name.starts_with("dream::") {
@@ -922,6 +922,12 @@ fn compile_modules_with_registry(
 
         println!("  Compiled {}.core", &beam_module_name);
         core_files.push(core_file);
+    }
+
+    // Batch register all generic functions (single lock acquisition)
+    if !pending_generics.is_empty() {
+        let mut registry = generic_registry.write().unwrap();
+        registry.register_batch(pending_generics);
     }
 
     // If target is "core", we're done
@@ -1282,6 +1288,8 @@ fn compile_modules_with_registry_and_options(
     let t5 = Instant::now();
     let mut core_files = Vec::new();
     let mut skipped_count = 0;
+    // Collect generics for batch registration (reduces lock contention)
+    let mut pending_generics: Vec<(String, Vec<dream::compiler::Function>)> = Vec::new();
 
     for module in &modules {
         // All Dream modules are prefixed with dream:: (like Elixir uses Elixir.)
@@ -1326,11 +1334,8 @@ fn compile_modules_with_registry_and_options(
             }
         };
 
-        // Register this module's generic functions for cross-module use
-        {
-            let mut registry = generic_registry.write().unwrap();
-            emitter.register_generics(&mut registry);
-        }
+        // Collect generics for deferred batch registration
+        pending_generics.push(emitter.get_generics_for_registration());
 
         let core_file = build_dir.join(format!("{}.core", &beam_module_name));
         if let Err(e) = fs::write(&core_file, &core_erlang) {
@@ -1340,6 +1345,12 @@ fn compile_modules_with_registry_and_options(
 
         println!("  Compiled {}.core", &beam_module_name);
         core_files.push(core_file);
+    }
+
+    // Batch register all generic functions (single lock acquisition)
+    if !pending_generics.is_empty() {
+        let mut registry = generic_registry.write().unwrap();
+        registry.register_batch(pending_generics);
     }
     if timing { eprintln!("  [timing] codegen: {:?}", t5.elapsed()); }
 

@@ -41,6 +41,26 @@ impl GenericFunctionRegistry {
     pub fn contains(&self, module_name: &str, func_name: &str) -> bool {
         self.functions.contains_key(&(module_name.to_string(), func_name.to_string()))
     }
+
+    /// Batch register generic functions from multiple modules.
+    /// This is more efficient than calling register() in a loop with locks.
+    pub fn register_batch(&mut self, modules: Vec<(String, Vec<Function>)>) {
+        for (module_name, funcs) in modules {
+            for func in funcs {
+                if !func.type_params.is_empty() {
+                    // Register with full module name
+                    self.functions
+                        .insert((module_name.clone(), func.name.clone()), func.clone());
+                    // Also register without the dream:: prefix for easier lookup
+                    let short_name = module_name
+                        .strip_prefix("dream::")
+                        .unwrap_or(&module_name);
+                    self.functions
+                        .insert((short_name.to_string(), func.name.clone()), func);
+                }
+            }
+        }
+    }
 }
 
 /// Thread-safe wrapper for GenericFunctionRegistry.
@@ -263,6 +283,13 @@ impl CoreErlangEmitter {
                 .unwrap_or(&self.module_name);
             registry.register(short_name, func);
         }
+    }
+
+    /// Get the module name and generic functions for deferred batch registration.
+    /// This allows collecting generics from multiple modules before acquiring a write lock.
+    pub fn get_generics_for_registration(&self) -> (String, Vec<Function>) {
+        let funcs: Vec<Function> = self.generic_functions.values().cloned().collect();
+        (self.module_name.clone(), funcs)
     }
 
     /// Known stdlib modules that live under the dream:: namespace.
