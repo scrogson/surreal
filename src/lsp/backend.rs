@@ -8,7 +8,10 @@ use tower_lsp::{Client, LanguageServer};
 
 use super::analysis::Analyzer;
 use super::document::DocumentManager;
-use super::handlers::{handle_completion, handle_goto_definition, handle_hover, handle_references, publish_diagnostics};
+use super::handlers::{
+    get_legend, handle_completion, handle_goto_definition, handle_hover, handle_references,
+    handle_semantic_tokens_full, publish_diagnostics,
+};
 
 /// The Dream language server.
 pub struct DreamLanguageServer {
@@ -67,6 +70,16 @@ impl LanguageServer for DreamLanguageServer {
                 }),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
+                semantic_tokens_provider: Some(
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(
+                        SemanticTokensOptions {
+                            legend: get_legend(),
+                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                            range: None,
+                            ..Default::default()
+                        },
+                    ),
+                ),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -191,5 +204,26 @@ impl LanguageServer for DreamLanguageServer {
         });
 
         Ok(references)
+    }
+
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        let uri = &params.text_document.uri;
+
+        let doc = match self.documents.get(uri) {
+            Some(doc) => doc,
+            None => return Ok(None),
+        };
+
+        let result = self.analyzer.analyze(&doc.content, doc.path.as_deref());
+
+        let tokens = result
+            .module
+            .as_ref()
+            .and_then(|module| handle_semantic_tokens_full(module, &doc.line_index, &doc.content));
+
+        Ok(tokens)
     }
 }
