@@ -79,3 +79,28 @@ example-run name:
 # Rebuild all stdlib modules (compiles all files in a single pass)
 stdlib:
     cargo run --release -- stdlib --force
+
+# Build the NIF library
+nif:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd native/dream_nif
+    cargo build --release
+    # On macOS, Erlang expects .so but Rust produces .dylib
+    if [[ "$(uname)" == "Darwin" ]]; then
+        ln -sf libdream_nif.dylib target/release/libdream_nif.so
+    fi
+    erlc -o . dream_nif.erl
+    echo "NIF built: native/dream_nif/target/release/libdream_nif.{so,dylib}"
+
+# Build NIF in debug mode
+nif-debug:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd native/dream_nif
+    cargo build
+    if [[ "$(uname)" == "Darwin" ]]; then
+        ln -sf libdream_nif.dylib target/debug/libdream_nif.so
+    fi
+    erlc -o . dream_nif.erl
+    echo "NIF built (debug): native/dream_nif/target/debug/libdream_nif.{so,dylib}"
