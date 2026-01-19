@@ -3,6 +3,7 @@
 // Provides console input/output functions.
 
 use erlang::std::io as erl_io;
+use display::DisplayOpts;
 
 /// Print a string followed by a newline.
 pub fn println(s: String) -> Atom {
@@ -39,7 +40,7 @@ pub fn dbg<T>(term: T) -> T {
 /// Example:
 ///   data |> io::dbg_opts(display::DisplayOpts::pretty())
 ///   data |> io::dbg_opts(display::DisplayOpts::new().with_label("debug"))
-pub fn dbg_opts(term: Any, opts: display::DisplayOpts) -> Any {
+pub fn dbg_opts(term: Any, opts: DisplayOpts) -> Any {
     println(display::display_any_opts(term, opts));
     term
 }
