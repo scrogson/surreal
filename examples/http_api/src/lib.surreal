@@ -3,12 +3,12 @@
 //
 // Project structure:
 //   src/
-//     lib.sur             - This file (root module)
-//     app.sur             - Application trait implementation
+//     lib.surreal         - This file (root module)
+//     app.surreal         - Application trait implementation
 //     handlers/
-//       hello.sur         - GET /api/hello handler
-//       users.sur         - GET /api/users handler
-//       not_found.sur     - 404 handler
+//       hello.surreal     - GET /api/hello handler
+//       users.surreal     - GET /api/users handler
+//       not_found.surreal - 404 handler
 //
 // Dependencies:
 //   cowboy      - HTTP server

@@ -37,15 +37,9 @@ impl Application {
 
 /// Compile cowboy routes
 fn compile_routes() -> Any {
-    // Reference handler modules by their full BEAM module names
-    let hello = :"surreal::http_api::handlers::hello";
-    let users = :"surreal::http_api::handlers::users";
-    let not_found = :"surreal::http_api::handlers::not_found";
-
-    // Build route list
-    let r1 = ("/api/hello", hello, []);
-    let r2 = ("/api/users", users, []);
-    let r3 = (:_, not_found, []);
+    let r1 = ("/api/hello", http_api::handlers::hello, []);
+    let r2 = ("/api/users", http_api::handlers::users, []);
+    let r3 = (:_, http_api::handlers::not_found, []);
 
     :cowboy_router::compile([(:_, [r1, r2, r3])])
 }

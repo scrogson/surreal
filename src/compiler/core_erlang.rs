@@ -3520,17 +3520,11 @@ impl CoreErlangEmitter {
             }
 
             Expr::Path { segments } => {
-                // Module path - emit as atom or function reference
-                if segments.len() == 1 {
-                    self.emit(&format!("'{}'", segments[0]));
-                } else {
-                    // Module:function reference
-                    self.emit(&format!(
-                        "fun '{}':'{}'",
-                        segments[0].to_lowercase(),
-                        segments[1]
-                    ));
-                }
+                // Module path as value - emit as atom with surreal:: prefix
+                // Similar to Elixir where `Hello` becomes `:'Elixir.Hello'`
+                let path = segments.join("::");
+                let resolved = Self::resolve_module_name(&path);
+                self.emit(&format!("'{}'", resolved));
             }
 
             Expr::ExternCall { module, function, args } => {
