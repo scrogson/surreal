@@ -1,5 +1,7 @@
 -module(surreal_native).
+
 -export([parse/1, generate_core_ast/1]).
+
 -on_load(init/0).
 
 %% NIF loading

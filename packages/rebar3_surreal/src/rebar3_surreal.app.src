@@ -1,0 +1,10 @@
+{application, rebar3_surreal,
+ [{description, "Rebar3 plugin for compiling Surreal source files"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {applications, [kernel, stdlib, rebar]},
+  {env, []},
+  {modules, []},
+  {licenses, ["MIT"]},
+  {links, [{"GitHub", "https://github.com/surreal-lang/surreal"}]}
+ ]}.
