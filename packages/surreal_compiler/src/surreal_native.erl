@@ -1,6 +1,6 @@
 -module(surreal_native).
 
--export([parse/1, generate_core_ast/1]).
+-export([parse/1, generate_core_ast/1, format_result/1]).
 
 -on_load(init/0).
 
@@ -48,4 +48,20 @@ parse(_Source) ->
 %% Returns: {ok, CoreErlangAST} | {error, Reason}
 -spec generate_core_ast(binary() | string()) -> {ok, term()} | {error, term()}.
 generate_core_ast(_Source) ->
+    erlang:nif_error(nif_not_loaded).
+
+%% Format an Erlang term as Surreal syntax.
+%% Converts Erlang runtime values to Surreal-style string representation.
+%% Useful for REPL output formatting.
+%%
+%% Examples:
+%%   ok -> ":ok"
+%%   {ok, 42} -> "Ok(42)"
+%%   {error, reason} -> "Err(:reason)"
+%%   [1, 2, 3] -> "[1, 2, 3]"
+%%   #{a => 1} -> "{a: 1}"
+%%   <<"hello">> -> "\"hello\""
+%%   "hello" -> "'hello'" (charlist)
+-spec format_result(term()) -> string().
+format_result(_Term) ->
     erlang:nif_error(nif_not_loaded).
