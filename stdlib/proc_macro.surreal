@@ -8,7 +8,7 @@ use erlang::std::lists as erl_lists;
 //
 // ## Usage
 //
-// ```dream
+// ```surreal
 // use proc_macro::TokenStream;
 //
 // #[proc_macro_derive(MyDerive)]

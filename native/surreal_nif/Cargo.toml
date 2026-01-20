@@ -1,15 +1,15 @@
 [package]
-name = "dream_nif"
+name = "surreal_nif"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "dream_nif"
+name = "surreal_nif"
 crate-type = ["cdylib"]
 
 [dependencies]
 # Rustler for NIF bindings
 rustler = "0.36"
 
-# Dream compiler - use the parent crate
-dream = { path = "../.." }
+# Surreal compiler - use the parent crate
+surreal = { path = "../.." }

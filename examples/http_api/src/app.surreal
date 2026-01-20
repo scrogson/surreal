@@ -38,9 +38,9 @@ impl Application {
 /// Compile cowboy routes
 fn compile_routes() -> Any {
     // Reference handler modules by their full BEAM module names
-    let hello = :"dream::http_api::handlers::hello";
-    let users = :"dream::http_api::handlers::users";
-    let not_found = :"dream::http_api::handlers::not_found";
+    let hello = :"surreal::http_api::handlers::hello";
+    let users = :"surreal::http_api::handlers::users";
+    let not_found = :"surreal::http_api::handlers::not_found";
 
     // Build route list
     let r1 = ("/api/hello", hello, []);

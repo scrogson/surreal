@@ -106,7 +106,7 @@ mod counter {
     // Required: init, handle_call, handle_cast
     // Optional: handle_info, terminate (have defaults)
     //
-    // Dream supports multi-clause functions with enum pattern matching,
+    // Surreal supports multi-clause functions with enum pattern matching,
     // similar to Erlang/Elixir. Each variant gets its own function clause.
     //
     // With associated type bindings, we can use Self::State in signatures.

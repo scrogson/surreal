@@ -1,6 +1,6 @@
 // Union Types Example
 //
-// Dream supports union types (T | U) and literal atom types (:ok, :error).
+// Surreal supports union types (T | U) and literal atom types (:ok, :error).
 // This allows for precise typing of functions that can return multiple types.
 
 mod union_types {

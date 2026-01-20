@@ -1,5 +1,5 @@
 // Tests for http_api
-// Only compiled when running `dream test`
+// Only compiled when running `surreal test`
 
 use crate::models::user::User;
 

@@ -1,8 +1,8 @@
 /// Multi-file project example
 ///
-/// This demonstrates a Dream project with multiple modules.
-/// Build with: dream build
-/// Run with: dream run
+/// This demonstrates a Surreal project with multiple modules.
+/// Build with: surreal build
+/// Run with: surreal run
 
 pub fn main() -> atom {
     // Use the math module

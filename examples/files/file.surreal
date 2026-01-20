@@ -1,6 +1,6 @@
 // File I/O Example - Demonstrates the file module
 //
-// Uses Dream stdlib modules for idiomatic code.
+// Uses Surreal stdlib modules for idiomatic code.
 
 mod file_example {
     use io::{println, format};
@@ -18,7 +18,7 @@ mod file_example {
         println("");
 
         // Create a test directory
-        let test_dir = "/tmp/dream_file_test";
+        let test_dir = "/tmp/surreal_file_test";
         println("Creating test directory...");
 
         // Clean up if exists from previous run
@@ -36,9 +36,9 @@ mod file_example {
         println("");
 
         // Write a file
-        let test_file = "/tmp/dream_file_test/hello.txt";
+        let test_file = "/tmp/surreal_file_test/hello.txt";
         println("Writing file...");
-        match file::write(test_file, "Hello, Dream!\nThis is a test file.\n") {
+        match file::write(test_file, "Hello, Surreal!\nThis is a test file.\n") {
             :ok => format("Wrote: ~s~n", [test_file]),
             (:error, reason) => format("Error writing: ~p~n", [reason]),
             _ => :ok
@@ -82,7 +82,7 @@ mod file_example {
         println("");
 
         // Copy file
-        let copy_file = "/tmp/dream_file_test/hello_copy.txt";
+        let copy_file = "/tmp/surreal_file_test/hello_copy.txt";
         println("Copying file...");
         match file::cp(test_file, copy_file) {
             (:ok, num_bytes) => format("Copied ~p bytes~n", [num_bytes]),
@@ -91,7 +91,7 @@ mod file_example {
         };
 
         // Rename file
-        let renamed_file = "/tmp/dream_file_test/renamed.txt";
+        let renamed_file = "/tmp/surreal_file_test/renamed.txt";
         println("Renaming file...");
         match file::rename(copy_file, renamed_file) {
             :ok => format("Renamed to ~s~n", [renamed_file]),
@@ -114,7 +114,7 @@ mod file_example {
         println("");
 
         // Touch a new file
-        let touch_file = "/tmp/dream_file_test/touched.txt";
+        let touch_file = "/tmp/surreal_file_test/touched.txt";
         println("Touching new file...");
         match file::touch(touch_file) {
             :ok => format("Touched: ~s~n", [touch_file]),

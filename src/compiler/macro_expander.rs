@@ -280,7 +280,7 @@ impl MacroExpander {
     ///
     /// # Arguments
     ///
-    /// * `module` - The Dream module containing the macro (e.g., "dream::my_macros")
+    /// * `module` - The Surreal module containing the macro (e.g., "surreal::my_macros")
     /// * `function` - The macro function name (e.g., "my_debug")
     /// * `ast_term` - The AST serialized as an Erlang term string
     ///
@@ -361,11 +361,11 @@ mod tests {
     #[test]
     fn test_macro_error_with_full_context() {
         let err = MacroError::with_span("expected struct", 100..150)
-            .in_file("src/lib.dream")
+            .in_file("src/lib.surreal")
             .in_macro("my_derive");
         assert_eq!(
             format!("{}", err),
-            "Macro error in `my_derive` (src/lib.dream) at 100..150: expected struct"
+            "Macro error in `my_derive` (src/lib.surreal) at 100..150: expected struct"
         );
     }
 

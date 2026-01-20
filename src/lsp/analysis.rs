@@ -29,7 +29,7 @@ fn load_stdlib() -> StdlibData {
         None => return StdlibData { modules: Vec::new() },
     };
 
-    let mut loader = ModuleLoader::with_package("dream".to_string(), stdlib_dir.clone());
+    let mut loader = ModuleLoader::with_package("surreal".to_string(), stdlib_dir.clone());
     if loader.load_all_in_dir(&stdlib_dir).is_err() {
         return StdlibData { modules: Vec::new() };
     }

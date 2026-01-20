@@ -1,6 +1,6 @@
-// FFI example - calling Erlang/OTP functions from Dream
+// FFI example - calling Erlang/OTP functions from Surreal
 //
-// NOTE: For most use cases, prefer Dream stdlib modules:
+// NOTE: For most use cases, prefer Surreal stdlib modules:
 //   use list::{reverse, head, tail};
 //   use enumerable::{map, filter, reduce};
 //
@@ -22,7 +22,7 @@ pub fn main() -> atom {
 }
 
 pub fn reverse_list(items: [int]) -> [int] {
-    // Use Dream stdlib list::reverse instead of :lists::reverse
+    // Use Surreal stdlib list::reverse instead of :lists::reverse
     list::reverse(items)
 }
 

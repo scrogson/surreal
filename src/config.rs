@@ -1,6 +1,6 @@
 //! Project configuration for Dream projects.
 //!
-//! Handles parsing of `dream.toml` manifest files and project discovery.
+//! Handles parsing of `surreal.toml` manifest files and project discovery.
 
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -32,7 +32,7 @@ impl std::error::Error for ConfigError {}
 /// Result type for configuration operations.
 pub type ConfigResult<T> = Result<T, ConfigError>;
 
-/// The parsed dream.toml configuration.
+/// The parsed surreal.toml configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProjectConfig {
     pub package: Package,
@@ -114,7 +114,7 @@ impl Dependency {
     }
 }
 
-/// Application configuration from dream.toml's [application] section.
+/// Application configuration from surreal.toml's [application] section.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ApplicationConfig {
     /// The module containing the Application trait implementation.
@@ -126,7 +126,7 @@ pub struct ApplicationConfig {
     pub env: HashMap<String, toml::Value>,
 }
 
-/// Package metadata from dream.toml.
+/// Package metadata from surreal.toml.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Package {
     pub name: String,
@@ -140,7 +140,7 @@ fn default_src_dir() -> String {
 }
 
 impl ProjectConfig {
-    /// Load configuration from a dream.toml file.
+    /// Load configuration from a surreal.toml file.
     pub fn load(path: &Path) -> ConfigResult<Self> {
         let content = fs::read_to_string(path).map_err(|e| {
             ConfigError::new(format!("Failed to read {}: {}", path.display(), e))
@@ -151,12 +151,12 @@ impl ProjectConfig {
         })
     }
 
-    /// Find the project root by looking for dream.toml in current and parent directories.
+    /// Find the project root by looking for surreal.toml in current and parent directories.
     pub fn find_project_root() -> Option<PathBuf> {
         let mut current = std::env::current_dir().ok()?;
 
         loop {
-            let config_path = current.join("dream.toml");
+            let config_path = current.join("surreal.toml");
             if config_path.exists() {
                 return Some(current);
             }
@@ -170,10 +170,10 @@ impl ProjectConfig {
     /// Load configuration from the project root.
     pub fn from_project_root() -> ConfigResult<(PathBuf, Self)> {
         let root = Self::find_project_root().ok_or_else(|| {
-            ConfigError::new("Could not find dream.toml in current or parent directories")
+            ConfigError::new("Could not find surreal.toml in current or parent directories")
         })?;
 
-        let config_path = root.join("dream.toml");
+        let config_path = root.join("surreal.toml");
         let config = Self::load(&config_path)?;
 
         Ok((root, config))
@@ -304,8 +304,8 @@ impl CompileOptions {
     }
 }
 
-/// Generate a default dream.toml content for a new project.
-pub fn generate_dream_toml(name: &str) -> String {
+/// Generate a default surreal.toml content for a new project.
+pub fn generate_surreal_toml(name: &str) -> String {
     format!(
         r#"[package]
 name = "{}"
@@ -315,8 +315,8 @@ version = "0.1.0"
     )
 }
 
-/// Generate a default main.dream content for a new project.
-pub fn generate_main_dream(name: &str) -> String {
+/// Generate a default main.surreal content for a new project.
+pub fn generate_main_surreal(name: &str) -> String {
     format!(
         r#"// {} - A Dream project
 
@@ -333,7 +333,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_dream_toml() {
+    fn test_parse_surreal_toml() {
         let content = r#"
 [package]
 name = "test_project"
@@ -346,7 +346,7 @@ version = "0.1.0"
     }
 
     #[test]
-    fn test_parse_dream_toml_custom_src() {
+    fn test_parse_surreal_toml_custom_src() {
         let content = r#"
 [package]
 name = "custom"
@@ -358,8 +358,8 @@ src = "lib"
     }
 
     #[test]
-    fn test_generate_dream_toml() {
-        let content = generate_dream_toml("my_app");
+    fn test_generate_surreal_toml() {
+        let content = generate_surreal_toml("my_app");
         assert!(content.contains("name = \"my_app\""));
         assert!(content.contains("version = \"0.1.0\""));
     }

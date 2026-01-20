@@ -497,7 +497,7 @@ pub struct TypeEnv {
     /// Extern function imports: local_name -> (module, function_name)
     /// Used for `use jason::encode; encode(data)` syntax
     extern_imports: HashMap<String, (String, String)>,
-    /// Maps extern function (module, dream_name, arity) -> beam_name (shared via Arc, read-mostly)
+    /// Maps extern function (module, surreal_name, arity) -> beam_name (shared via Arc, read-mostly)
     extern_function_names: Arc<HashMap<(String, String, usize), String>>,
     /// Module aliases: alias_name -> full_module_path (shared via Arc, read-mostly)
     extern_module_aliases: Arc<HashMap<String, String>>,
@@ -607,7 +607,7 @@ impl TypeEnv {
             .contains_key(&(trait_name.to_string(), type_name.to_string()))
     }
 
-    /// Get external function info (from .dreamt stubs).
+    /// Get external function info (from .surreal binding files).
     /// Resolves module aliases before lookup.
     pub fn get_extern_function(&self, module: &str, function: &str, arity: usize) -> Option<&FnInfo> {
         // Resolve module alias if present
@@ -632,9 +632,9 @@ impl TypeEnv {
     /// Get the BEAM module name for a Dream extern module name.
     /// Returns the mapped name if #[name = "..."] was used, otherwise the original name.
     /// Resolves module aliases first.
-    pub fn get_beam_module_name(&self, dream_name: &str) -> Option<&String> {
+    pub fn get_beam_module_name(&self, surreal_name: &str) -> Option<&String> {
         // Resolve module alias first
-        let resolved = self.resolve_module_alias(dream_name);
+        let resolved = self.resolve_module_alias(surreal_name);
         self.extern_module_names.get(resolved)
     }
 
@@ -1424,7 +1424,7 @@ impl TypeChecker {
                     }
                 }
                 Item::ExternMod(extern_mod) => {
-                    // Collect external function signatures from .dreamt stubs
+                    // Collect external function signatures from .surreal binding files
                     self.collect_extern_mod(extern_mod, &extern_mod.name);
                 }
                 Item::Use(use_decl) => {
@@ -1532,7 +1532,7 @@ impl TypeChecker {
     }
 
     /// Known Dream stdlib modules that should NOT be treated as extern modules.
-    /// These modules live under the dream:: namespace and have their own implementations.
+    /// These modules live under the surreal:: namespace and have their own implementations.
     const STDLIB_MODULES: &'static [&'static str] = &[
         "io", "list", "enumerable", "iterator", "option", "result",
         "string", "map", "file", "timer", "display", "convert",
@@ -2510,7 +2510,7 @@ impl TypeChecker {
 
             // External call
             Expr::ExternCall { module, function, args } => {
-                // Look up extern function signature from .dreamt stubs (by arity)
+                // Look up extern function signature from .surreal binding files (by arity)
                 let arity = args.len();
                 if let Some(info) = self.env.get_extern_function(module, function, arity).cloned() {
                     // Instantiate generic function
@@ -2856,8 +2856,8 @@ impl TypeChecker {
                     // Check if this is a stdlib module - these take priority over extern modules
                     // with the same name (e.g., `logger` is both a stdlib wrapper and an extern module)
                     if Self::is_stdlib_module(module) {
-                        // Try looking up as dream::{module}::{func}
-                        let stdlib_qualified = format!("dream::{}::{}", module, func_name);
+                        // Try looking up as surreal::{module}::{func}
+                        let stdlib_qualified = format!("surreal::{}::{}", module, func_name);
                         if let Some(info) = self.env.get_function(&stdlib_qualified).cloned() {
                             let instantiated = if !type_args.is_empty() {
                                 self.instantiate_function_with_args(&info, type_args, &stdlib_qualified)?
@@ -3776,7 +3776,7 @@ impl TypeChecker {
                 if let Expr::Ident(name) = func.inner() {
                     if let Some((module, func_name)) = self.env.get_extern_import(name).cloned() {
                         // If this is a stdlib module import, transform to Path call
-                        // so it gets the dream:: prefix in codegen
+                        // so it gets the surreal:: prefix in codegen
                         if Self::is_stdlib_module(&module) {
                             return SpannedExpr::new(Expr::Call {
                                 func: SpannedExpr::boxed(Expr::Path {
@@ -4343,7 +4343,7 @@ pub struct TypeCheckResult {
     pub modules: Vec<(String, TypeResult<Module>)>,
     /// Extern module name mappings (Dream name -> BEAM name)
     pub extern_module_names: HashMap<String, String>,
-    /// Extern function name mappings (module, dream_name, arity) -> beam_name
+    /// Extern function name mappings (module, surreal_name, arity) -> beam_name
     /// Used for #[name = "encode!"] attribute support on functions
     pub extern_function_names: HashMap<(String, String, usize), String>,
     /// Struct metadata including record names (struct_name -> StructInfo)

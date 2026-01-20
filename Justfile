@@ -43,13 +43,13 @@ stubs: build
     KERNEL=$(echo "$ERL_ROOT"/lib/kernel-*/src)
 
     echo "Generating stubs from $ERL_ROOT..."
-    ./target/release/dream bindgen "$ERTS/erlang.erl" --output stubs/erlang.dreamt
-    ./target/release/dream bindgen "$STDLIB/lists.erl" --output stubs/lists.dreamt
-    ./target/release/dream bindgen "$STDLIB/maps.erl" --output stubs/maps.dreamt
-    ./target/release/dream bindgen "$STDLIB/io.erl" --output stubs/io.dreamt
-    ./target/release/dream bindgen "$KERNEL/file.erl" --output stubs/file.dreamt
+    ./target/release/surreal bindgen "$ERTS/erlang.erl" --output stubs/erlang.surreal
+    ./target/release/surreal bindgen "$STDLIB/lists.erl" --output stubs/lists.surreal
+    ./target/release/surreal bindgen "$STDLIB/maps.erl" --output stubs/maps.surreal
+    ./target/release/surreal bindgen "$STDLIB/io.erl" --output stubs/io.surreal
+    ./target/release/surreal bindgen "$KERNEL/file.erl" --output stubs/file.surreal
     echo "Generated stubs:"
-    wc -l stubs/*.dreamt
+    wc -l stubs/*.surreal
 
 # Clean build artifacts
 clean:
@@ -74,7 +74,7 @@ example name:
 
 # Run a single-file example
 example-run name:
-    cargo run --release -- run examples/{{name}}.dream
+    cargo run --release -- run examples/{{name}}.surreal
 
 # Rebuild all stdlib modules (compiles all files in a single pass)
 stdlib:
@@ -84,23 +84,23 @@ stdlib:
 nif:
     #!/usr/bin/env bash
     set -euo pipefail
-    cd native/dream_nif
+    cd native/surreal_nif
     cargo build --release
     # On macOS, Erlang expects .so but Rust produces .dylib
     if [[ "$(uname)" == "Darwin" ]]; then
-        ln -sf libdream_nif.dylib target/release/libdream_nif.so
+        ln -sf libsurreal_nif.dylib target/release/libsurreal_nif.so
     fi
-    erlc -o . dream_nif.erl
-    echo "NIF built: native/dream_nif/target/release/libdream_nif.{so,dylib}"
+    erlc -o . surreal_nif.erl
+    echo "NIF built: native/surreal_nif/target/release/libsurreal_nif.{so,dylib}"
 
 # Build NIF in debug mode
 nif-debug:
     #!/usr/bin/env bash
     set -euo pipefail
-    cd native/dream_nif
+    cd native/surreal_nif
     cargo build
     if [[ "$(uname)" == "Darwin" ]]; then
-        ln -sf libdream_nif.dylib target/debug/libdream_nif.so
+        ln -sf libsurreal_nif.dylib target/debug/libsurreal_nif.so
     fi
-    erlc -o . dream_nif.erl
-    echo "NIF built (debug): native/dream_nif/target/debug/libdream_nif.{so,dylib}"
+    erlc -o . surreal_nif.erl
+    echo "NIF built (debug): native/surreal_nif/target/debug/libsurreal_nif.{so,dylib}"

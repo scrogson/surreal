@@ -487,38 +487,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dream"
-version = "0.1.0"
-dependencies = [
- "clap",
- "crossterm",
- "flate2",
- "futures",
- "hex",
- "hexpm",
- "insta",
- "js-sys",
- "logos",
- "miette",
- "num-bigint",
- "num-traits",
- "rayon",
- "reqwest",
- "rustyline",
- "serde",
- "serde_json",
- "sha2",
- "tar",
- "tempfile",
- "thiserror",
- "tokio",
- "toml",
- "tower-lsp",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2202,6 +2170,38 @@ name = "supports-unicode"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7401a30af6cb5818bb64852270bb722533397edcfc7344954a38f420819ece2"
+
+[[package]]
+name = "surreal"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "crossterm",
+ "flate2",
+ "futures",
+ "hex",
+ "hexpm",
+ "insta",
+ "js-sys",
+ "logos",
+ "miette",
+ "num-bigint",
+ "num-traits",
+ "rayon",
+ "reqwest",
+ "rustyline",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tower-lsp",
+ "wasm-bindgen",
+ "web-sys",
+]
 
 [[package]]
 name = "syn"

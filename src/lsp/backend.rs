@@ -83,7 +83,7 @@ impl LanguageServer for DreamLanguageServer {
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
-                name: "dream-lsp".to_string(),
+                name: "surreal-lsp".to_string(),
                 version: Some(env!("CARGO_PKG_VERSION").to_string()),
             }),
         })

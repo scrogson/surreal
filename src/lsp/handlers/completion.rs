@@ -70,7 +70,7 @@ pub fn handle_completion(
 
     // Stdlib module name completions (with :: suffix)
     for m in stdlib_modules {
-        let name = m.name.strip_prefix("dream::").unwrap_or(&m.name);
+        let name = m.name.strip_prefix("surreal::").unwrap_or(&m.name);
         if name.starts_with(word) && !word.is_empty() {
             completions.push(CompletionItem {
                 label: format!("{}::", name),

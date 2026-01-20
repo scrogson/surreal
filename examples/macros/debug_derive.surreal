@@ -1,6 +1,6 @@
 // Example: User-defined Debug derive macro
 //
-// This demonstrates how to write a custom derive macro in Dream.
+// This demonstrates how to write a custom derive macro in Surreal.
 
 mod debug_derive {
     /// A macro that generates a debug method for structs.

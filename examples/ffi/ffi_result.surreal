@@ -2,7 +2,7 @@
 //
 // When an extern function declares Result<T, E> as its return type,
 // the compiler automatically wraps the Erlang {:ok, T} | {:error, E} tuple
-// into Dream's Result type, enabling ergonomic method chaining.
+// into Surreal's Result type, enabling ergonomic method chaining.
 
 mod ffi_result_example {
     use io::{println, format};
@@ -51,8 +51,8 @@ mod ffi_result_example {
 
         // Example 4: Chaining with Result methods
         println("4. Writing and reading a test file:");
-        let test_file = "/tmp/dream_ffi_test.txt";
-        let test_content = "Hello from Dream FFI!";
+        let test_file = "/tmp/surreal_ffi_test.txt";
+        let test_content = "Hello from Surreal FFI!";
 
         // Write returns Result<(), atom>
         match :file::write_file(test_file, test_content) {

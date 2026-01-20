@@ -1,6 +1,7 @@
 /target
 target/
 _build/
+deps/
 *.beam
 *.core
 erl_crash.dump

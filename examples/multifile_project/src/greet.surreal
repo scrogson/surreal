@@ -5,7 +5,7 @@ pub fn hello() -> atom {
 }
 
 pub fn welcome() -> atom {
-    io::println("Welcome to Dream!")
+    io::println("Welcome to Surreal!")
 }
 
 pub fn farewell() -> atom {

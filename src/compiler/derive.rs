@@ -107,7 +107,7 @@ impl MacroRegistry {
     /// # Arguments
     ///
     /// * `name` - The derive name (e.g., "Serialize")
-    /// * `module` - The Dream module containing the macro (e.g., "dream::serde::serde")
+    /// * `module` - The Dream module containing the macro (e.g., "surreal::serde::serde")
     /// * `function` - The macro function name (e.g., "serialize_derive")
     pub fn register(&mut self, name: &str, module: &str, function: &str) {
         self.user_defined
