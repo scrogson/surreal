@@ -4,6 +4,8 @@
 %% Implements the same interface as Erlang's shell module
 
 -export([start/0, start/1]).
+%% Tab completion
+-export([expand_input/1]).
 
 %% Called by group:start - spawns the actual shell process
 start() ->
@@ -14,7 +16,101 @@ start(_Args) ->
     %% The group process is the group leader, we can't do I/O from it directly
     spawn(fun() -> shell_init() end).
 
+%% Tab completion for REPL commands, modules, and functions
+%% Bef is the text before the cursor (reversed)
+expand_input(Bef) ->
+    %% Bef is reversed, so we need to reverse it
+    Line = lists:reverse(Bef),
+    %% Get the last word (for completion)
+    LastWord = get_last_word(Line),
+    case Line of
+        ":" ++ Partial ->
+            %% Complete commands
+            expand_command(Partial);
+        _ ->
+            %% Check if it looks like module::func pattern
+            case string:split(LastWord, "::", trailing) of
+                [ModName, FuncPartial] ->
+                    %% Complete function in module
+                    expand_function(ModName, FuncPartial);
+                [Partial] ->
+                    %% Could be a module name
+                    expand_module(Partial)
+            end
+    end.
+
+get_last_word(Line) ->
+    %% Get the last word (identifier) from the line
+    Reversed = lists:reverse(Line),
+    Word = lists:takewhile(fun(C) ->
+        (C >= $a andalso C =< $z) orelse
+        (C >= $A andalso C =< $Z) orelse
+        (C >= $0 andalso C =< $9) orelse
+        C =:= $_ orelse C =:= $:
+    end, Reversed),
+    lists:reverse(Word).
+
+expand_command(Partial) ->
+    Commands = ["help", "h", "quit", "q", "edit", "e", "clear",
+                "bindings", "b", "type ", "core "],
+    Matches = [Cmd || Cmd <- Commands, lists:prefix(Partial, Cmd)],
+    format_matches(Partial, Matches).
+
+expand_module(Partial) ->
+    %% Get all defined modules from ETS
+    case ets:info(surreal_repl_modules) of
+        undefined ->
+            {no, [], []};
+        _ ->
+            Modules = [Name || {Name, _Exports} <- ets:tab2list(surreal_repl_modules)],
+            Matches = [Mod || Mod <- Modules, lists:prefix(Partial, Mod)],
+            format_matches(Partial, Matches)
+    end.
+
+expand_function(ModName, FuncPartial) ->
+    %% Get functions for the given module
+    case ets:info(surreal_repl_modules) of
+        undefined ->
+            {no, [], []};
+        _ ->
+            case ets:lookup(surreal_repl_modules, ModName) of
+                [{_, Exports}] ->
+                    %% Exports is [{FuncName, Arity}, ...]
+                    FuncNames = [atom_to_list(F) || {F, _A} <- Exports],
+                    Matches = [F || F <- FuncNames, lists:prefix(FuncPartial, F)],
+                    format_matches(FuncPartial, Matches);
+                [] ->
+                    {no, [], []}
+            end
+    end.
+
+format_matches(_Partial, []) ->
+    {no, [], []};
+format_matches(Partial, [Single]) ->
+    %% Complete with the rest
+    Expansion = lists:nthtail(length(Partial), Single),
+    {yes, Expansion, []};
+format_matches(Partial, Multiple) ->
+    %% Find common prefix
+    Common = common_prefix(Multiple),
+    Expansion = lists:nthtail(length(Partial), Common),
+    {yes, Expansion, Multiple}.
+
+common_prefix([]) -> "";
+common_prefix([S]) -> S;
+common_prefix([H|T]) ->
+    lists:foldl(fun(S, Acc) -> common_prefix2(Acc, S) end, H, T).
+
+common_prefix2([], _) -> [];
+common_prefix2(_, []) -> [];
+common_prefix2([H|T1], [H|T2]) -> [H | common_prefix2(T1, T2)];
+common_prefix2(_, _) -> [].
+
 shell_init() ->
+    %% Create ETS table for tracking defined modules (for tab completion)
+    ets:new(surreal_repl_modules, [named_table, public, set]),
+    %% Set up tab expansion for commands
+    io:setopts([{expand_fun, fun expand_input/1}]),
     io:format("Surreal REPL (BEAM native)~n"),
     io:format("Type :help for commands, :quit to exit~n~n"),
     loop(#{bindings => #{}, counter => 0}).
@@ -79,6 +175,12 @@ handle_input(":core " ++ Expr, State) ->
     show_core(Expr, State),
     {continue, State};
 
+handle_input(":edit", State) ->
+    edit_in_editor(State);
+
+handle_input(":e", State) ->
+    edit_in_editor(State);
+
 handle_input(":" ++ Unknown, State) ->
     io:format("Unknown command: :~s~n", [Unknown]),
     io:format("Type :help for available commands.~n"),
@@ -99,13 +201,81 @@ print_help() ->
     io:format("Commands:~n"),
     io:format("  :help, :h       Show this help message~n"),
     io:format("  :quit, :q       Exit the shell~n"),
+    io:format("  :edit, :e       Open $EDITOR to write code~n"),
     io:format("  :clear          Clear all bindings~n"),
     io:format("  :bindings, :b   Show current bindings~n"),
     io:format("  :type <expr>    Show inferred type of expression~n"),
     io:format("  :core <expr>    Show generated Core Erlang~n"),
     io:format("~n"),
     io:format("Enter Surreal expressions to evaluate them.~n"),
-    io:format("Use 'let x = expr' to create bindings.~n").
+    io:format("Use 'let x = expr' to create bindings.~n"),
+    io:format("Use 'mod name { ... }' to define modules.~n"),
+    io:format("~n"),
+    io:format("Note: String interpolation (e.g., \"Hello {name}!\") is not yet~n"),
+    io:format("supported. Use string concatenation or 'surreal shell' CLI instead.~n").
+
+%% Open editor and run the code when saved
+edit_in_editor(State) ->
+    Editor = case os:getenv("EDITOR") of
+        false -> "vi";
+        E -> E
+    end,
+    %% Create temp file with .surreal extension
+    TmpDir = case os:getenv("TMPDIR") of
+        false -> "/tmp";
+        T -> T
+    end,
+    TmpFile = filename:join(TmpDir, "surreal_repl_" ++
+        integer_to_list(erlang:unique_integer([positive])) ++ ".surreal"),
+    %% Write empty file or template
+    ok = file:write_file(TmpFile, "// Write your Surreal code here\n// Save and close to execute\n\n"),
+    %% Open editor
+    io:format("Opening ~s... (save and quit to execute)~n", [Editor]),
+    %% Find the editor executable
+    EditorPath = os:find_executable(Editor),
+    case EditorPath of
+        false ->
+            io:format("Error: Could not find editor '~s'~n", [Editor]),
+            file:delete(TmpFile),
+            {continue, State};
+        _ ->
+            %% Run editor with nouse_stdio so it can use the terminal
+            Port = open_port({spawn_executable, EditorPath},
+                            [exit_status, nouse_stdio, {args, [TmpFile]}]),
+            receive
+                {Port, {exit_status, _Status}} -> ok
+            end,
+            run_editor_result(TmpFile, State)
+    end.
+
+run_editor_result(TmpFile, State) ->
+    %% Read the file contents after editor closes
+    case file:read_file(TmpFile) of
+        {ok, Contents} ->
+            %% Clean up temp file
+            file:delete(TmpFile),
+            %% Process the code - strip leading comment lines
+            Code = string:trim(binary_to_list(Contents)),
+            Lines = string:split(Code, "\n", all),
+            %% Drop leading empty lines and comment lines
+            CodeLines = lists:dropwhile(fun(L) ->
+                Trimmed = string:trim(L),
+                Trimmed =:= "" orelse string:prefix(Trimmed, "//") =/= nomatch
+            end, Lines),
+            CleanCode = string:trim(string:join(CodeLines, "\n")),
+            case CleanCode of
+                "" ->
+                    io:format("No code to execute.~n"),
+                    {continue, State};
+                FinalCode ->
+                    io:format("~n--- Executing ---~n~s~n-----------------~n", [FinalCode]),
+                    handle_input(FinalCode, State)
+            end;
+        {error, Reason} ->
+            file:delete(TmpFile),
+            io:format("Error reading file: ~p~n", [Reason]),
+            {continue, State}
+    end.
 
 %% Print bindings
 print_bindings(Bindings) when map_size(Bindings) == 0 ->
@@ -153,6 +323,14 @@ define_module(Source, State) ->
                         {module, CompiledModName} ->
                             %% Format exports from CoreAst
                             FunExports = [extract_export(E) || E <- Exports],
+                            %% Store module info for tab completion
+                            %% Extract short name from 'surreal::foo' -> "foo"
+                            FullName = atom_to_list(CompiledModName),
+                            ShortName = case lists:prefix("surreal::", FullName) of
+                                true -> lists:nthtail(9, FullName);
+                                false -> FullName
+                            end,
+                            ets:insert(surreal_repl_modules, {ShortName, FunExports}),
                             io:format("{:module, ~p, [~s]}~n",
                                 [CompiledModName, format_exports(FunExports)]),
                             {continue, State};

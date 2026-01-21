@@ -12,4 +12,9 @@ start() ->
     %% Start user_drv with our shell as the initial shell
     %% The MFA tuple {surreal_shell, start, [init]} follows the same
     %% pattern as the default {shell, start, [init]}
-    user_drv:start(#{initial_shell => {surreal_shell, start, [init]}}).
+    %% Provide a no-op expand function to prevent tab from hanging
+    NoExpand = fun(_) -> {no, [], []} end,
+    user_drv:start(#{
+        initial_shell => {surreal_shell, start, [init]},
+        expand_fun => NoExpand
+    }).
