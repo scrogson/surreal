@@ -2,7 +2,7 @@
 name = "surreal-lang"
 version = "0.1.0"
 edition = "2024"
-description = "A programming language with Rust-like syntax and Erlang-style concurrency"
+description = "A Rust-inspired language for the BEAM"
 license = "MIT"
 repository = "https://github.com/surreal-lang/surreal"
 homepage = "https://github.com/surreal-lang/surreal"
