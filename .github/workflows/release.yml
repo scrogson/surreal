@@ -26,8 +26,8 @@ jobs:
             nif_artifact: libsurreal_native-aarch64-apple-darwin
             nif_ext: so
 
-          # macOS x86_64
-          - os: macos-13
+          # macOS x86_64 (cross-compile from ARM64)
+          - os: macos-latest
             target: x86_64-apple-darwin
             cli_artifact: surreal-x86_64-apple-darwin
             nif_artifact: libsurreal_native-x86_64-apple-darwin

@@ -1,5 +1,9 @@
 //! Compiler errors with rich diagnostics.
 
+// These struct fields are used by miette's derive macros (#[error], #[label], #[help])
+// but Rust's static analysis can't see through the proc macro expansion.
+#![allow(unused_assignments)]
+
 use crate::compiler::lexer::Span;
 use crate::compiler::token::Token;
 use miette::{Diagnostic, NamedSource, SourceSpan};
